@@ -118,6 +118,8 @@ app.get('/api/whatsapp/qr', (req, res) => {
   const session = sessionManager.getSessionStatus(companyId);
   const qr = sessionManager.getQrCode(companyId);
 
+  logger.info(`[${companyId}] GET /api/whatsapp/qr - exists: ${session?.exists}, connecting: ${session?.connecting}, connected: ${session?.connected}, hasQR: ${!!qr}`);
+
   if (session?.connected) {
     return res.json({
       status: 'CONNECTED',
@@ -132,7 +134,8 @@ app.get('/api/whatsapp/qr', (req, res) => {
     });
   }
 
-  if (session?.exists) {
+  // Session exists OR is in connecting state -> return WAITING
+  if (session?.exists || session?.connecting) {
     return res.json({ status: 'WAITING' });
   }
 

@@ -34,12 +34,20 @@ class SessionManager {
     // Cache em memória do QR por empresa (QR é efêmero no Baileys)
     // Map<companyId, { qr: string; createdAt: Date }>
     this.qrStore = new Map();
+    
+    // Track sessions that are currently being created (before socket is ready)
+    // Map<companyId, Date> - timestamp when connection was requested
+    this.pendingConnections = new Map();
   }
 
   /**
    * Cria uma nova sessão WhatsApp
    */
   async createSession(companyId) {
+    // Mark as pending IMMEDIATELY - before any async work
+    // This ensures getSessionStatus returns "connecting" during initialization
+    this.pendingConnections.set(companyId, new Date());
+    
     // Sempre limpar QR anterior para evitar QR "velho" no polling
     this.qrStore.delete(companyId);
 
@@ -48,6 +56,7 @@ class SessionManager {
       const existingSocket = this.sessions.get(companyId);
       if (existingSocket?.user) {
         logger.info(`[${companyId}] Sessão já existe e está conectada`);
+        this.pendingConnections.delete(companyId);
         return { status: 'already_connected' };
       }
       // Se existe mas não está conectada, remover e recriar
@@ -150,6 +159,9 @@ class SessionManager {
 
         // ✅ QR já não é mais necessário após conectar
         this.qrStore.delete(companyId);
+        
+        // ✅ Clear pending connection flag
+        this.pendingConnections.delete(companyId);
 
         logger.info(`[${companyId}] ✅ Conectado: ${phoneNumber}`);
 
@@ -582,9 +594,24 @@ class SessionManager {
   getSessionStatus(companyId) {
     const socket = this.sessions.get(companyId);
     const meta = this.sessionMeta.get(companyId) || {};
+    const isPending = this.pendingConnections.has(companyId);
+    
+    // Check if pending connection is stale (older than 2 minutes)
+    if (isPending) {
+      const pendingTime = this.pendingConnections.get(companyId);
+      const ageMs = Date.now() - pendingTime.getTime();
+      if (ageMs > 120000) {
+        // Stale pending connection, clean it up
+        this.pendingConnections.delete(companyId);
+      }
+    }
+    
+    // Session exists if: socket is in map, OR we have a pending connection
+    const sessionExists = this.sessions.has(companyId) || this.pendingConnections.has(companyId);
     
     return {
-      exists: this.sessions.has(companyId),
+      exists: sessionExists,
+      connecting: isPending && !socket?.user,
       connected: !!socket?.user,
       phoneNumber: socket?.user?.id?.split(':')[0] || meta.phoneNumber || null,
       reconnecting: meta.reconnecting || false,
