@@ -63,6 +63,7 @@ Deno.serve(async (req) => {
     }
 
     const companyId = profile.company_id;
+    console.log(`[QR] company_id: ${companyId}, WHATSAPP_SERVER_URL: ${whatsappServerUrl ? 'SET' : 'NOT SET'}`);
 
     // Fetch session directly from database
     const { data: session, error } = await supabase
@@ -70,6 +71,8 @@ Deno.serve(async (req) => {
       .select("status, qr_code, phone_number")
       .eq("company_id", companyId)
       .maybeSingle();
+
+    console.log(`[QR] DB session status: ${session?.status}, has_qr: ${!!session?.qr_code}`);
 
     if (error) {
       console.error("Erro ao buscar sessão:", error);
@@ -159,18 +162,20 @@ Deno.serve(async (req) => {
     // Fallback: buscar QR diretamente do WhatsApp Server (cache em memória)
     if (whatsappServerUrl) {
       try {
+        const url = `${whatsappServerUrl}/api/whatsapp/qr?company_id=${encodeURIComponent(companyId)}`;
+        console.log(`[QR] Fetching from server: ${url}`);
+        
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-        const resp = await fetch(
-          `${whatsappServerUrl}/api/whatsapp/qr?company_id=${encodeURIComponent(companyId)}`,
-          { method: "GET", signal: controller.signal }
-        );
+        const resp = await fetch(url, { method: "GET", signal: controller.signal });
 
         clearTimeout(timeoutId);
+        console.log(`[QR] Server response status: ${resp.status}`);
 
         if (resp.ok) {
           const serverData = await resp.json();
+          console.log(`[QR] Server data: ${JSON.stringify(serverData)}`);
 
           if (serverData?.status === "QR" && serverData.qr) {
             return new Response(
@@ -206,10 +211,15 @@ Deno.serve(async (req) => {
               { headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
           }
+        } else {
+          const errorText = await resp.text();
+          console.error(`[QR] Server error: ${resp.status} - ${errorText}`);
         }
       } catch (e) {
-        console.error("Erro ao buscar QR no servidor:", e);
+        console.error("[QR] Erro ao buscar QR no servidor:", e);
       }
+    } else {
+      console.log("[QR] No WHATSAPP_SERVER_URL configured");
     }
 
     // Still connecting, no QR yet
