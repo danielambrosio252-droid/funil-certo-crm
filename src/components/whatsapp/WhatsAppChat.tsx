@@ -31,6 +31,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatLocalPhone, normalizePhone } from "@/lib/phoneNormalizer";
 import { useWhatsApp } from "@/hooks/useWhatsApp";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -280,10 +281,10 @@ export function WhatsAppChat() {
   const handleCreateConversation = async () => {
     if (!newPhoneNumber.trim() || !profile?.company_id) return;
 
-    // Clean the phone number (remove non-numeric characters)
-    const cleanPhone = newPhoneNumber.replace(/\D/g, "");
+    // Clean and normalize the phone number
+    const cleanPhone = normalizePhone(newPhoneNumber);
     
-    if (cleanPhone.length < 10) {
+    if (!cleanPhone || cleanPhone.length < 12) {
       toast.error("Número de telefone inválido");
       return;
     }
@@ -291,8 +292,8 @@ export function WhatsAppChat() {
     setCreatingConversation(true);
 
     try {
-      // Check if contact already exists
-      const existingContact = contacts.find(c => c.phone.replace(/\D/g, "") === cleanPhone);
+      // Check if contact already exists (comparing normalized phones)
+      const existingContact = contacts.find(c => normalizePhone(c.phone) === cleanPhone);
       
       if (existingContact) {
         setSelectedContact(existingContact);
@@ -300,15 +301,17 @@ export function WhatsAppChat() {
         setNewPhoneNumber("");
         setNewContactName("");
         setCreatingConversation(false);
+        toast.info("Conversa já existe");
         return;
       }
 
-      // Create new contact in database
+      // Create new contact in database with normalized phone
       const { data: newContact, error } = await supabase
         .from("whatsapp_contacts")
         .insert({
           company_id: profile.company_id,
-          phone: cleanPhone,
+          phone: cleanPhone, // ✅ Telefone normalizado E.164
+          normalized_phone: cleanPhone,
           name: newContactName.trim() || null,
           is_group: false,
           unread_count: 0,
@@ -560,7 +563,7 @@ export function WhatsAppChat() {
                     </div>
                     <div className="flex items-center justify-between">
                       <p className="text-sm text-muted-foreground truncate">
-                        {contact.phone}
+                        {formatLocalPhone(contact.phone)}
                       </p>
                       {contact.unread_count > 0 && (
                         <Badge className="bg-emerald-500 text-white ml-2 h-5 min-w-[20px] p-0 flex items-center justify-center text-xs shadow-sm">
@@ -602,7 +605,7 @@ export function WhatsAppChat() {
                       {contactTyping.presence === "recording" ? "Gravando áudio..." : "Digitando..."}
                     </p>
                   ) : (
-                    <p className="text-xs text-muted-foreground">{selectedContact.phone}</p>
+                    <p className="text-xs text-muted-foreground">{formatLocalPhone(selectedContact.phone)}</p>
                   )}
                 </div>
               </div>
