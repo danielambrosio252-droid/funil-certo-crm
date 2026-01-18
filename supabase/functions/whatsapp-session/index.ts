@@ -132,9 +132,9 @@ Deno.serve(async (req) => {
         // Check if WhatsApp server is configured
         if (!whatsappServerUrl) {
           return new Response(
-            JSON.stringify({ 
+            JSON.stringify({
               error: "Servidor WhatsApp não configurado",
-              message: "Configure o WHATSAPP_SERVER_URL nas configurações do backend."
+              message: "Configure o WHATSAPP_SERVER_URL nas configurações do backend.",
             }),
             { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
@@ -148,12 +148,10 @@ Deno.serve(async (req) => {
           .maybeSingle();
 
         if (!existingSession) {
-          await supabaseAdmin
-            .from("whatsapp_sessions")
-            .insert({
-              company_id: companyId,
-              status: "connecting",
-            });
+          await supabaseAdmin.from("whatsapp_sessions").insert({
+            company_id: companyId,
+            status: "connecting",
+          });
         } else {
           await supabaseAdmin
             .from("whatsapp_sessions")
@@ -161,15 +159,9 @@ Deno.serve(async (req) => {
             .eq("company_id", companyId);
         }
 
-        // Respond to user IMMEDIATELY - don't block on WhatsApp server
-        const responsePromise = new Response(
-          JSON.stringify({ success: true, message: "Iniciando conexão..." }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-
-        // Call WhatsApp server with timeout (non-blocking for user)
-        // Use waitUntil pattern - fire and forget with error handling
-        const notifyServer = async () => {
+        // Notify WhatsApp server (blocking up to ~5s). This avoids "fire-and-forget" being
+        // cancelled by the runtime, which could leave the UI stuck in "connecting" forever.
+        const notifyServer = async (): Promise<boolean> => {
           try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
@@ -187,30 +179,41 @@ Deno.serve(async (req) => {
             if (!response.ok) {
               const errorText = await response.text();
               console.error("Erro do servidor WhatsApp:", errorText);
-              
-              // Update status to error
+
               await supabaseAdmin
                 .from("whatsapp_sessions")
                 .update({ status: "error" })
                 .eq("company_id", companyId);
-            } else {
-              console.log("Servidor WhatsApp respondeu com sucesso");
+
+              return false;
             }
+
+            console.log("Servidor WhatsApp respondeu com sucesso");
+            return true;
           } catch (e) {
             console.error("Erro ao conectar ao servidor WhatsApp:", e);
-            
-            // Update status to error
+
             await supabaseAdmin
               .from("whatsapp_sessions")
               .update({ status: "error" })
               .eq("company_id", companyId);
+
+            return false;
           }
         };
 
-        // Fire and don't await - user gets response immediately
-        runInBackground(notifyServer());
+        const serverOk = await notifyServer();
 
-        return responsePromise;
+        return new Response(
+          JSON.stringify({
+            success: true,
+            server_ok: serverOk,
+            message: serverOk
+              ? "Conexão iniciada. Aguarde o QR Code."
+              : "Não foi possível contatar o servidor do WhatsApp.",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
 
       case "disconnect": {
