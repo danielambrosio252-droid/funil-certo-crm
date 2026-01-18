@@ -1,0 +1,25 @@
+# .gitignore para o servidor WhatsApp
+
+# Dependências
+node_modules/
+
+# Sessões do WhatsApp (contém dados sensíveis)
+sessions/
+
+# Logs
+logs/
+*.log
+
+# Variáveis de ambiente
+.env
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# PM2
+.pm2/
