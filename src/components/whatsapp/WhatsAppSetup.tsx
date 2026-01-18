@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -76,14 +76,16 @@ const getStatusConfig = (status: UIState): StatusConfig => {
 };
 
 export function WhatsAppSetup() {
-  const { session, connect, disconnect, refetch, initializing } = useWhatsApp();
+  const { session, connect, disconnect, refetch, fetchQrCode, initializing } = useWhatsApp();
   const { toast } = useToast();
   const [showQrModal, setShowQrModal] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
-
-  // Local timeout/override so the UI never spins forever if the backend never sends the QR
-  const [connectStartedAt, setConnectStartedAt] = useState<number | null>(null);
-  const [localError, setLocalError] = useState(false);
+  
+  // Local state for polling QR
+  const [pollingQr, setPollingQr] = useState(false);
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [qrError, setQrError] = useState(false);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Derive UI state from session, with explicit fallback to "disconnected"
   const deriveBaseUIState = (): UIState => {
@@ -97,93 +99,122 @@ export function WhatsAppSetup() {
   };
 
   const baseUiState = deriveBaseUIState();
-  const uiState: UIState = localError ? "error" : baseUiState;
+  const uiState: UIState = qrError ? "error" : baseUiState;
   const statusConfig = getStatusConfig(uiState);
 
-  // Clear local error when the backend progresses
-  useEffect(() => {
-    if (session?.qr_code) setLocalError(false);
-    if (session?.status === "connected" || session?.status === "disconnected") {
-      setLocalError(false);
-      setConnectStartedAt(null);
+  // Stop polling helper
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
     }
-  }, [session?.qr_code, session?.status]);
+    setPollingQr(false);
+  }, []);
 
-  // Auto-open QR modal when QR code is available
+  // Start polling for QR code
+  const startQrPolling = useCallback(() => {
+    setPollingQr(true);
+    setQrCode(null);
+    setQrError(false);
+
+    let attempts = 0;
+    const maxAttempts = 20; // 20 * 2s = 40s max
+    const pollInterval = 2000; // 2 seconds
+
+    pollingRef.current = setInterval(async () => {
+      attempts++;
+      
+      const result = await fetchQrCode();
+      console.log("QR Poll result:", result);
+
+      if (result.status === "QR" && result.qr) {
+        // QR code received!
+        setQrCode(result.qr);
+        setPollingQr(false);
+        stopPolling();
+        return;
+      }
+
+      if (result.status === "CONNECTED") {
+        // Already connected
+        stopPolling();
+        setShowQrModal(false);
+        refetch();
+        return;
+      }
+
+      if (result.status === "ERROR") {
+        // Error occurred
+        stopPolling();
+        setQrError(true);
+        return;
+      }
+
+      if (attempts >= maxAttempts) {
+        // Timeout
+        stopPolling();
+        setQrError(true);
+        return;
+      }
+
+      // status === "WAITING" - continue polling
+    }, pollInterval);
+  }, [fetchQrCode, stopPolling, refetch]);
+
+  // Cleanup polling on unmount
   useEffect(() => {
-    if (baseUiState === "qr_code" && session?.qr_code) {
-      setShowQrModal(true);
-      setActionLoading(false);
-    }
-  }, [baseUiState, session?.qr_code]);
+    return () => stopPolling();
+  }, [stopPolling]);
 
-  // While modal is open and we don't have QR yet, poll status as a fallback
-  // (covers cases where realtime/webhook updates are delayed) + stop infinite spinner
+  // Auto-close modal when connected via realtime
   useEffect(() => {
-    if (!showQrModal) return;
-    if (session?.qr_code) return;
-    if (baseUiState !== "connecting" && baseUiState !== "qr_code") return;
-
-    // Hard timeout: if QR doesn't arrive, surface a clear error state.
-    const hardTimeoutMs = 30_000;
-    const startedAt = connectStartedAt ?? Date.now();
-    if (!connectStartedAt) setConnectStartedAt(startedAt);
-
-    const intervalId = setInterval(() => {
-      // Keep refreshing in the background
-      refetch();
-    }, 2500);
-
-    const timeoutId = setTimeout(() => {
-      setLocalError(true);
-      setActionLoading(false);
-      refetch();
-    }, hardTimeoutMs);
-
-    return () => {
-      clearInterval(intervalId);
-      clearTimeout(timeoutId);
-    };
-  }, [showQrModal, session?.qr_code, baseUiState, refetch, connectStartedAt]);
-
-  // Auto-close modal when connected
-  useEffect(() => {
-    if (uiState === "connected") {
+    if (baseUiState === "connected") {
+      stopPolling();
       setShowQrModal(false);
       setActionLoading(false);
+      setQrCode(null);
       toast({
         title: "WhatsApp Conectado!",
         description: "Seu WhatsApp foi conectado com sucesso.",
       });
     }
-  }, [uiState, toast]);
+  }, [baseUiState, toast, stopPolling]);
 
-  // Handle error state
+  // If session has QR code from realtime, use it
   useEffect(() => {
-    if (uiState === "error") {
+    if (session?.qr_code && showQrModal && !qrCode) {
+      setQrCode(session.qr_code);
+      stopPolling();
+    }
+  }, [session?.qr_code, showQrModal, qrCode, stopPolling]);
+
+  // Handle error state from session
+  useEffect(() => {
+    if (baseUiState === "error" && showQrModal) {
+      stopPolling();
+      setQrError(true);
       setActionLoading(false);
     }
-  }, [uiState]);
+  }, [baseUiState, showQrModal, stopPolling]);
 
   const handleConnect = async () => {
-    setLocalError(false);
-    setConnectStartedAt(Date.now());
+    setQrError(false);
+    setQrCode(null);
     setActionLoading(true);
     setShowQrModal(true); // Open modal immediately (shows "Gerando QR Code...")
 
     try {
       const success = await connect();
-      if (!success) {
+      if (success) {
+        // Start polling for QR code
+        startQrPolling();
+      } else {
         setActionLoading(false);
-        toast({
-          title: "Erro ao conectar",
-          description: "Não foi possível iniciar a conexão. Tente novamente.",
-          variant: "destructive",
-        });
+        setQrError(true);
       }
-      // If success, realtime will update status to qr_code/connected
     } catch {
       setActionLoading(false);
+      setQrError(true);
       toast({
         title: "Erro ao conectar",
         description: "Servidor indisponível. Verifique a configuração.",
@@ -194,8 +225,9 @@ export function WhatsAppSetup() {
 
   const handleDisconnect = async () => {
     setActionLoading(true);
-    setLocalError(false);
-    setConnectStartedAt(null);
+    setQrError(false);
+    setQrCode(null);
+    stopPolling();
     try {
       await disconnect();
       setActionLoading(false);
@@ -419,7 +451,7 @@ export function WhatsAppSetup() {
 
           <div className="flex flex-col items-center py-6">
             <AnimatePresence mode="wait">
-              {uiState === "error" ? (
+              {qrError ? (
                 <motion.div
                   key="error"
                   initial={{ opacity: 0 }}
@@ -437,7 +469,7 @@ export function WhatsAppSetup() {
                     Tentar novamente
                   </Button>
                 </motion.div>
-              ) : !session?.qr_code ? (
+              ) : !qrCode ? (
                 <motion.div
                   key="loading"
                   initial={{ opacity: 0 }}
@@ -459,7 +491,7 @@ export function WhatsAppSetup() {
                 >
                   <div className="p-4 bg-white rounded-2xl shadow-lg">
                     <img
-                      src={session.qr_code}
+                      src={qrCode}
                       alt="QR Code para conectar WhatsApp"
                       className="w-56 h-56 rounded-lg"
                     />
