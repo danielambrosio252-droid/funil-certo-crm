@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,6 +88,30 @@ export function WhatsAppChat() {
   // Track pending message IDs to avoid duplicates from realtime
   const pendingMessageIds = useRef<Set<string>>(new Set());
 
+  // Notification sound
+  const playNotificationSound = useCallback(() => {
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // Pleasant notification tone
+      oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // A5
+      oscillator.frequency.setValueAtTime(1108.73, audioContext.currentTime + 0.1); // C#6
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    } catch (err) {
+      console.log("Could not play notification sound:", err);
+    }
+  }, []);
+
   // Subscribe to realtime messages
   useEffect(() => {
     if (!selectedContact || !profile?.company_id) return;
@@ -110,6 +134,11 @@ export function WhatsAppChat() {
           if (pendingMessageIds.current.has(newMessage.id)) {
             pendingMessageIds.current.delete(newMessage.id);
             return;
+          }
+          
+          // Play sound for incoming messages (not from me)
+          if (!newMessage.is_from_me) {
+            playNotificationSound();
           }
           
           setMessages((prev) => {
@@ -155,7 +184,7 @@ export function WhatsAppChat() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedContact?.id, profile?.company_id]);
+  }, [selectedContact?.id, profile?.company_id, playNotificationSound]);
 
   const handleSend = async () => {
     if (!messageInput.trim() || !selectedContact || sending) return;
