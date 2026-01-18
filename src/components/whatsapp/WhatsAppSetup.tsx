@@ -81,8 +81,12 @@ export function WhatsAppSetup() {
   const [showQrModal, setShowQrModal] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
+  // Local timeout/override so the UI never spins forever if the backend never sends the QR
+  const [connectStartedAt, setConnectStartedAt] = useState<number | null>(null);
+  const [localError, setLocalError] = useState(false);
+
   // Derive UI state from session, with explicit fallback to "disconnected"
-  const deriveUIState = (): UIState => {
+  const deriveBaseUIState = (): UIState => {
     if (!session) return "disconnected";
     const status = session.status;
     if (status === "connected") return "connected";
@@ -92,35 +96,55 @@ export function WhatsAppSetup() {
     return "disconnected";
   };
 
-  const uiState = deriveUIState();
+  const baseUiState = deriveBaseUIState();
+  const uiState: UIState = localError ? "error" : baseUiState;
   const statusConfig = getStatusConfig(uiState);
+
+  // Clear local error when the backend progresses
+  useEffect(() => {
+    if (session?.qr_code) setLocalError(false);
+    if (session?.status === "connected" || session?.status === "disconnected") {
+      setLocalError(false);
+      setConnectStartedAt(null);
+    }
+  }, [session?.qr_code, session?.status]);
 
   // Auto-open QR modal when QR code is available
   useEffect(() => {
-    if (uiState === "qr_code" && session?.qr_code) {
+    if (baseUiState === "qr_code" && session?.qr_code) {
       setShowQrModal(true);
       setActionLoading(false);
     }
-  }, [uiState, session?.qr_code]);
+  }, [baseUiState, session?.qr_code]);
 
   // While modal is open and we don't have QR yet, poll status as a fallback
-  // (covers cases where realtime/webhook updates are delayed)
+  // (covers cases where realtime/webhook updates are delayed) + stop infinite spinner
   useEffect(() => {
     if (!showQrModal) return;
     if (session?.qr_code) return;
-    if (uiState !== "connecting" && uiState !== "qr_code") return;
+    if (baseUiState !== "connecting" && baseUiState !== "qr_code") return;
 
-    const startedAt = Date.now();
+    // Hard timeout: if QR doesn't arrive, surface a clear error state.
+    const hardTimeoutMs = 30_000;
+    const startedAt = connectStartedAt ?? Date.now();
+    if (!connectStartedAt) setConnectStartedAt(startedAt);
+
     const intervalId = setInterval(() => {
-      if (Date.now() - startedAt > 30_000) {
-        clearInterval(intervalId);
-        return;
-      }
+      // Keep refreshing in the background
       refetch();
     }, 2500);
 
-    return () => clearInterval(intervalId);
-  }, [showQrModal, session?.qr_code, uiState, refetch]);
+    const timeoutId = setTimeout(() => {
+      setLocalError(true);
+      setActionLoading(false);
+      refetch();
+    }, hardTimeoutMs);
+
+    return () => {
+      clearInterval(intervalId);
+      clearTimeout(timeoutId);
+    };
+  }, [showQrModal, session?.qr_code, baseUiState, refetch, connectStartedAt]);
 
   // Auto-close modal when connected
   useEffect(() => {
@@ -142,9 +166,11 @@ export function WhatsAppSetup() {
   }, [uiState]);
 
   const handleConnect = async () => {
+    setLocalError(false);
+    setConnectStartedAt(Date.now());
     setActionLoading(true);
     setShowQrModal(true); // Open modal immediately (shows "Gerando QR Code...")
-    
+
     try {
       const success = await connect();
       if (!success) {
@@ -168,6 +194,8 @@ export function WhatsAppSetup() {
 
   const handleDisconnect = async () => {
     setActionLoading(true);
+    setLocalError(false);
+    setConnectStartedAt(null);
     try {
       await disconnect();
       setActionLoading(false);
