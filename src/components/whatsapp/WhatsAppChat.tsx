@@ -594,6 +594,27 @@ export function WhatsAppChat() {
                     </motion.div>
                   ))}
                 </AnimatePresence>
+                
+                {/* Typing indicator */}
+                <AnimatePresence>
+                  {sending && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      className="flex justify-end"
+                    >
+                      <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-2xl rounded-br-md px-4 py-3 shadow-sm">
+                        <div className="flex items-center gap-1">
+                          <span className="w-2 h-2 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                          <span className="w-2 h-2 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                          <span className="w-2 h-2 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                
                 <div ref={messagesEndRef} />
               </div>
             </ScrollArea>
