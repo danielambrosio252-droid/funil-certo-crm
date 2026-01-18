@@ -101,6 +101,45 @@ app.post('/connect', async (req, res) => {
 });
 
 /**
+ * GET /api/whatsapp/qr
+ * Retorna o QR Code atual (cacheado) ou status de conexão.
+ * Query: ?company_id=...
+ */
+app.get('/api/whatsapp/qr', (req, res) => {
+  const companyId = req.query.company_id || req.query.companyId;
+
+  if (!companyId) {
+    return res.status(400).json({
+      status: 'ERROR',
+      error: 'company_id é obrigatório'
+    });
+  }
+
+  const session = sessionManager.getSessionStatus(companyId);
+  const qr = sessionManager.getQrCode(companyId);
+
+  if (session?.connected) {
+    return res.json({
+      status: 'CONNECTED',
+      phone_number: session.phoneNumber
+    });
+  }
+
+  if (qr) {
+    return res.json({
+      status: 'QR',
+      qr
+    });
+  }
+
+  if (session?.exists) {
+    return res.json({ status: 'WAITING' });
+  }
+
+  return res.json({ status: 'DISCONNECTED' });
+});
+
+/**
  * POST /disconnect
  * Desconecta uma sessão WhatsApp
  */

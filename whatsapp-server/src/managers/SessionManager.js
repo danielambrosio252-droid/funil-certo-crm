@@ -29,12 +29,19 @@ class SessionManager {
     this.sessions = new Map(); // Map<companyId, socket>
     this.sessionMeta = new Map(); // Map<companyId, metadata>
     this.reconnectAttempts = new Map(); // Map<companyId, count>
+
+    // Cache em memória do QR por empresa (QR é efêmero no Baileys)
+    // Map<companyId, { qr: string; createdAt: Date }>
+    this.qrStore = new Map();
   }
 
   /**
    * Cria uma nova sessão WhatsApp
    */
   async createSession(companyId) {
+    // Sempre limpar QR anterior para evitar QR "velho" no polling
+    this.qrStore.delete(companyId);
+
     // Verificar se já existe sessão ativa
     if (this.sessions.has(companyId)) {
       const existingSocket = this.sessions.get(companyId);
@@ -116,8 +123,12 @@ class SessionManager {
             width: 256
           });
 
+          // ✅ Cache em memória por empresa (fonte de verdade para polling)
+          this.qrStore.set(companyId, { qr: qrImage, createdAt: new Date() });
+
           logger.info(`[${companyId}] 📱 QR Code gerado`);
-          
+
+          // Mantém o webhook (quando estiver OK ele atualiza o backend)
           await this.webhookService.send(companyId, 'qr_code', {
             qr_code: qrImage
           });
@@ -135,9 +146,12 @@ class SessionManager {
       // Conexão aberta
       if (connection === 'open') {
         const phoneNumber = socket.user?.id?.split(':')[0] || '';
-        
+
+        // ✅ QR já não é mais necessário após conectar
+        this.qrStore.delete(companyId);
+
         logger.info(`[${companyId}] ✅ Conectado: ${phoneNumber}`);
-        
+
         // Atualizar metadata
         const meta = this.sessionMeta.get(companyId);
         if (meta) {
@@ -146,7 +160,7 @@ class SessionManager {
           meta.lastConnectedAt = new Date();
           meta.reconnecting = false;
         }
-        
+
         // Resetar tentativas de reconexão
         this.reconnectAttempts.set(companyId, 0);
 
@@ -162,29 +176,32 @@ class SessionManager {
           meta.connected = false;
         }
 
+        // ✅ Ao desconectar, QR anterior não é confiável
+        this.qrStore.delete(companyId);
+
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const reason = DisconnectReason[statusCode] || statusCode;
-        
+
         logger.warn(`[${companyId}] ❌ Desconectado: ${reason} (${statusCode})`);
 
         // Verificar se deve reconectar
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-        
+
         if (shouldReconnect) {
           const attempts = this.reconnectAttempts.get(companyId) || 0;
-          
+
           if (attempts < MAX_RECONNECT_ATTEMPTS) {
             this.reconnectAttempts.set(companyId, attempts + 1);
-            
+
             if (meta) {
               meta.reconnecting = true;
             }
-            
+
             logger.info(`[${companyId}] 🔄 Reconectando... (tentativa ${attempts + 1}/${MAX_RECONNECT_ATTEMPTS})`);
-            
+
             // Limpar sessão atual
             this.sessions.delete(companyId);
-            
+
             // Reconectar após delay
             setTimeout(() => {
               this.createSession(companyId).catch(err => {
@@ -193,24 +210,27 @@ class SessionManager {
             }, RECONNECT_TIMEOUT);
           } else {
             logger.error(`[${companyId}] Máximo de tentativas de reconexão atingido`);
-            
+
             await this.webhookService.send(companyId, 'disconnected', {
               reason: 'max_reconnect_attempts'
             });
-            
+
             this.sessions.delete(companyId);
           }
         } else {
           // Logout - limpar sessão completamente
           logger.info(`[${companyId}] 🚪 Logout realizado`);
-          
+
           await this.webhookService.send(companyId, 'disconnected', {
             reason: 'logged_out'
           });
-          
+
           this.sessions.delete(companyId);
           this.sessionMeta.delete(companyId);
-          
+
+          // ✅ garantir que não fique QR preso no cache
+          this.qrStore.delete(companyId);
+
           // Opcional: remover arquivos de sessão após logout
           // await this._removeSessionFiles(companyId);
         }
@@ -498,6 +518,14 @@ class SessionManager {
         logger.warn(`[${companyId}] Erro ao desconectar:`, error);
       }
     }
+  }
+
+  /**
+   * Retorna o último QR Code (base64/dataURL) cacheado para a empresa
+   */
+  getQrCode(companyId) {
+    const entry = this.qrStore.get(companyId);
+    return entry?.qr || null;
   }
 
   /**

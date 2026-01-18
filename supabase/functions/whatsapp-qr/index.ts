@@ -23,6 +23,7 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const whatsappServerUrl = Deno.env.get("WHATSAPP_SERVER_URL");
 
   try {
     // Validate auth
@@ -39,7 +40,7 @@ Deno.serve(async (req) => {
     });
 
     const { data: { user }, error: userError } = await supabase.auth.getUser();
-    
+
     if (userError || !user) {
       return new Response(
         JSON.stringify({ error: "Token inválido" }),
@@ -61,11 +62,13 @@ Deno.serve(async (req) => {
       );
     }
 
+    const companyId = profile.company_id;
+
     // Fetch session directly from database
     const { data: session, error } = await supabase
       .from("whatsapp_sessions")
       .select("status, qr_code, phone_number")
-      .eq("company_id", profile.company_id)
+      .eq("company_id", companyId)
       .maybeSingle();
 
     if (error) {
@@ -77,6 +80,46 @@ Deno.serve(async (req) => {
     }
 
     if (!session) {
+      // Mesmo sem sessão no banco, ainda pode existir QR no servidor.
+      // Vamos tentar buscar do servidor antes de responder DISCONNECTED.
+      if (whatsappServerUrl) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+          const resp = await fetch(
+            `${whatsappServerUrl}/api/whatsapp/qr?company_id=${encodeURIComponent(companyId)}`,
+            { method: "GET", signal: controller.signal }
+          );
+
+          clearTimeout(timeoutId);
+
+          if (resp.ok) {
+            const serverData = await resp.json();
+            if (serverData?.status === "QR" && serverData.qr) {
+              return new Response(
+                JSON.stringify({ status: "QR", qr: serverData.qr }),
+                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+            if (serverData?.status === "CONNECTED") {
+              return new Response(
+                JSON.stringify({ status: "CONNECTED", phone_number: serverData.phone_number }),
+                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+            if (serverData?.status === "WAITING") {
+              return new Response(
+                JSON.stringify({ status: "WAITING" }),
+                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+          }
+        } catch (e) {
+          console.error("Erro ao buscar QR no servidor:", e);
+        }
+      }
+
       return new Response(
         JSON.stringify({ status: "DISCONNECTED" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -88,9 +131,9 @@ Deno.serve(async (req) => {
 
     if (dbStatus === "connected") {
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           status: "CONNECTED",
-          phone_number: session.phone_number 
+          phone_number: session.phone_number,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -105,12 +148,68 @@ Deno.serve(async (req) => {
 
     if (dbStatus === "qr_code" && session.qr_code) {
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           status: "QR",
-          qr: session.qr_code 
+          qr: session.qr_code,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // Fallback: buscar QR diretamente do WhatsApp Server (cache em memória)
+    if (whatsappServerUrl) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        const resp = await fetch(
+          `${whatsappServerUrl}/api/whatsapp/qr?company_id=${encodeURIComponent(companyId)}`,
+          { method: "GET", signal: controller.signal }
+        );
+
+        clearTimeout(timeoutId);
+
+        if (resp.ok) {
+          const serverData = await resp.json();
+
+          if (serverData?.status === "QR" && serverData.qr) {
+            return new Response(
+              JSON.stringify({ status: "QR", qr: serverData.qr }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          if (serverData?.status === "CONNECTED") {
+            return new Response(
+              JSON.stringify({ status: "CONNECTED", phone_number: serverData.phone_number }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          if (serverData?.status === "WAITING") {
+            return new Response(
+              JSON.stringify({ status: "WAITING" }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          if (serverData?.status === "DISCONNECTED") {
+            return new Response(
+              JSON.stringify({ status: "DISCONNECTED" }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          if (serverData?.status === "ERROR") {
+            return new Response(
+              JSON.stringify({ status: "ERROR" }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+        }
+      } catch (e) {
+        console.error("Erro ao buscar QR no servidor:", e);
+      }
     }
 
     // Still connecting, no QR yet
