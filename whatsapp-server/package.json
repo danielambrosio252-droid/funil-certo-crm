@@ -1,0 +1,35 @@
+{
+  "name": "escala-certo-whatsapp-server",
+  "version": "1.0.0",
+  "description": "Servidor WhatsApp Web para Escala Certo Pro usando Baileys",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop escala-whatsapp",
+    "pm2:restart": "pm2 restart escala-whatsapp",
+    "pm2:logs": "pm2 logs escala-whatsapp"
+  },
+  "keywords": [
+    "whatsapp",
+    "baileys",
+    "escala-certo"
+  ],
+  "author": "Escala Certo Pro",
+  "license": "MIT",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.16",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "pm2": "^5.4.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

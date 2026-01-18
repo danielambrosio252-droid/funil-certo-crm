@@ -1,331 +1,418 @@
-# 📱 Servidor WhatsApp - Baileys (Node.js)
+# 📱 Servidor WhatsApp Web - Documentação Completa
 
-Este documento explica como configurar o servidor Node.js externo necessário para o módulo WhatsApp do **Escala Certo Pro**.
+## 🎯 Visão Geral
 
-## 📋 Pré-requisitos
+Este documento contém todas as instruções para configurar o módulo WhatsApp do **Escala Certo Pro**.
 
-- Node.js 18+
-- NPM ou Yarn
-- Hospedagem (Railway, Render, VPS, etc.)
+O sistema é composto por duas partes:
 
-## 🚀 Instalação Rápida
-
-### 1. Clone o projeto base
-
-```bash
-mkdir whatsapp-server
-cd whatsapp-server
-npm init -y
-```
-
-### 2. Instale as dependências
-
-```bash
-npm install @whiskeysockets/baileys express qrcode pino cors
-```
-
-### 3. Crie o arquivo `server.js`
-
-```javascript
-const express = require('express');
-const cors = require('cors');
-const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
-const QRCode = require('qrcode');
-const pino = require('pino');
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-// Configuração
-const PORT = process.env.PORT || 3001;
-const WEBHOOK_URL = process.env.WEBHOOK_URL; // URL do Escala Certo Pro
-
-// Armazenar sessões por empresa
-const sessions = new Map();
-
-// Logger silencioso para produção
-const logger = pino({ level: 'silent' });
-
-// Enviar evento para o CRM
-async function sendWebhook(companyId, type, data) {
-  if (!WEBHOOK_URL) return;
-  
-  try {
-    await fetch(WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ company_id: companyId, type, data })
-    });
-    console.log(`[${companyId}] Webhook enviado: ${type}`);
-  } catch (error) {
-    console.error(`[${companyId}] Erro no webhook:`, error.message);
-  }
-}
-
-// Criar ou reconectar sessão
-async function createSession(companyId) {
-  if (sessions.has(companyId)) {
-    console.log(`[${companyId}] Sessão já existe`);
-    return;
-  }
-
-  const { state, saveCreds } = await useMultiFileAuthState(`./sessions/${companyId}`);
-  
-  const socket = makeWASocket({
-    auth: state,
-    logger,
-    printQRInTerminal: true,
-    browser: ['Escala Certo Pro', 'Chrome', '120.0.0.0']
-  });
-
-  sessions.set(companyId, socket);
-
-  // Evento de conexão
-  socket.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr) {
-      // Gerar QR Code como imagem base64
-      const qrImage = await QRCode.toDataURL(qr);
-      await sendWebhook(companyId, 'qr_code', { qr_code: qrImage });
-      console.log(`[${companyId}] QR Code gerado`);
-    }
-
-    if (connection === 'open') {
-      const phoneNumber = socket.user?.id?.split(':')[0] || '';
-      await sendWebhook(companyId, 'connected', { phone_number: phoneNumber });
-      console.log(`[${companyId}] Conectado: ${phoneNumber}`);
-    }
-
-    if (connection === 'close') {
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      
-      if (shouldReconnect) {
-        console.log(`[${companyId}] Reconectando...`);
-        sessions.delete(companyId);
-        setTimeout(() => createSession(companyId), 5000);
-      } else {
-        await sendWebhook(companyId, 'disconnected', {});
-        sessions.delete(companyId);
-        console.log(`[${companyId}] Desconectado (logout)`);
-      }
-    }
-  });
-
-  // Salvar credenciais
-  socket.ev.on('creds.update', saveCreds);
-
-  // Receber mensagens
-  socket.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-
-    for (const msg of messages) {
-      // Ignorar mensagens enviadas por mim
-      if (msg.key.fromMe) continue;
-      
-      // Ignorar status/stories
-      if (msg.key.remoteJid === 'status@broadcast') continue;
-
-      const phone = msg.key.remoteJid?.replace('@s.whatsapp.net', '') || '';
-      const content = msg.message?.conversation || 
-                     msg.message?.extendedTextMessage?.text || 
-                     msg.message?.imageMessage?.caption ||
-                     '[Mídia]';
-      
-      const senderName = msg.pushName || '';
-
-      await sendWebhook(companyId, 'message_received', {
-        message_id: msg.key.id,
-        from: phone,
-        content,
-        sender_name: senderName,
-        message_type: 'text'
-      });
-
-      console.log(`[${companyId}] Mensagem de ${phone}: ${content.substring(0, 50)}`);
-    }
-  });
-
-  // Atualização de status das mensagens
-  socket.ev.on('messages.update', async (updates) => {
-    for (const update of updates) {
-      if (update.update.status) {
-        const statusMap = {
-          2: 'sent',
-          3: 'delivered', 
-          4: 'read'
-        };
-        
-        const status = statusMap[update.update.status];
-        if (status) {
-          await sendWebhook(companyId, 'message_status', {
-            message_id: update.key.id,
-            status
-          });
-        }
-      }
-    }
-  });
-
-  return socket;
-}
-
-// ==================== ENDPOINTS ====================
-
-// Iniciar conexão
-app.post('/connect', async (req, res) => {
-  const { company_id } = req.body;
-  
-  if (!company_id) {
-    return res.status(400).json({ error: 'company_id é obrigatório' });
-  }
-
-  try {
-    await createSession(company_id);
-    res.json({ success: true, message: 'Conexão iniciada' });
-  } catch (error) {
-    console.error('Erro ao conectar:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Desconectar
-app.post('/disconnect', async (req, res) => {
-  const { company_id } = req.body;
-  
-  const socket = sessions.get(company_id);
-  if (socket) {
-    await socket.logout();
-    sessions.delete(company_id);
-  }
-
-  res.json({ success: true, message: 'Desconectado' });
-});
-
-// Enviar mensagem
-app.post('/send', async (req, res) => {
-  const { message_id, phone, content, message_type } = req.body;
-
-  // Encontrar sessão (assumindo single-tenant por enquanto)
-  // Em produção, você passaria company_id
-  const [companyId, socket] = [...sessions.entries()][0] || [];
-
-  if (!socket) {
-    return res.status(400).json({ error: 'Nenhuma sessão ativa' });
-  }
-
-  try {
-    const jid = `${phone.replace(/\D/g, '')}@s.whatsapp.net`;
-    
-    const result = await socket.sendMessage(jid, { text: content });
-    
-    // Notificar que mensagem foi enviada
-    await sendWebhook(companyId, 'message_sent', {
-      local_id: message_id,
-      message_id: result.key.id
-    });
-
-    res.json({ success: true, message_id: result.key.id });
-  } catch (error) {
-    console.error('Erro ao enviar:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Status do servidor
-app.get('/status', (req, res) => {
-  const sessionsInfo = {};
-  
-  sessions.forEach((socket, companyId) => {
-    sessionsInfo[companyId] = {
-      connected: !!socket.user,
-      phone: socket.user?.id?.split(':')[0] || null
-    };
-  });
-
-  res.json({
-    status: 'online',
-    sessions: sessionsInfo,
-    total: sessions.size
-  });
-});
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Iniciar servidor
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor WhatsApp rodando na porta ${PORT}`);
-  console.log(`📡 Webhook URL: ${WEBHOOK_URL || 'NÃO CONFIGURADO'}`);
-});
-```
-
-### 4. Configure as variáveis de ambiente
-
-Crie um arquivo `.env`:
-
-```env
-PORT=3001
-WEBHOOK_URL=https://ysiszrxwbargoyqrrehr.supabase.co/functions/v1/whatsapp-webhook
-```
-
-### 5. Inicie o servidor
-
-```bash
-node server.js
-```
-
-## 🌐 Deploy no Railway
-
-1. Crie uma conta em [railway.app](https://railway.app)
-2. Conecte seu repositório GitHub
-3. Adicione a variável `WEBHOOK_URL` nas configurações
-4. Deploy automático!
-
-## 🔧 Configuração no Escala Certo Pro
-
-1. Acesse **WhatsApp → Configuração**
-2. Cole a URL do seu servidor Railway (ex: `https://seu-app.railway.app`)
-3. Clique em **Salvar Configuração**
-4. Clique em **Conectar WhatsApp**
-5. Escaneie o QR Code
-
-## 📊 Fluxo de Dados
+1. **Servidor Node.js/Baileys** (VPS) - Gerencia conexões WhatsApp Web
+2. **Backend Escala Certo Pro** (Lovable Cloud) - Armazena dados e fornece interface
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  WhatsApp App   │ ←→  │  Servidor Node  │ ←→  │  Escala Certo   │
+│  WhatsApp App   │ ←→  │  Servidor VPS   │ ←→  │  Escala Certo   │
 │   (Celular)     │     │   (Baileys)     │     │   Pro (CRM)     │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
-        ↑                       ↑                       ↑
-        │                       │                       │
-   Mensagens              QR Code,             Interface de
-   Reais                  Eventos              Atendimento
+         ↑                       ↑                       ↑
+         │                       │                       │
+    Mensagens              Sessões,              Interface de
+    Reais                  Webhooks              Atendimento
 ```
 
-## 🔒 Segurança
+---
 
-- Use HTTPS em produção
-- Configure firewall para aceitar apenas IPs do Supabase
-- Não exponha o servidor na internet sem proteção
-- Considere usar autenticação por token
+## 📁 Estrutura do Projeto
 
-## 📝 Endpoints da API
+O servidor WhatsApp está na pasta `whatsapp-server/`:
+
+```
+whatsapp-server/
+├── src/
+│   ├── index.js              # Servidor Express principal
+│   ├── managers/
+│   │   └── SessionManager.js # Gerenciador de sessões Baileys
+│   ├── services/
+│   │   └── WebhookService.js # Comunicação com Escala Certo Pro
+│   └── utils/
+│       └── logger.js         # Sistema de logs
+├── sessions/                  # Dados das sessões (persistência)
+├── logs/                      # Logs do servidor
+├── package.json
+├── ecosystem.config.js        # Configuração PM2
+├── install.sh                 # Script de instalação automatizada
+├── .env.example               # Exemplo de variáveis de ambiente
+└── README.md
+```
+
+---
+
+## 🚀 Guia de Instalação em VPS
+
+### Requisitos
+
+| Requisito | Mínimo | Recomendado |
+|-----------|--------|-------------|
+| SO | Ubuntu 20.04 | Ubuntu 22.04 |
+| RAM | 512MB | 1GB |
+| CPU | 1 vCPU | 2 vCPU |
+| Disco | 10GB | 20GB |
+| Node.js | 18.x | 20.x LTS |
+
+### Provedores Recomendados
+
+- **Contabo** - Melhor custo-benefício
+- **Hetzner** - Alta qualidade europeia
+- **DigitalOcean** - Fácil de usar
+- **Vultr** - Boa performance
+- **Linode** - Confiável
+
+### Instalação Passo a Passo
+
+#### 1. Conectar na VPS
+
+```bash
+ssh usuario@seu-ip-vps
+```
+
+#### 2. Clonar/Copiar os arquivos
+
+```bash
+# Opção 1: Via Git
+git clone [seu-repositorio] escala-whatsapp
+cd escala-whatsapp/whatsapp-server
+
+# Opção 2: Via SCP (do seu computador)
+scp -r whatsapp-server/ usuario@seu-ip-vps:~/escala-whatsapp
+```
+
+#### 3. Executar instalação automatizada
+
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+O script irá:
+- ✅ Atualizar o sistema
+- ✅ Instalar Node.js 20 LTS
+- ✅ Instalar PM2
+- ✅ Criar diretórios necessários
+- ✅ Instalar dependências
+- ✅ Configurar variáveis de ambiente
+- ✅ Iniciar o servidor
+- ✅ Configurar auto-start
+
+#### 4. Verificar se está funcionando
+
+```bash
+pm2 status
+curl http://localhost:3001/health
+```
+
+---
+
+## 🔧 Configuração
+
+### Variáveis de Ambiente (.env)
+
+```env
+# Porta do servidor (padrão: 3001)
+PORT=3001
+
+# URL do webhook do Escala Certo Pro (OBRIGATÓRIO)
+WEBHOOK_URL=https://ysiszrxwbargoyqrrehr.supabase.co/functions/v1/whatsapp-webhook
+
+# Segredo para validar webhooks (opcional)
+WEBHOOK_SECRET=seu_segredo_aqui
+
+# Ambiente
+NODE_ENV=production
+
+# Tempo de reconexão em ms
+RECONNECT_TIMEOUT=5000
+
+# Tentativas de reconexão
+MAX_RECONNECT_ATTEMPTS=10
+
+# Diretório de sessões
+SESSIONS_DIR=./sessions
+```
+
+### Configurar HTTPS (Recomendado)
+
+```bash
+# Instalar Nginx
+sudo apt install nginx
+
+# Instalar Certbot
+sudo apt install certbot python3-certbot-nginx
+
+# Obter certificado SSL
+sudo certbot --nginx -d whatsapp.seudominio.com
+```
+
+Configuração Nginx:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name whatsapp.seudominio.com;
+    
+    ssl_certificate /etc/letsencrypt/live/whatsapp.seudominio.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/whatsapp.seudominio.com/privkey.pem;
+    
+    location / {
+        proxy_pass http://localhost:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+---
+
+## 📡 API do Servidor
+
+### Endpoints
 
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
-| POST | `/connect` | Iniciar sessão WhatsApp |
-| POST | `/disconnect` | Encerrar sessão |
-| POST | `/send` | Enviar mensagem |
-| GET | `/status` | Status das sessões |
-| GET | `/health` | Health check |
+| `POST` | `/connect` | Iniciar sessão WhatsApp |
+| `POST` | `/disconnect` | Encerrar sessão |
+| `POST` | `/send` | Enviar mensagem |
+| `GET` | `/status` | Status de todas as sessões |
+| `GET` | `/status/:company_id` | Status de uma sessão |
+| `GET` | `/health` | Health check |
+| `POST` | `/restart/:company_id` | Reiniciar sessão |
+| `DELETE` | `/session/:company_id` | Remover sessão |
 
-## ⚠️ Importante
+### Exemplos de Uso
 
-- O WhatsApp pode banir números que usam automação excessiva
-- Respeite os limites de mensagens
-- Esta é uma integração não-oficial (WhatsApp Web)
-- Para uso comercial em escala, considere a API oficial do Meta
+**Iniciar conexão:**
+```bash
+curl -X POST http://localhost:3001/connect \
+  -H "Content-Type: application/json" \
+  -d '{"company_id": "uuid-da-empresa"}'
+```
+
+**Enviar mensagem:**
+```bash
+curl -X POST http://localhost:3001/send \
+  -H "Content-Type: application/json" \
+  -d '{
+    "company_id": "uuid-da-empresa",
+    "phone": "5511999999999",
+    "content": "Olá! Mensagem de teste.",
+    "message_id": "local-uuid"
+  }'
+```
+
+**Verificar status:**
+```bash
+curl http://localhost:3001/status
+```
+
+---
+
+## 📊 Eventos de Webhook
+
+O servidor envia eventos para o Escala Certo Pro:
+
+| Evento | Quando | Dados |
+|--------|--------|-------|
+| `qr_code` | QR Code gerado | `qr_code` (base64) |
+| `connected` | Sessão conectada | `phone_number` |
+| `disconnected` | Sessão desconectada | `reason` |
+| `message_received` | Mensagem recebida | `from`, `content`, `sender_name`, `message_type` |
+| `message_sent` | Mensagem enviada | `local_id`, `message_id` |
+| `message_status` | Status atualizado | `message_id`, `status` |
+
+### Formato do Payload
+
+```json
+{
+  "type": "message_received",
+  "company_id": "uuid-da-empresa",
+  "data": {
+    "message_id": "ABC123XYZ",
+    "from": "5511999999999",
+    "content": "Olá, preciso de ajuda!",
+    "sender_name": "Maria Silva",
+    "message_type": "text"
+  },
+  "timestamp": "2024-01-15T10:30:00.000Z"
+}
+```
+
+---
+
+## 🔄 Fluxo de Funcionamento
+
+### Conexão
+
+1. Usuário clica em "Conectar WhatsApp" no CRM
+2. CRM chama Edge Function `whatsapp-session` com action `connect`
+3. Edge Function notifica servidor VPS via `/connect`
+4. Servidor gera QR Code e envia webhook `qr_code`
+5. Edge Function atualiza tabela `whatsapp_sessions`
+6. CRM exibe QR Code em tempo real
+7. Usuário escaneia com WhatsApp
+8. Servidor envia webhook `connected`
+9. Sessão salva para persistência
+
+### Envio de Mensagem
+
+1. Usuário digita mensagem no CRM
+2. CRM chama Edge Function `whatsapp-send`
+3. Edge Function cria registro em `whatsapp_messages`
+4. Edge Function chama servidor VPS via `/send`
+5. Servidor envia via WhatsApp Web
+6. Servidor envia webhook `message_sent`
+7. Edge Function atualiza status da mensagem
+
+### Recebimento de Mensagem
+
+1. Contato envia mensagem no WhatsApp
+2. Servidor recebe via Baileys
+3. Servidor envia webhook `message_received`
+4. Edge Function cria/atualiza contato
+5. Edge Function salva mensagem
+6. CRM atualiza via Realtime subscription
+
+---
+
+## 📝 Comandos Úteis
+
+### PM2
+
+```bash
+pm2 status                    # Ver status
+pm2 logs escala-whatsapp      # Ver logs
+pm2 restart escala-whatsapp   # Reiniciar
+pm2 stop escala-whatsapp      # Parar
+pm2 delete escala-whatsapp    # Remover
+pm2 monit                     # Monitor interativo
+```
+
+### Manutenção
+
+```bash
+# Ver uso de memória
+pm2 show escala-whatsapp
+
+# Limpar logs antigos
+pm2 flush
+
+# Atualizar servidor
+git pull
+npm install
+pm2 restart escala-whatsapp
+```
+
+### Backup de Sessões
+
+```bash
+# Criar backup
+tar -czvf sessoes-backup-$(date +%Y%m%d).tar.gz sessions/
+
+# Restaurar backup
+tar -xzvf sessoes-backup-20240115.tar.gz
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### QR Code não aparece
+
+1. Verifique logs: `pm2 logs escala-whatsapp`
+2. Confirme webhook URL no .env
+3. Teste webhook: `curl -X POST [WEBHOOK_URL] -d '{"type":"test"}'`
+
+### Sessão não reconecta
+
+1. Verifique se há creds.json em `sessions/[company_id]/`
+2. Remova a sessão e reconecte: `rm -rf sessions/[company_id]`
+3. Reinicie o servidor: `pm2 restart escala-whatsapp`
+
+### Mensagens não chegam
+
+1. Verifique status: `curl http://localhost:3001/status`
+2. Confirme que a sessão está `connected`
+3. Verifique logs do webhook
+
+### Erro de memória
+
+1. Aumente a RAM da VPS
+2. Configure limite no PM2: `max_memory_restart: '500M'`
+3. Monitore uso: `pm2 monit`
+
+---
+
+## ⚠️ Avisos Importantes
+
+> **ATENÇÃO**: O WhatsApp pode banir números que:
+> - Enviam muitas mensagens em curto período
+> - Enviam para números que não têm você salvo
+> - São denunciados por spam
+> - Usam automação de forma abusiva
+
+### Boas Práticas
+
+- ✅ Responda apenas a contatos que iniciaram conversa
+- ✅ Mantenha intervalos entre mensagens
+- ✅ Não envie links suspeitos
+- ✅ Personalize mensagens
+- ❌ Não envie spam ou mensagens em massa
+- ❌ Não use para cold outreach agressivo
+
+---
+
+## 📋 Checklist de Validação
+
+Antes de considerar o módulo pronto, verifique:
+
+- [ ] Servidor inicia sem erros
+- [ ] QR Code é exibido no CRM
+- [ ] Escaneamento conecta a sessão
+- [ ] Sessão persiste após reinício do servidor
+- [ ] Mensagem enviada pelo CRM chega no celular
+- [ ] Mensagem enviada pelo celular aparece no CRM
+- [ ] Mensagens são salvas no banco
+- [ ] Cada empresa vê apenas seu WhatsApp
+- [ ] Reconexão automática funciona
+- [ ] Logs são gerados corretamente
+
+---
+
+## 🔐 Tabelas do Banco de Dados
+
+O sistema usa as seguintes tabelas:
+
+### whatsapp_sessions
+Armazena sessões ativas de WhatsApp por empresa.
+
+### whatsapp_contacts
+Armazena contatos que interagiram via WhatsApp.
+
+### whatsapp_messages
+Armazena histórico de mensagens enviadas e recebidas.
+
+Todas as tabelas têm RLS habilitado para isolamento multi-tenant.
+
+---
+
+## 📞 Suporte
+
+Em caso de problemas:
+
+1. Verifique os logs: `pm2 logs escala-whatsapp`
+2. Consulte esta documentação
+3. Verifique o README na pasta `whatsapp-server/`
