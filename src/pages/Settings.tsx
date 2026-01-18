@@ -19,7 +19,9 @@ import {
   Zap,
   Check,
   Webhook,
+  MessageCircle,
 } from "lucide-react";
+import { WhatsAppSetup } from "@/components/whatsapp/WhatsAppSetup";
 
 const integrations = [
   { name: "Meta Ads", description: "Conecte sua conta do Facebook Business", connected: true, icon: "📊" },
@@ -38,7 +40,7 @@ export default function Settings() {
   return (
     <MainLayout title="Configurações" subtitle="Gerencie sua conta e preferências">
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full max-w-2xl grid-cols-5">
+        <TabsList className="grid w-full max-w-3xl grid-cols-6">
           <TabsTrigger value="profile" className="gap-2">
             <User className="w-4 h-4" />
             <span className="hidden sm:inline">Perfil</span>
@@ -46,6 +48,10 @@ export default function Settings() {
           <TabsTrigger value="company" className="gap-2">
             <Building className="w-4 h-4" />
             <span className="hidden sm:inline">Empresa</span>
+          </TabsTrigger>
+          <TabsTrigger value="whatsapp" className="gap-2">
+            <MessageCircle className="w-4 h-4" />
+            <span className="hidden sm:inline">WhatsApp</span>
           </TabsTrigger>
           <TabsTrigger value="integrations" className="gap-2">
             <Link className="w-4 h-4" />
@@ -150,6 +156,33 @@ export default function Settings() {
                   </div>
                 </div>
                 <Button className="gradient-primary text-primary-foreground">Salvar</Button>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </TabsContent>
+
+        {/* WhatsApp Tab */}
+        <TabsContent value="whatsapp">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-2xl">
+            <WhatsAppSetup />
+            
+            <Card className="mt-6">
+              <CardHeader>
+                <CardTitle>Instruções de Conexão</CardTitle>
+                <CardDescription>
+                  Seu servidor WhatsApp está rodando em: <code className="bg-muted px-2 py-1 rounded text-sm font-mono">http://72.62.139.222:3001</code>
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="p-4 bg-muted/50 rounded-lg space-y-2">
+                  <p className="text-sm font-medium">1. Clique em "Configurar" acima</p>
+                  <p className="text-sm font-medium">2. Cole a URL do servidor:</p>
+                  <code className="block bg-background px-3 py-2 rounded text-sm font-mono">
+                    http://72.62.139.222:3001
+                  </code>
+                  <p className="text-sm font-medium mt-4">3. Clique em "Conectar WhatsApp"</p>
+                  <p className="text-sm font-medium">4. Escaneie o QR Code que aparecer</p>
+                </div>
               </CardContent>
             </Card>
           </motion.div>
