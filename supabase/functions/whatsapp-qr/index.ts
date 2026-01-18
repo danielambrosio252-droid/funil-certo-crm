@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
 
     if (!profile?.company_id) {
       return new Response(
-        JSON.stringify({ status: "DISCONNECTED" }),
+        JSON.stringify({ status: "ERROR" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -121,7 +121,7 @@ Deno.serve(async (req) => {
       }
 
       return new Response(
-        JSON.stringify({ status: "DISCONNECTED" }),
+        JSON.stringify({ status: "WAITING" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -195,7 +195,7 @@ Deno.serve(async (req) => {
 
           if (serverData?.status === "DISCONNECTED") {
             return new Response(
-              JSON.stringify({ status: "DISCONNECTED" }),
+              JSON.stringify({ status: "WAITING" }),
               { headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
           }
