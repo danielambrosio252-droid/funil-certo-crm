@@ -6,6 +6,13 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
   Search,
   Send,
   CheckCheck,
@@ -20,12 +27,15 @@ import {
   MessageSquare,
   Wifi,
   WifiOff,
+  Plus,
+  UserPlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWhatsApp } from "@/hooks/useWhatsApp";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 interface Contact {
   id: string;
@@ -50,13 +60,17 @@ interface Message {
 export function WhatsAppChat() {
   const { profile } = useAuth();
   const navigate = useNavigate();
-  const { contacts, session, sendMessage, fetchMessages, markAsRead, loading } = useWhatsApp();
+  const { contacts, session, sendMessage, fetchMessages, markAsRead, loading, refetch } = useWhatsApp();
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [newConversationOpen, setNewConversationOpen] = useState(false);
+  const [newPhoneNumber, setNewPhoneNumber] = useState("");
+  const [newContactName, setNewContactName] = useState("");
+  const [creatingConversation, setCreatingConversation] = useState(false);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -168,6 +182,71 @@ export function WhatsAppChat() {
     (c.name || c.phone).toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const handleCreateConversation = async () => {
+    if (!newPhoneNumber.trim() || !profile?.company_id) return;
+
+    // Clean the phone number (remove non-numeric characters)
+    const cleanPhone = newPhoneNumber.replace(/\D/g, "");
+    
+    if (cleanPhone.length < 10) {
+      toast.error("Número de telefone inválido");
+      return;
+    }
+
+    setCreatingConversation(true);
+
+    try {
+      // Check if contact already exists
+      const existingContact = contacts.find(c => c.phone.replace(/\D/g, "") === cleanPhone);
+      
+      if (existingContact) {
+        setSelectedContact(existingContact);
+        setNewConversationOpen(false);
+        setNewPhoneNumber("");
+        setNewContactName("");
+        setCreatingConversation(false);
+        return;
+      }
+
+      // Create new contact in database
+      const { data: newContact, error } = await supabase
+        .from("whatsapp_contacts")
+        .insert({
+          company_id: profile.company_id,
+          phone: cleanPhone,
+          name: newContactName.trim() || null,
+          is_group: false,
+          unread_count: 0,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Refresh contacts and select the new one
+      await refetch();
+      
+      setSelectedContact({
+        id: newContact.id,
+        phone: newContact.phone,
+        name: newContact.name,
+        profile_picture: newContact.profile_picture,
+        unread_count: 0,
+        last_message_at: null,
+      });
+
+      setNewConversationOpen(false);
+      setNewPhoneNumber("");
+      setNewContactName("");
+      toast.success("Conversa criada com sucesso!");
+    } catch (error) {
+      console.error("Erro ao criar conversa:", error);
+      toast.error("Erro ao criar conversa");
+    } finally {
+      setCreatingConversation(false);
+    }
+  };
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "pending":
@@ -246,21 +325,87 @@ export function WhatsAppChat() {
       <div className="w-80 lg:w-96 border-r border-border flex flex-col bg-background">
         {/* Search Header */}
         <div className="p-4 border-b border-border bg-muted/30">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Buscar conversas..."
-              className="pl-10 bg-background"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar conversas..."
+                className="pl-10 bg-background"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            <Dialog open={newConversationOpen} onOpenChange={setNewConversationOpen}>
+              <DialogTrigger asChild>
+                <Button 
+                  size="icon" 
+                  className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 shadow-md shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <UserPlus className="w-5 h-5 text-emerald-500" />
+                    Nova Conversa
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 pt-4">
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-2 block">
+                      Número de WhatsApp *
+                    </label>
+                    <Input
+                      placeholder="Ex: 5583999999999"
+                      value={newPhoneNumber}
+                      onChange={(e) => setNewPhoneNumber(e.target.value)}
+                      className="text-base"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Digite o número com código do país (55 para Brasil)
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-2 block">
+                      Nome do Contato (opcional)
+                    </label>
+                    <Input
+                      placeholder="Ex: João Silva"
+                      value={newContactName}
+                      onChange={(e) => setNewContactName(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700"
+                    onClick={handleCreateConversation}
+                    disabled={!newPhoneNumber.trim() || creatingConversation}
+                  >
+                    {creatingConversation ? (
+                      <>
+                        <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                        Criando...
+                      </>
+                    ) : (
+                      <>
+                        <MessageSquare className="w-4 h-4 mr-2" />
+                        Iniciar Conversa
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
 
         {/* Status indicator */}
-        <div className="px-4 py-2 bg-emerald-50 border-b border-emerald-100 flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-xs text-emerald-700 font-medium">WhatsApp conectado</span>
+        <div className="px-4 py-2 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-xs text-emerald-700 font-medium">WhatsApp conectado</span>
+          </div>
+          <span className="text-xs text-emerald-600">{contacts.length} conversas</span>
         </div>
 
         <ScrollArea className="flex-1">
