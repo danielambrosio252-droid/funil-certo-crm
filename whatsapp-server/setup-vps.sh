@@ -29,7 +29,7 @@ NC='\033[0m'
 
 # Configurações
 INSTALL_DIR="$HOME/whatsapp-server"
-PORT="${PORT:-3001}"
+SERVER_PORT=3001
 
 echo -e "${CYAN}"
 echo "╔════════════════════════════════════════════════════════════╗"
@@ -185,7 +185,7 @@ module.exports = {
 PM2_EOF
 
 # .env
-cat > .env << ENV_EOF
+cat > .env << 'ENV_EOF'
 PORT=3001
 WEBHOOK_URL=https://ysiszrxwbargoyqrrehr.supabase.co/functions/v1/whatsapp-webhook
 NODE_ENV=production
@@ -225,9 +225,9 @@ cat > src/services/WebhookService.js << 'WEBHOOK_EOF'
 const logger = require('../utils/logger');
 
 class WebhookService {
-  constructor(webhookUrl, webhookSecret = null) {
+  constructor(webhookUrl, webhookSecret) {
     this.webhookUrl = webhookUrl;
-    this.webhookSecret = webhookSecret;
+    this.webhookSecret = webhookSecret || null;
     this.retryAttempts = 3;
     this.retryDelay = 1000;
   }
@@ -262,17 +262,17 @@ class WebhookService {
         });
 
         if (response.ok) {
-          logger.info(`Webhook enviado: ${eventType} para empresa ${companyId}`);
+          logger.info('Webhook enviado: ' + eventType + ' para empresa ' + companyId);
           return true;
         }
 
-        logger.warn(`Webhook falhou (tentativa ${attempt}): ${response.status}`);
+        logger.warn('Webhook falhou (tentativa ' + attempt + '): ' + response.status);
       } catch (error) {
-        logger.error(`Erro no webhook (tentativa ${attempt}):`, error.message);
+        logger.error('Erro no webhook (tentativa ' + attempt + '):', error.message);
       }
 
       if (attempt < this.retryAttempts) {
-        await new Promise(r => setTimeout(r, this.retryDelay * attempt));
+        await new Promise(function(r) { setTimeout(r, this.retryDelay * attempt); }.bind(this));
       }
     }
 
@@ -285,7 +285,8 @@ WEBHOOK_EOF
 
 # src/managers/SessionManager.js
 cat > src/managers/SessionManager.js << 'SESSION_EOF'
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const makeWASocket = require('@whiskeysockets/baileys').default;
+const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const path = require('path');
 const fs = require('fs');
@@ -307,13 +308,14 @@ class SessionManager {
   }
 
   async createSession(companyId) {
-    logger.info(`Criando sessão para empresa: ${companyId}`);
+    const self = this;
+    logger.info('Criando sessão para empresa: ' + companyId);
     
     // Verificar se já existe sessão ativa
     if (this.sessions.has(companyId)) {
       const status = this.sessionStatus.get(companyId);
       if (status === 'connected') {
-        logger.warn(`Sessão já conectada para empresa: ${companyId}`);
+        logger.warn('Sessão já conectada para empresa: ' + companyId);
         return { status: 'already_connected' };
       }
       // Desconectar sessão anterior
@@ -325,11 +327,14 @@ class SessionManager {
 
     try {
       const sessionPath = path.join(this.sessionsDir, companyId);
-      const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
-      const { version } = await fetchLatestBaileysVersion();
+      const authResult = await useMultiFileAuthState(sessionPath);
+      const state = authResult.state;
+      const saveCreds = authResult.saveCreds;
+      const versionResult = await fetchLatestBaileysVersion();
+      const version = versionResult.version;
 
       const socket = makeWASocket({
-        version,
+        version: version,
         auth: state,
         printQRInTerminal: false,
         logger: logger.child({ company: companyId }),
@@ -345,82 +350,93 @@ class SessionManager {
 
       return { status: 'connecting', message: 'Aguardando QR Code...' };
     } catch (error) {
-      logger.error(`Erro ao criar sessão ${companyId}:`, error);
+      logger.error('Erro ao criar sessão ' + companyId + ':', error);
       this.sessionStatus.set(companyId, 'error');
       throw error;
     }
   }
 
   _setupEventHandlers(companyId, socket, saveCreds) {
+    const self = this;
+
     // Evento de atualização de conexão
-    socket.ev.on('connection.update', async (update) => {
-      const { connection, lastDisconnect, qr } = update;
+    socket.ev.on('connection.update', async function(update) {
+      const connection = update.connection;
+      const lastDisconnect = update.lastDisconnect;
+      const qr = update.qr;
 
       // QR Code gerado
       if (qr) {
-        logger.info(`QR Code gerado para empresa: ${companyId}`);
-        this.sessionStatus.set(companyId, 'qr_code');
+        logger.info('QR Code gerado para empresa: ' + companyId);
+        self.sessionStatus.set(companyId, 'qr_code');
         
         // Exibir QR no terminal
         console.log('\n');
-        console.log('═'.repeat(50));
-        console.log(`  📱 QR CODE - Empresa: ${companyId}`);
-        console.log('═'.repeat(50));
+        console.log('══════════════════════════════════════════════════');
+        console.log('  📱 QR CODE - Empresa: ' + companyId);
+        console.log('══════════════════════════════════════════════════');
         qrcode.generate(qr, { small: true });
-        console.log('═'.repeat(50));
+        console.log('══════════════════════════════════════════════════');
         console.log('  Escaneie com seu WhatsApp');
-        console.log('═'.repeat(50));
+        console.log('══════════════════════════════════════════════════');
         console.log('\n');
 
         // Enviar QR para webhook
-        await this.webhookService.send(companyId, 'qr_code', { qr_code: qr });
+        await self.webhookService.send(companyId, 'qr_code', { qr_code: qr });
       }
 
       // Conexão estabelecida
       if (connection === 'open') {
-        logger.info(`WhatsApp conectado para empresa: ${companyId}`);
-        this.sessionStatus.set(companyId, 'connected');
-        this.reconnectAttempts.set(companyId, 0);
+        logger.info('WhatsApp conectado para empresa: ' + companyId);
+        self.sessionStatus.set(companyId, 'connected');
+        self.reconnectAttempts.set(companyId, 0);
 
         const user = socket.user;
-        await this.webhookService.send(companyId, 'connected', {
-          phone_number: user?.id?.split(':')[0] || user?.id,
-          name: user?.name || 'WhatsApp'
+        const phoneId = user && user.id ? user.id : '';
+        const phoneNumber = phoneId.split(':')[0] || phoneId;
+        const userName = user && user.name ? user.name : 'WhatsApp';
+        
+        await self.webhookService.send(companyId, 'connected', {
+          phone_number: phoneNumber,
+          name: userName
         });
       }
 
       // Conexão fechada
       if (connection === 'close') {
-        const statusCode = lastDisconnect?.error?.output?.statusCode;
-        const reason = DisconnectReason[Object.keys(DisconnectReason).find(
-          k => DisconnectReason[k] === statusCode
-        )] || statusCode;
+        var statusCode = null;
+        if (lastDisconnect && lastDisconnect.error && lastDisconnect.error.output) {
+          statusCode = lastDisconnect.error.output.statusCode;
+        }
 
-        logger.warn(`Conexão fechada para ${companyId}: ${reason}`);
+        logger.warn('Conexão fechada para ' + companyId + ': código ' + statusCode);
 
         // Logout manual - limpar sessão
         if (statusCode === DisconnectReason.loggedOut) {
-          logger.info(`Logout detectado para empresa: ${companyId}`);
-          this.sessionStatus.set(companyId, 'disconnected');
-          await this._clearSessionFiles(companyId);
-          await this.webhookService.send(companyId, 'disconnected', { reason: 'logged_out' });
+          logger.info('Logout detectado para empresa: ' + companyId);
+          self.sessionStatus.set(companyId, 'disconnected');
+          await self._clearSessionFiles(companyId);
+          await self.webhookService.send(companyId, 'disconnected', { reason: 'logged_out' });
           return;
         }
 
         // Tentar reconectar
-        const attempts = this.reconnectAttempts.get(companyId) || 0;
-        if (attempts < this.maxReconnectAttempts) {
-          this.reconnectAttempts.set(companyId, attempts + 1);
-          logger.info(`Reconectando ${companyId} (tentativa ${attempts + 1}/${this.maxReconnectAttempts})...`);
+        var attempts = self.reconnectAttempts.get(companyId) || 0;
+        if (attempts < self.maxReconnectAttempts) {
+          self.reconnectAttempts.set(companyId, attempts + 1);
+          var nextAttempt = attempts + 1;
+          logger.info('Reconectando ' + companyId + ' (tentativa ' + nextAttempt + '/' + self.maxReconnectAttempts + ')...');
           
-          this.sessionStatus.set(companyId, 'reconnecting');
-          await this.webhookService.send(companyId, 'reconnecting', { attempt: attempts + 1 });
+          self.sessionStatus.set(companyId, 'reconnecting');
+          await self.webhookService.send(companyId, 'reconnecting', { attempt: nextAttempt });
           
-          setTimeout(() => this.createSession(companyId), 5000);
+          setTimeout(function() { 
+            self.createSession(companyId); 
+          }, 5000);
         } else {
-          logger.error(`Máximo de tentativas atingido para ${companyId}`);
-          this.sessionStatus.set(companyId, 'disconnected');
-          await this.webhookService.send(companyId, 'disconnected', { reason: 'max_retries' });
+          logger.error('Máximo de tentativas atingido para ' + companyId);
+          self.sessionStatus.set(companyId, 'disconnected');
+          await self.webhookService.send(companyId, 'disconnected', { reason: 'max_retries' });
         }
       }
     });
@@ -429,38 +445,43 @@ class SessionManager {
     socket.ev.on('creds.update', saveCreds);
 
     // Mensagens recebidas
-    socket.ev.on('messages.upsert', async ({ messages, type }) => {
+    socket.ev.on('messages.upsert', async function(upsertData) {
+      var messages = upsertData.messages;
+      var type = upsertData.type;
+      
       if (type !== 'notify') return;
 
-      for (const msg of messages) {
+      for (var i = 0; i < messages.length; i++) {
+        var msg = messages[i];
+        
         // Ignorar mensagens próprias e de status
         if (msg.key.fromMe || msg.key.remoteJid === 'status@broadcast') continue;
 
-        const contact = msg.key.remoteJid;
-        const isGroup = contact.endsWith('@g.us');
-        const phone = isGroup ? contact : contact.split('@')[0];
+        var contact = msg.key.remoteJid;
+        var isGroup = contact.endsWith('@g.us');
+        var phone = isGroup ? contact : contact.split('@')[0];
         
         // Extrair conteúdo da mensagem
-        let content = '';
-        let messageType = 'text';
+        var content = '';
+        var messageType = 'text';
         
-        if (msg.message?.conversation) {
+        if (msg.message && msg.message.conversation) {
           content = msg.message.conversation;
-        } else if (msg.message?.extendedTextMessage?.text) {
+        } else if (msg.message && msg.message.extendedTextMessage && msg.message.extendedTextMessage.text) {
           content = msg.message.extendedTextMessage.text;
-        } else if (msg.message?.imageMessage) {
-          content = msg.message.imageMessage.caption || '[Imagem]';
+        } else if (msg.message && msg.message.imageMessage) {
+          content = (msg.message.imageMessage.caption) ? msg.message.imageMessage.caption : '[Imagem]';
           messageType = 'image';
-        } else if (msg.message?.videoMessage) {
-          content = msg.message.videoMessage.caption || '[Vídeo]';
+        } else if (msg.message && msg.message.videoMessage) {
+          content = (msg.message.videoMessage.caption) ? msg.message.videoMessage.caption : '[Vídeo]';
           messageType = 'video';
-        } else if (msg.message?.audioMessage) {
+        } else if (msg.message && msg.message.audioMessage) {
           content = '[Áudio]';
           messageType = 'audio';
-        } else if (msg.message?.documentMessage) {
-          content = msg.message.documentMessage.fileName || '[Documento]';
+        } else if (msg.message && msg.message.documentMessage) {
+          content = (msg.message.documentMessage.fileName) ? msg.message.documentMessage.fileName : '[Documento]';
           messageType = 'document';
-        } else if (msg.message?.stickerMessage) {
+        } else if (msg.message && msg.message.stickerMessage) {
           content = '[Sticker]';
           messageType = 'sticker';
         } else {
@@ -468,25 +489,30 @@ class SessionManager {
           messageType = 'unknown';
         }
 
-        logger.info(`Mensagem recebida de ${phone}: ${content.substring(0, 50)}...`);
+        var contentPreview = content.substring(0, 50);
+        logger.info('Mensagem recebida de ' + phone + ': ' + contentPreview + '...');
 
-        await this.webhookService.send(companyId, 'message_received', {
+        var msgTimestamp = msg.messageTimestamp ? new Date(msg.messageTimestamp * 1000).toISOString() : new Date().toISOString();
+        var pushName = msg.pushName || null;
+
+        await self.webhookService.send(companyId, 'message_received', {
           message_id: msg.key.id,
           phone: phone,
           is_group: isGroup,
           content: content,
           message_type: messageType,
-          timestamp: msg.messageTimestamp ? new Date(msg.messageTimestamp * 1000).toISOString() : new Date().toISOString(),
-          push_name: msg.pushName || null
+          timestamp: msgTimestamp,
+          push_name: pushName
         });
       }
     });
 
     // Atualização de status de mensagem
-    socket.ev.on('messages.update', async (updates) => {
-      for (const update of updates) {
-        if (update.update?.status) {
-          const statusMap = {
+    socket.ev.on('messages.update', async function(updates) {
+      for (var i = 0; i < updates.length; i++) {
+        var update = updates[i];
+        if (update.update && update.update.status) {
+          var statusMap = {
             0: 'error',
             1: 'pending',
             2: 'sent',
@@ -494,9 +520,11 @@ class SessionManager {
             4: 'read'
           };
           
-          await this.webhookService.send(companyId, 'message_status', {
+          var statusValue = statusMap[update.update.status] || 'unknown';
+          
+          await self.webhookService.send(companyId, 'message_status', {
             message_id: update.key.id,
-            status: statusMap[update.update.status] || 'unknown',
+            status: statusValue,
             remote_jid: update.key.remoteJid
           });
         }
@@ -505,19 +533,20 @@ class SessionManager {
   }
 
   async _clearSessionFiles(companyId) {
-    const sessionPath = path.join(this.sessionsDir, companyId);
+    var sessionPath = path.join(this.sessionsDir, companyId);
     try {
       if (fs.existsSync(sessionPath)) {
         fs.rmSync(sessionPath, { recursive: true, force: true });
-        logger.info(`Arquivos de sessão removidos: ${companyId}`);
+        logger.info('Arquivos de sessão removidos: ' + companyId);
       }
     } catch (error) {
-      logger.error(`Erro ao limpar sessão ${companyId}:`, error);
+      logger.error('Erro ao limpar sessão ' + companyId + ':', error);
     }
   }
 
-  async sendMessage(companyId, phone, content, messageType = 'text') {
-    const socket = this.sessions.get(companyId);
+  async sendMessage(companyId, phone, content, messageType) {
+    messageType = messageType || 'text';
+    var socket = this.sessions.get(companyId);
     
     if (!socket) {
       throw new Error('Sessão não encontrada');
@@ -528,21 +557,21 @@ class SessionManager {
     }
 
     // Formatar número
-    const jid = this._formatJid(phone);
+    var jid = this._formatJid(phone);
     
     try {
-      let message;
+      var message;
       
-      switch (messageType) {
-        case 'text':
-        default:
-          message = { text: content };
-          break;
+      if (messageType === 'text') {
+        message = { text: content };
+      } else {
+        message = { text: content };
       }
 
-      const result = await socket.sendMessage(jid, message);
+      var result = await socket.sendMessage(jid, message);
       
-      logger.info(`Mensagem enviada para ${phone}: ${content.substring(0, 50)}...`);
+      var contentPreview = content.substring(0, 50);
+      logger.info('Mensagem enviada para ' + phone + ': ' + contentPreview + '...');
       
       await this.webhookService.send(companyId, 'message_sent', {
         message_id: result.key.id,
@@ -557,39 +586,39 @@ class SessionManager {
         message_id: result.key.id
       };
     } catch (error) {
-      logger.error(`Erro ao enviar mensagem para ${phone}:`, error);
+      logger.error('Erro ao enviar mensagem para ' + phone + ':', error);
       throw error;
     }
   }
 
   _formatJid(phone) {
     // Remover caracteres não numéricos
-    let cleaned = phone.replace(/\D/g, '');
+    var cleaned = phone.replace(/\D/g, '');
     
     // Adicionar código do país se necessário (Brasil)
-    if (cleaned.length === 11 && cleaned.startsWith('9')) {
+    if (cleaned.length === 11 && cleaned.charAt(0) === '9') {
       cleaned = '55' + cleaned;
     } else if (cleaned.length === 10 || cleaned.length === 11) {
       cleaned = '55' + cleaned;
     }
     
-    return `${cleaned}@s.whatsapp.net`;
+    return cleaned + '@s.whatsapp.net';
   }
 
   async disconnectSession(companyId) {
-    const socket = this.sessions.get(companyId);
+    var socket = this.sessions.get(companyId);
     
     if (socket) {
       try {
         await socket.logout();
       } catch (error) {
-        logger.warn(`Erro ao fazer logout ${companyId}:`, error.message);
+        logger.warn('Erro ao fazer logout ' + companyId + ':', error.message);
       }
       
       try {
         socket.end();
       } catch (error) {
-        logger.warn(`Erro ao encerrar socket ${companyId}:`, error.message);
+        logger.warn('Erro ao encerrar socket ' + companyId + ':', error.message);
       }
       
       this.sessions.delete(companyId);
@@ -598,26 +627,28 @@ class SessionManager {
     this.sessionStatus.set(companyId, 'disconnected');
     await this._clearSessionFiles(companyId);
     
-    logger.info(`Sessão desconectada: ${companyId}`);
+    logger.info('Sessão desconectada: ' + companyId);
     return { success: true };
   }
 
   async restoreAllSessions() {
+    var self = this;
     logger.info('Restaurando sessões existentes...');
     
     try {
-      const dirs = fs.readdirSync(this.sessionsDir);
+      var dirs = fs.readdirSync(this.sessionsDir);
       
-      for (const companyId of dirs) {
-        const sessionPath = path.join(this.sessionsDir, companyId);
+      for (var i = 0; i < dirs.length; i++) {
+        var companyId = dirs[i];
+        var sessionPath = path.join(this.sessionsDir, companyId);
         if (fs.statSync(sessionPath).isDirectory()) {
           // Verificar se tem arquivos de credenciais
-          const credsPath = path.join(sessionPath, 'creds.json');
+          var credsPath = path.join(sessionPath, 'creds.json');
           if (fs.existsSync(credsPath)) {
-            logger.info(`Restaurando sessão: ${companyId}`);
+            logger.info('Restaurando sessão: ' + companyId);
             await this.createSession(companyId);
             // Esperar um pouco entre restaurações
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(function(r) { setTimeout(r, 2000); });
           }
         }
       }
@@ -635,20 +666,23 @@ class SessionManager {
   }
 
   getAllSessionsStatus() {
-    const statuses = [];
-    for (const [companyId, status] of this.sessionStatus) {
+    var statuses = [];
+    var self = this;
+    this.sessionStatus.forEach(function(status, companyId) {
       statuses.push({
         company_id: companyId,
         status: status,
         connected: status === 'connected'
       });
-    }
+    });
     return statuses;
   }
 
   async disconnectAllSessions() {
-    for (const companyId of this.sessions.keys()) {
-      await this.disconnectSession(companyId);
+    var self = this;
+    var keys = Array.from(this.sessions.keys());
+    for (var i = 0; i < keys.length; i++) {
+      await this.disconnectSession(keys[i]);
     }
   }
 }
@@ -683,7 +717,7 @@ const sessionManager = new SessionManager(webhookService);
 // ==================== ROTAS ====================
 
 // Health check
-app.get('/health', (req, res) => {
+app.get('/health', function(req, res) {
   res.json({
     status: 'ok',
     uptime: process.uptime(),
@@ -692,15 +726,15 @@ app.get('/health', (req, res) => {
 });
 
 // Conectar WhatsApp
-app.post('/connect', async (req, res) => {
+app.post('/connect', async function(req, res) {
   try {
-    const { company_id } = req.body;
+    var company_id = req.body.company_id;
     
     if (!company_id) {
       return res.status(400).json({ error: 'company_id é obrigatório' });
     }
 
-    const result = await sessionManager.createSession(company_id);
+    var result = await sessionManager.createSession(company_id);
     res.json(result);
   } catch (error) {
     logger.error('Erro ao conectar:', error);
@@ -709,15 +743,15 @@ app.post('/connect', async (req, res) => {
 });
 
 // Desconectar WhatsApp
-app.post('/disconnect', async (req, res) => {
+app.post('/disconnect', async function(req, res) {
   try {
-    const { company_id } = req.body;
+    var company_id = req.body.company_id;
     
     if (!company_id) {
       return res.status(400).json({ error: 'company_id é obrigatório' });
     }
 
-    const result = await sessionManager.disconnectSession(company_id);
+    var result = await sessionManager.disconnectSession(company_id);
     res.json(result);
   } catch (error) {
     logger.error('Erro ao desconectar:', error);
@@ -726,9 +760,12 @@ app.post('/disconnect', async (req, res) => {
 });
 
 // Enviar mensagem
-app.post('/send', async (req, res) => {
+app.post('/send', async function(req, res) {
   try {
-    const { company_id, phone, message, message_type = 'text' } = req.body;
+    var company_id = req.body.company_id;
+    var phone = req.body.phone;
+    var message = req.body.message;
+    var message_type = req.body.message_type || 'text';
     
     if (!company_id || !phone || !message) {
       return res.status(400).json({ 
@@ -736,7 +773,7 @@ app.post('/send', async (req, res) => {
       });
     }
 
-    const result = await sessionManager.sendMessage(
+    var result = await sessionManager.sendMessage(
       company_id, 
       phone, 
       message, 
@@ -751,8 +788,8 @@ app.post('/send', async (req, res) => {
 });
 
 // Status da sessão
-app.get('/status', (req, res) => {
-  const { company_id } = req.query;
+app.get('/status', function(req, res) {
+  var company_id = req.query.company_id;
   
   if (company_id) {
     res.json(sessionManager.getSessionStatus(company_id));
@@ -763,44 +800,44 @@ app.get('/status', (req, res) => {
 
 // ==================== INICIALIZAÇÃO ====================
 
-app.listen(PORT, '0.0.0.0', async () => {
+app.listen(PORT, '0.0.0.0', async function() {
   console.log('\n');
   console.log('╔════════════════════════════════════════════════════════════╗');
   console.log('║                                                            ║');
   console.log('║     🟢 ESCALA CERTO PRO - WHATSAPP SERVER                 ║');
   console.log('║                                                            ║');
-  console.log(`║     Servidor rodando na porta: ${PORT}                        ║`);
+  console.log('║     Servidor rodando na porta: ' + PORT + '                        ║');
   console.log('║                                                            ║');
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('\n');
   
-  logger.info(`Servidor iniciado em http://0.0.0.0:${PORT}`);
-  logger.info(`Webhook URL: ${process.env.WEBHOOK_URL || 'NÃO CONFIGURADO'}`);
+  logger.info('Servidor iniciado em http://0.0.0.0:' + PORT);
+  logger.info('Webhook URL: ' + (process.env.WEBHOOK_URL || 'NÃO CONFIGURADO'));
   
   // Restaurar sessões existentes
   await sessionManager.restoreAllSessions();
   
   console.log('\n');
-  console.log('═'.repeat(60));
+  console.log('══════════════════════════════════════════════════════════════');
   console.log('  📱 Para conectar um WhatsApp, faça uma requisição POST:');
-  console.log(`  curl -X POST http://localhost:${PORT}/connect \\`);
+  console.log('  curl -X POST http://localhost:' + PORT + '/connect \\');
   console.log('       -H "Content-Type: application/json" \\');
   console.log('       -d \'{"company_id": "sua-empresa-id"}\'');
-  console.log('═'.repeat(60));
+  console.log('══════════════════════════════════════════════════════════════');
   console.log('\n');
 });
 
 // Tratamento de erros
-process.on('uncaughtException', (error) => {
+process.on('uncaughtException', function(error) {
   logger.error('Uncaught Exception:', error);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', function(reason, promise) {
   logger.error('Unhandled Rejection:', reason);
 });
 
 // Graceful shutdown
-const shutdown = async () => {
+var shutdown = async function() {
   logger.info('Encerrando servidor...');
   await sessionManager.disconnectAllSessions();
   process.exit(0);
@@ -848,8 +885,8 @@ log_info "Processos anteriores limpos"
 # =====================================================
 if command -v ufw &> /dev/null; then
   log_step "Configurando firewall..."
-  sudo ufw allow $PORT/tcp 2>/dev/null || true
-  log_info "Porta $PORT liberada"
+  sudo ufw allow $SERVER_PORT/tcp 2>/dev/null || true
+  log_info "Porta $SERVER_PORT liberada"
 fi
 
 # =====================================================
@@ -875,6 +912,9 @@ log_info "Servidor iniciado com PM2"
 # =====================================================
 # FINALIZAÇÃO
 # =====================================================
+
+SERVER_IP=$(hostname -I | awk '{print $1}')
+
 echo ""
 echo -e "${CYAN}"
 echo "╔════════════════════════════════════════════════════════════╗"
@@ -884,7 +924,7 @@ echo "║                                                            ║"
 echo "╠════════════════════════════════════════════════════════════╣"
 echo "║                                                            ║"
 echo "║  📍 Diretório: $INSTALL_DIR"
-echo "║  🌐 Servidor: http://$(hostname -I | awk '{print $1}'):$PORT"
+echo "║  🌐 Servidor: http://$SERVER_IP:$SERVER_PORT"
 echo "║  📁 Sessões: $INSTALL_DIR/sessions"
 echo "║  📝 Logs: $INSTALL_DIR/logs"
 echo "║                                                            ║"
@@ -892,7 +932,7 @@ echo "╠═══════════════════════�
 echo "║                                                            ║"
 echo "║  📱 PARA CONECTAR SEU WHATSAPP:                           ║"
 echo "║                                                            ║"
-echo "║  curl -X POST http://localhost:$PORT/connect \\"
+echo "║  curl -X POST http://localhost:$SERVER_PORT/connect \\"
 echo "║       -H 'Content-Type: application/json' \\"
 echo "║       -d '{\"company_id\": \"minha-empresa\"}'"
 echo "║                                                            ║"
