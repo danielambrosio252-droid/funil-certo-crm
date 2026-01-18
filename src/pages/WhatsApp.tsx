@@ -4,23 +4,44 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WhatsAppSetup } from "@/components/whatsapp/WhatsAppSetup";
 import { WhatsAppChat } from "@/components/whatsapp/WhatsAppChat";
 import { MessageSquare, Settings } from "lucide-react";
+import { useWhatsApp } from "@/hooks/useWhatsApp";
+import { Badge } from "@/components/ui/badge";
 
 export default function WhatsApp() {
   const [activeTab, setActiveTab] = useState("chat");
+  const { session, contacts } = useWhatsApp();
+  
+  const totalUnread = contacts.reduce((acc, c) => acc + (c.unread_count || 0), 0);
+  const isConnected = session?.status === "connected";
 
   return (
     <MainLayout title="WhatsApp" subtitle="Central de atendimento">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="chat" className="flex items-center gap-2">
-            <MessageSquare className="w-4 h-4" />
-            Conversas
-          </TabsTrigger>
-          <TabsTrigger value="setup" className="flex items-center gap-2">
-            <Settings className="w-4 h-4" />
-            Configuração
-          </TabsTrigger>
-        </TabsList>
+        <div className="flex items-center justify-between">
+          <TabsList className="bg-muted/50">
+            <TabsTrigger value="chat" className="flex items-center gap-2 relative">
+              <MessageSquare className="w-4 h-4" />
+              Conversas
+              {totalUnread > 0 && (
+                <Badge className="ml-1 h-5 min-w-[20px] px-1.5 bg-emerald-500 text-white">
+                  {totalUnread}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="setup" className="flex items-center gap-2">
+              <Settings className="w-4 h-4" />
+              Configuração
+            </TabsTrigger>
+          </TabsList>
+          
+          {/* Connection status indicator */}
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+            <span className={`text-sm font-medium ${isConnected ? 'text-emerald-600' : 'text-muted-foreground'}`}>
+              {isConnected ? 'Conectado' : 'Desconectado'}
+            </span>
+          </div>
+        </div>
 
         <TabsContent value="chat" className="mt-0">
           <WhatsAppChat />

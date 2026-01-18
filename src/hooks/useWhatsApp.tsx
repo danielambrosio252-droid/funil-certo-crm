@@ -3,33 +3,42 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 import { useToast } from "./use-toast";
 
-interface WhatsAppSession {
+export interface WhatsAppSession {
   id: string;
-  status: "disconnected" | "connecting" | "qr_code" | "connected";
+  company_id: string;
+  status: string;
   phone_number: string | null;
   qr_code: string | null;
-  webhook_url: string | null;
   last_connected_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-interface WhatsAppContact {
+export interface WhatsAppContact {
   id: string;
+  company_id: string;
   phone: string;
   name: string | null;
   profile_picture: string | null;
-  unread_count: number;
+  is_group: boolean;
   last_message_at: string | null;
+  unread_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
-interface WhatsAppMessage {
+export interface WhatsAppMessage {
   id: string;
+  company_id: string;
   contact_id: string;
+  message_id: string | null;
   content: string;
   message_type: string;
   media_url: string | null;
   is_from_me: boolean;
   status: string;
   sent_at: string;
+  created_at: string;
 }
 
 export function useWhatsApp() {
@@ -106,34 +115,7 @@ export function useWhatsApp() {
     }
   }, [profile?.company_id]);
 
-  // Configurar webhook
-  const setWebhookUrl = useCallback(async (webhookUrl: string) => {
-    try {
-      const { data, error } = await supabase.functions.invoke("whatsapp-session", {
-        body: { action: "set_webhook", webhook_url: webhookUrl },
-      });
-
-      if (error) throw error;
-
-      toast({
-        title: "Webhook configurado",
-        description: "URL do servidor externo salva com sucesso.",
-      });
-
-      await fetchSession();
-      return true;
-    } catch (err) {
-      console.error("Erro ao configurar webhook:", err);
-      toast({
-        title: "Erro",
-        description: "Não foi possível configurar o webhook.",
-        variant: "destructive",
-      });
-      return false;
-    }
-  }, [fetchSession, toast]);
-
-  // Conectar WhatsApp
+  // Conectar WhatsApp - agora sem expor URL do servidor
   const connect = useCallback(async () => {
     try {
       const { data, error } = await supabase.functions.invoke("whatsapp-session", {
@@ -144,7 +126,7 @@ export function useWhatsApp() {
 
       toast({
         title: "Iniciando conexão",
-        description: "Aguarde o servidor gerar o QR Code...",
+        description: "Aguarde o QR Code aparecer...",
       });
 
       await fetchSession();
@@ -153,7 +135,7 @@ export function useWhatsApp() {
       console.error("Erro ao conectar:", err);
       toast({
         title: "Erro",
-        description: "Não foi possível iniciar a conexão.",
+        description: "Não foi possível iniciar a conexão. Verifique se o servidor está configurado.",
         variant: "destructive",
       });
       return false;
@@ -196,7 +178,7 @@ export function useWhatsApp() {
 
       if (error) throw error;
 
-      return data.message_id;
+      return data?.message_id || true;
     } catch (err) {
       console.error("Erro ao enviar mensagem:", err);
       toast({
@@ -204,43 +186,41 @@ export function useWhatsApp() {
         description: "Não foi possível enviar a mensagem.",
         variant: "destructive",
       });
-      return null;
+      return false;
     }
   }, [toast]);
 
   // Marcar como lido
   const markAsRead = useCallback(async (contactId: string) => {
-    if (!profile?.company_id) return;
-
     try {
       await supabase
         .from("whatsapp_contacts")
         .update({ unread_count: 0 })
         .eq("id", contactId);
-
-      setContacts((prev) =>
-        prev.map((c) => (c.id === contactId ? { ...c, unread_count: 0 } : c))
-      );
     } catch (err) {
       console.error("Erro ao marcar como lido:", err);
     }
-  }, [profile?.company_id]);
+  }, []);
+
+  // Refetch all data
+  const refetch = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([fetchSession(), fetchContacts()]);
+    setLoading(false);
+  }, [fetchSession, fetchContacts]);
 
   // Carregar dados iniciais
   useEffect(() => {
     if (profile?.company_id) {
-      setLoading(true);
-      Promise.all([fetchSession(), fetchContacts()]).finally(() => {
-        setLoading(false);
-      });
+      refetch();
     }
-  }, [profile?.company_id, fetchSession, fetchContacts]);
+  }, [profile?.company_id, refetch]);
 
-  // Subscribe to realtime updates
+  // Real-time subscriptions
   useEffect(() => {
     if (!profile?.company_id) return;
 
-    // Subscribe to session updates
+    // Subscription para sessões
     const sessionChannel = supabase
       .channel("whatsapp_sessions_changes")
       .on(
@@ -255,12 +235,14 @@ export function useWhatsApp() {
           console.log("Sessão atualizada:", payload);
           if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
             setSession(payload.new as WhatsAppSession);
+          } else if (payload.eventType === "DELETE") {
+            setSession(null);
           }
         }
       )
       .subscribe();
 
-    // Subscribe to contacts updates
+    // Subscription para contatos
     const contactsChannel = supabase
       .channel("whatsapp_contacts_changes")
       .on(
@@ -277,7 +259,15 @@ export function useWhatsApp() {
             setContacts((prev) => [payload.new as WhatsAppContact, ...prev]);
           } else if (payload.eventType === "UPDATE") {
             setContacts((prev) =>
-              prev.map((c) => (c.id === payload.new.id ? (payload.new as WhatsAppContact) : c))
+              prev.map((c) =>
+                c.id === (payload.new as WhatsAppContact).id
+                  ? (payload.new as WhatsAppContact)
+                  : c
+              )
+            );
+          } else if (payload.eventType === "DELETE") {
+            setContacts((prev) =>
+              prev.filter((c) => c.id !== (payload.old as WhatsAppContact).id)
             );
           }
         }
@@ -296,10 +286,9 @@ export function useWhatsApp() {
     loading,
     connect,
     disconnect,
-    setWebhookUrl,
     sendMessage,
     fetchMessages,
     markAsRead,
-    refetch: () => Promise.all([fetchSession(), fetchContacts()]),
+    refetch,
   };
 }

@@ -6,8 +6,7 @@ const corsHeaders = {
 };
 
 interface SessionPayload {
-  action: "connect" | "disconnect" | "status" | "set_webhook";
-  webhook_url?: string;
+  action: "connect" | "disconnect" | "status";
 }
 
 Deno.serve(async (req) => {
@@ -18,6 +17,7 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const whatsappServerUrl = Deno.env.get("WHATSAPP_SERVER_URL");
 
     // Validar autenticação
     const authHeader = req.headers.get("Authorization");
@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
 
     const companyId = profile.company_id;
     const payload: SessionPayload = await req.json();
-    const { action, webhook_url } = payload;
+    const { action } = payload;
 
     console.log("Ação de sessão:", action, "empresa:", companyId);
 
@@ -75,12 +75,23 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
+    // Verificar se o servidor WhatsApp está configurado
+    if (!whatsappServerUrl && action !== "status") {
+      return new Response(
+        JSON.stringify({ 
+          error: "Servidor WhatsApp não configurado",
+          message: "Configure o WHATSAPP_SERVER_URL nas configurações do backend."
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     switch (action) {
       case "connect": {
         // Verificar se já existe sessão
         const { data: existingSession } = await supabaseAdmin
           .from("whatsapp_sessions")
-          .select("id, status, webhook_url")
+          .select("id, status")
           .eq("company_id", companyId)
           .single();
 
@@ -105,17 +116,46 @@ Deno.serve(async (req) => {
             .eq("company_id", companyId);
         }
 
-        // Se tiver webhook configurado, notificar servidor externo
-        const session = existingSession;
-        if (session?.webhook_url) {
+        // Notificar servidor WhatsApp (URL protegida no backend)
+        if (whatsappServerUrl) {
           try {
-            await fetch(session.webhook_url + "/connect", {
+            console.log("Chamando servidor WhatsApp:", whatsappServerUrl + "/connect");
+            const response = await fetch(whatsappServerUrl + "/connect", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ company_id: companyId }),
             });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              console.error("Erro do servidor WhatsApp:", errorText);
+              
+              // Atualizar status para erro
+              await supabaseAdmin
+                .from("whatsapp_sessions")
+                .update({ status: "error" })
+                .eq("company_id", companyId);
+              
+              return new Response(
+                JSON.stringify({ error: "Falha ao comunicar com servidor WhatsApp" }),
+                { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+
+            console.log("Servidor WhatsApp respondeu com sucesso");
           } catch (e) {
-            console.error("Erro ao notificar servidor externo:", e);
+            console.error("Erro ao conectar ao servidor WhatsApp:", e);
+            
+            // Atualizar status para erro
+            await supabaseAdmin
+              .from("whatsapp_sessions")
+              .update({ status: "error" })
+              .eq("company_id", companyId);
+            
+            return new Response(
+              JSON.stringify({ error: "Servidor WhatsApp indisponível" }),
+              { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
           }
         }
 
@@ -126,28 +166,22 @@ Deno.serve(async (req) => {
       }
 
       case "disconnect": {
-        const { data: session } = await supabaseAdmin
-          .from("whatsapp_sessions")
-          .select("webhook_url")
-          .eq("company_id", companyId)
-          .single();
-
         // Desconectar
         await supabaseAdmin
           .from("whatsapp_sessions")
           .update({ status: "disconnected", qr_code: null })
           .eq("company_id", companyId);
 
-        // Notificar servidor externo
-        if (session?.webhook_url) {
+        // Notificar servidor WhatsApp
+        if (whatsappServerUrl) {
           try {
-            await fetch(session.webhook_url + "/disconnect", {
+            await fetch(whatsappServerUrl + "/disconnect", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ company_id: companyId }),
             });
           } catch (e) {
-            console.error("Erro ao notificar servidor externo:", e);
+            console.error("Erro ao notificar desconexão:", e);
           }
         }
 
@@ -160,7 +194,7 @@ Deno.serve(async (req) => {
       case "status": {
         const { data: session, error } = await supabase
           .from("whatsapp_sessions")
-          .select("status, phone_number, qr_code, last_connected_at, webhook_url")
+          .select("status, phone_number, qr_code, last_connected_at")
           .eq("company_id", companyId)
           .single();
 
@@ -171,43 +205,8 @@ Deno.serve(async (req) => {
         return new Response(
           JSON.stringify({
             session: session || { status: "disconnected" },
+            server_configured: !!whatsappServerUrl,
           }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      case "set_webhook": {
-        if (!webhook_url) {
-          return new Response(
-            JSON.stringify({ error: "webhook_url é obrigatório" }),
-            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
-
-        // Verificar se existe sessão
-        const { data: existingSession } = await supabaseAdmin
-          .from("whatsapp_sessions")
-          .select("id")
-          .eq("company_id", companyId)
-          .single();
-
-        if (existingSession) {
-          await supabaseAdmin
-            .from("whatsapp_sessions")
-            .update({ webhook_url })
-            .eq("company_id", companyId);
-        } else {
-          await supabaseAdmin
-            .from("whatsapp_sessions")
-            .insert({
-              company_id: companyId,
-              webhook_url,
-              status: "disconnected",
-            });
-        }
-
-        return new Response(
-          JSON.stringify({ success: true, message: "Webhook configurado" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
