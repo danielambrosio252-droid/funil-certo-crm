@@ -235,7 +235,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      increment_unread_count: {
+        Args: { contact_uuid: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
