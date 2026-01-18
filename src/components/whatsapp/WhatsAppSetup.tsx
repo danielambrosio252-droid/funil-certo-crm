@@ -103,6 +103,25 @@ export function WhatsAppSetup() {
     }
   }, [uiState, session?.qr_code]);
 
+  // While modal is open and we don't have QR yet, poll status as a fallback
+  // (covers cases where realtime/webhook updates are delayed)
+  useEffect(() => {
+    if (!showQrModal) return;
+    if (session?.qr_code) return;
+    if (uiState !== "connecting" && uiState !== "qr_code") return;
+
+    const startedAt = Date.now();
+    const intervalId = setInterval(() => {
+      if (Date.now() - startedAt > 30_000) {
+        clearInterval(intervalId);
+        return;
+      }
+      refetch();
+    }, 2500);
+
+    return () => clearInterval(intervalId);
+  }, [showQrModal, session?.qr_code, uiState, refetch]);
+
   // Auto-close modal when connected
   useEffect(() => {
     if (uiState === "connected") {
@@ -372,7 +391,25 @@ export function WhatsAppSetup() {
 
           <div className="flex flex-col items-center py-6">
             <AnimatePresence mode="wait">
-              {!session?.qr_code ? (
+              {uiState === "error" ? (
+                <motion.div
+                  key="error"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="w-64 rounded-2xl bg-muted flex flex-col items-center justify-center gap-3 p-6"
+                >
+                  <AlertCircle className="w-10 h-10 text-destructive" />
+                  <p className="text-sm font-medium">Não foi possível gerar o QR Code</p>
+                  <p className="text-xs text-muted-foreground text-center">
+                    Verifique se o servidor do WhatsApp está online e tente novamente.
+                  </p>
+                  <Button variant="outline" onClick={handleRetry} disabled={actionLoading}>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Tentar novamente
+                  </Button>
+                </motion.div>
+              ) : !session?.qr_code ? (
                 <motion.div
                   key="loading"
                   initial={{ opacity: 0 }}
