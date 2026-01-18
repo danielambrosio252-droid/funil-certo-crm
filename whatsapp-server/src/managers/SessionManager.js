@@ -263,6 +263,31 @@ class SessionManager {
         }
       }
     });
+
+    // ========== EVENTO: presence.update (digitando...) ==========
+    socket.ev.on('presence.update', async ({ id, presences }) => {
+      try {
+        // id = jid do chat (ex: 5583999999999@s.whatsapp.net)
+        const phone = id.split('@')[0];
+        
+        for (const [participantJid, presence] of Object.entries(presences)) {
+          const participantPhone = participantJid.split('@')[0];
+          const isTyping = presence.lastKnownPresence === 'composing';
+          const isRecording = presence.lastKnownPresence === 'recording';
+          
+          // Enviar apenas quando está digitando ou gravando
+          if (isTyping || isRecording) {
+            await this.webhookService.send(companyId, 'presence_update', {
+              phone: participantPhone,
+              chat_jid: id,
+              presence: presence.lastKnownPresence, // 'composing', 'recording', 'available', 'unavailable'
+            });
+          }
+        }
+      } catch (error) {
+        logger.error(`[${companyId}] Erro ao processar presença:`, error);
+      }
+    });
   }
 
   /**
