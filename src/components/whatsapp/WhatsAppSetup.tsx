@@ -22,7 +22,7 @@ import { useToast } from "@/hooks/use-toast";
 // State machine (frontend): explicit states, nunca spinner infinito
 // (mantém a UI, só corrige o fluxo)
 type UIState =
-  | "DISCONNECTED"
+  | "IDLE"
   | "CONNECTING"
   | "WAITING_QR"
   | "QR_READY"
@@ -79,6 +79,7 @@ const getStatusConfig = (status: UIState): StatusConfig => {
         label: "Erro",
         description: "Falha na conexão. Tente novamente.",
       };
+    case "IDLE":
     default:
       return {
         icon: <WifiOff className="w-5 h-5" />,
@@ -98,15 +99,18 @@ export function WhatsAppSetup() {
   const [actionLoading, setActionLoading] = useState(false);
 
   // Explicit flow state (no infinite loading)
-  const [uiState, setUiState] = useState<UIState>("DISCONNECTED");
+  const [uiState, setUiState] = useState<UIState>("IDLE");
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [secondsLeft, setSecondsLeft] = useState<number>(30);
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const deadlineRef = useRef<number | null>(null);
 
   const deriveBaseUIState = useCallback((): UIState => {
-    if (!session) return "DISCONNECTED";
+    if (!session) return "IDLE";
     const status = session.status;
 
     if (status === "connected") return "CONNECTED";
@@ -114,7 +118,7 @@ export function WhatsAppSetup() {
     if (status === "qr_code") return session.qr_code ? "QR_READY" : "WAITING_QR";
     if (status === "error") return "ERROR";
 
-    return "DISCONNECTED";
+    return "IDLE";
   }, [session]);
 
   const baseUiState = deriveBaseUIState();
@@ -134,10 +138,19 @@ export function WhatsAppSetup() {
     }
   }, []);
 
+  const stopCountdown = useCallback(() => {
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+    deadlineRef.current = null;
+  }, []);
+
   const stopAllTimers = useCallback(() => {
     stopPolling();
     clearConnectTimeout();
-  }, [stopPolling, clearConnectTimeout]);
+    stopCountdown();
+  }, [stopPolling, clearConnectTimeout, stopCountdown]);
 
   const closeModal = useCallback(() => {
     stopAllTimers();
@@ -156,13 +169,25 @@ export function WhatsAppSetup() {
     setQrCode(null);
     setErrorMessage("");
 
+    // Countdown (30s -> 0)
+    deadlineRef.current = Date.now() + 30_000;
+    setSecondsLeft(30);
+    countdownRef.current = setInterval(() => {
+      if (!deadlineRef.current) return;
+      const remainingMs = deadlineRef.current - Date.now();
+      const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+      setSecondsLeft(remainingSec);
+    }, 250);
+
     // HARD TIMEOUT (30s): never allow infinite loading
     timeoutRef.current = setTimeout(() => {
       stopPolling();
       timeoutRef.current = null;
+      setSecondsLeft(0);
       setUiState("ERROR");
       setErrorMessage("Não foi possível gerar o QR Code no tempo esperado.");
       setActionLoading(false);
+      stopCountdown();
     }, 30_000);
 
     pollingRef.current = setInterval(async () => {
@@ -195,7 +220,7 @@ export function WhatsAppSetup() {
 
       // WAITING -> keep polling until timeout
     }, 2000);
-  }, [fetchQrCode, refetch, stopAllTimers, stopPolling]);
+  }, [fetchQrCode, refetch, stopAllTimers, stopPolling, stopCountdown]);
 
   // Cleanup
   useEffect(() => {
@@ -287,7 +312,7 @@ export function WhatsAppSetup() {
     try {
       await disconnect();
       setActionLoading(false);
-      setUiState("DISCONNECTED");
+      setUiState("IDLE");
       toast({
         title: "WhatsApp Desconectado",
         description: "Sua sessão foi encerrada com sucesso.",
@@ -362,7 +387,7 @@ export function WhatsAppSetup() {
             <div className="flex-1">
               <div className="flex items-center gap-2">
                 <span className={`font-semibold ${statusConfig.color}`}>{statusConfig.label}</span>
-                {uiState === "connected" && session?.phone_number && (
+                {uiState === "CONNECTED" && session?.phone_number && (
                   <Badge variant="secondary" className="font-mono text-xs">
                     {session.phone_number}
                   </Badge>
@@ -440,7 +465,7 @@ export function WhatsAppSetup() {
                 </Button>
               </>
             ) : (
-              // DISCONNECTED - main action
+              // IDLE - main action
               <Button
                 className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-lg"
                 onClick={handleConnect}
@@ -496,7 +521,13 @@ export function WhatsAppSetup() {
       </Card>
 
       {/* QR Code Modal */}
-      <Dialog open={showQrModal} onOpenChange={setShowQrModal}>
+      <Dialog
+        open={showQrModal}
+        onOpenChange={(open) => {
+          if (open) setShowQrModal(true);
+          else closeModal();
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader className="text-center">
             <DialogTitle className="flex items-center justify-center gap-2">
@@ -548,7 +579,11 @@ export function WhatsAppSetup() {
                       ? "Iniciando conexão..."
                       : "Gerando QR Code… isso pode levar até 30 segundos"}
                   </p>
-                  <p className="text-xs text-muted-foreground">Não feche esta janela</p>
+                  {(uiState === "WAITING_QR" || uiState === "CONNECTING") && (
+                    <p className="text-xs text-muted-foreground">
+                      Tempo restante: <span className="font-medium">{secondsLeft}s</span>
+                    </p>
+                  )}
                 </motion.div>
               ) : (
                 <motion.div
@@ -570,7 +605,6 @@ export function WhatsAppSetup() {
                   </div>
                 </motion.div>
               )}
-            </AnimatePresence>
             </AnimatePresence>
           </div>
 
