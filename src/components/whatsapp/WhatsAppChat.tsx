@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,13 +17,15 @@ import {
   Mic,
   Phone,
   MoreVertical,
-  User,
   MessageSquare,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWhatsApp } from "@/hooks/useWhatsApp";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useNavigate } from "react-router-dom";
 
 interface Contact {
   id: string;
@@ -47,7 +49,8 @@ interface Message {
 
 export function WhatsAppChat() {
   const { profile } = useAuth();
-  const { contacts, session, sendMessage, fetchMessages, markAsRead } = useWhatsApp();
+  const navigate = useNavigate();
+  const { contacts, session, sendMessage, fetchMessages, markAsRead, loading } = useWhatsApp();
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState("");
@@ -168,15 +171,15 @@ export function WhatsAppChat() {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "pending":
-        return <Clock className="w-3 h-3 text-muted-foreground" />;
+        return <Clock className="w-3 h-3 text-white/60" />;
       case "sent":
-        return <Check className="w-3 h-3 text-muted-foreground" />;
+        return <Check className="w-3 h-3 text-white/60" />;
       case "delivered":
-        return <CheckCheck className="w-3 h-3 text-muted-foreground" />;
+        return <CheckCheck className="w-3 h-3 text-white/60" />;
       case "read":
-        return <CheckCheck className="w-3 h-3 text-blue-500" />;
+        return <CheckCheck className="w-3 h-3 text-blue-400" />;
       case "failed":
-        return <AlertCircle className="w-3 h-3 text-destructive" />;
+        return <AlertCircle className="w-3 h-3 text-red-300" />;
       default:
         return null;
     }
@@ -206,36 +209,71 @@ export function WhatsAppChat() {
 
   const isConnected = session?.status === "connected";
 
+  // Not connected state
+  if (!loading && !isConnected) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-200px)] bg-card border border-border rounded-xl p-8">
+        <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mb-6">
+          <WifiOff className="w-10 h-10 text-slate-400" />
+        </div>
+        <h3 className="text-xl font-semibold text-foreground mb-2">
+          WhatsApp Desconectado
+        </h3>
+        <p className="text-muted-foreground text-center max-w-sm mb-6">
+          Conecte seu WhatsApp para começar a receber e enviar mensagens aos seus clientes.
+        </p>
+        <Button 
+          onClick={() => navigate("/settings")}
+          className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white"
+        >
+          <Wifi className="w-4 h-4 mr-2" />
+          Conectar WhatsApp
+        </Button>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-[calc(100vh-180px)] bg-card border border-border rounded-xl overflow-hidden">
+    <div className="flex h-[calc(100vh-200px)] bg-card border border-border rounded-xl overflow-hidden shadow-lg">
       {/* Contacts List */}
-      <div className="w-96 border-r border-border flex flex-col">
-        <div className="p-4 border-b border-border">
+      <div className="w-80 lg:w-96 border-r border-border flex flex-col bg-background">
+        {/* Search Header */}
+        <div className="p-4 border-b border-border bg-muted/30">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
               placeholder="Buscar conversas..."
-              className="pl-10"
+              className="pl-10 bg-background"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
         </div>
 
+        {/* Status indicator */}
+        <div className="px-4 py-2 bg-emerald-50 border-b border-emerald-100 flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-xs text-emerald-700 font-medium">WhatsApp conectado</span>
+        </div>
+
         <ScrollArea className="flex-1">
-          {filteredContacts.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : filteredContacts.length === 0 ? (
             <div className="flex flex-col items-center justify-center p-8 text-center">
-              <MessageSquare className="w-12 h-12 text-muted-foreground mb-4" />
-              <p className="text-sm text-muted-foreground">
-                {contacts.length === 0
-                  ? "Nenhuma conversa ainda"
-                  : "Nenhum resultado encontrado"}
+              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
+                <MessageSquare className="w-8 h-8 text-muted-foreground" />
+              </div>
+              <p className="text-sm font-medium text-foreground mb-1">
+                {contacts.length === 0 ? "Nenhuma conversa" : "Nenhum resultado"}
               </p>
-              {contacts.length === 0 && isConnected && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  As conversas aparecerão quando você receber mensagens
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground">
+                {contacts.length === 0
+                  ? "Novas conversas aparecerão aqui"
+                  : "Tente buscar por outro termo"}
+              </p>
             </div>
           ) : (
             filteredContacts.map((contact) => (
@@ -245,16 +283,16 @@ export function WhatsAppChat() {
                 animate={{ opacity: 1 }}
                 onClick={() => setSelectedContact(contact)}
                 className={cn(
-                  "p-4 border-b border-border cursor-pointer hover:bg-muted/50 transition-colors",
-                  selectedContact?.id === contact.id && "bg-muted"
+                  "p-4 border-b border-border cursor-pointer hover:bg-muted/50 transition-all duration-200",
+                  selectedContact?.id === contact.id && "bg-emerald-50 hover:bg-emerald-50 border-l-2 border-l-emerald-500"
                 )}
               >
                 <div className="flex items-start gap-3">
-                  <Avatar className="w-12 h-12">
+                  <Avatar className="w-12 h-12 ring-2 ring-background shadow-sm">
                     {contact.profile_picture ? (
-                      <img src={contact.profile_picture} alt={contact.name || contact.phone} />
+                      <img src={contact.profile_picture} alt={contact.name || contact.phone} className="object-cover" />
                     ) : (
-                      <AvatarFallback className="bg-success/20 text-success font-medium">
+                      <AvatarFallback className="bg-gradient-to-br from-emerald-400 to-emerald-600 text-white font-medium">
                         {(contact.name || contact.phone)
                           .split(" ")
                           .map((n) => n[0])
@@ -269,7 +307,7 @@ export function WhatsAppChat() {
                       <p className="font-medium text-foreground truncate">
                         {contact.name || contact.phone}
                       </p>
-                      <span className="text-xs text-muted-foreground flex-shrink-0">
+                      <span className="text-xs text-muted-foreground flex-shrink-0 ml-2">
                         {contact.last_message_at && formatDate(contact.last_message_at)}
                       </span>
                     </div>
@@ -278,7 +316,7 @@ export function WhatsAppChat() {
                         {contact.phone}
                       </p>
                       {contact.unread_count > 0 && (
-                        <Badge className="bg-success text-success-foreground ml-2 h-5 min-w-[20px] p-0 flex items-center justify-center text-xs">
+                        <Badge className="bg-emerald-500 text-white ml-2 h-5 min-w-[20px] p-0 flex items-center justify-center text-xs shadow-sm">
                           {contact.unread_count}
                         </Badge>
                       )}
@@ -292,14 +330,14 @@ export function WhatsAppChat() {
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col bg-gradient-to-b from-slate-50 to-slate-100">
         {selectedContact ? (
           <>
             {/* Chat Header */}
-            <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
+            <div className="p-4 border-b border-border flex items-center justify-between bg-white shadow-sm">
               <div className="flex items-center gap-3">
-                <Avatar className="w-10 h-10">
-                  <AvatarFallback className="bg-success/20 text-success font-medium">
+                <Avatar className="w-10 h-10 ring-2 ring-emerald-100">
+                  <AvatarFallback className="bg-gradient-to-br from-emerald-400 to-emerald-600 text-white font-medium">
                     {(selectedContact.name || selectedContact.phone)
                       .split(" ")
                       .map((n) => n[0])
@@ -309,25 +347,25 @@ export function WhatsAppChat() {
                   </AvatarFallback>
                 </Avatar>
                 <div>
-                  <p className="font-medium text-foreground">
+                  <p className="font-semibold text-foreground">
                     {selectedContact.name || selectedContact.phone}
                   </p>
                   <p className="text-xs text-muted-foreground">{selectedContact.phone}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button variant="ghost" size="icon">
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="icon" className="rounded-full">
                   <Phone className="w-5 h-5 text-muted-foreground" />
                 </Button>
-                <Button variant="ghost" size="icon">
+                <Button variant="ghost" size="icon" className="rounded-full">
                   <MoreVertical className="w-5 h-5 text-muted-foreground" />
                 </Button>
               </div>
             </div>
 
             {/* Messages */}
-            <ScrollArea className="flex-1 p-4 bg-gradient-to-b from-muted/20 to-muted/5">
-              <div className="space-y-3">
+            <ScrollArea className="flex-1 p-4">
+              <div className="space-y-3 max-w-3xl mx-auto">
                 <AnimatePresence mode="popLayout">
                   {messages.map((msg) => (
                     <motion.div
@@ -339,14 +377,14 @@ export function WhatsAppChat() {
                     >
                       <div
                         className={cn(
-                          "max-w-[70%] rounded-2xl px-4 py-2 shadow-sm",
+                          "max-w-[75%] rounded-2xl px-4 py-2.5 shadow-sm",
                           msg.is_from_me
-                            ? "bg-success text-success-foreground rounded-br-md"
-                            : "bg-card border border-border text-foreground rounded-bl-md",
-                          msg.status === "failed" && "border-destructive/50"
+                            ? "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-br-md"
+                            : "bg-white text-foreground rounded-bl-md border border-slate-200",
+                          msg.status === "failed" && "ring-2 ring-red-300"
                         )}
                       >
-                        <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
                         <div
                           className={cn(
                             "flex items-center gap-1 mt-1",
@@ -355,9 +393,9 @@ export function WhatsAppChat() {
                         >
                           <span
                             className={cn(
-                              "text-xs",
+                              "text-[10px]",
                               msg.is_from_me
-                                ? "text-success-foreground/70"
+                                ? "text-white/70"
                                 : "text-muted-foreground"
                             )}
                           >
@@ -374,59 +412,50 @@ export function WhatsAppChat() {
             </ScrollArea>
 
             {/* Input Area */}
-            <div className="p-4 border-t border-border bg-card">
-              {!isConnected ? (
-                <div className="flex items-center justify-center gap-2 text-muted-foreground py-2">
-                  <AlertCircle className="w-4 h-4" />
-                  <span className="text-sm">Conecte o WhatsApp para enviar mensagens</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="icon">
-                    <Smile className="w-5 h-5 text-muted-foreground" />
-                  </Button>
-                  <Button variant="ghost" size="icon">
-                    <Paperclip className="w-5 h-5 text-muted-foreground" />
-                  </Button>
-                  <Input
-                    placeholder="Digite uma mensagem..."
-                    value={messageInput}
-                    onChange={(e) => setMessageInput(e.target.value)}
-                    onKeyPress={handleKeyPress}
-                    className="flex-1"
+            <div className="p-4 border-t border-border bg-white">
+              <div className="flex items-center gap-2 max-w-3xl mx-auto">
+                <Button variant="ghost" size="icon" className="rounded-full shrink-0">
+                  <Smile className="w-5 h-5 text-muted-foreground" />
+                </Button>
+                <Button variant="ghost" size="icon" className="rounded-full shrink-0">
+                  <Paperclip className="w-5 h-5 text-muted-foreground" />
+                </Button>
+                <Input
+                  placeholder="Digite uma mensagem..."
+                  value={messageInput}
+                  onChange={(e) => setMessageInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  className="flex-1 rounded-full bg-slate-100 border-0 focus-visible:ring-emerald-500"
+                  disabled={sending}
+                />
+                {messageInput.trim() ? (
+                  <Button
+                    size="icon"
+                    className="rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 shadow-lg"
+                    onClick={handleSend}
                     disabled={sending}
-                  />
-                  {messageInput.trim() ? (
-                    <Button
-                      size="icon"
-                      className="gradient-primary text-primary-foreground"
-                      onClick={handleSend}
-                      disabled={sending}
-                    >
-                      <Send className="w-5 h-5" />
-                    </Button>
-                  ) : (
-                    <Button variant="ghost" size="icon">
-                      <Mic className="w-5 h-5 text-muted-foreground" />
-                    </Button>
-                  )}
-                </div>
-              )}
+                  >
+                    <Send className="w-5 h-5" />
+                  </Button>
+                ) : (
+                  <Button variant="ghost" size="icon" className="rounded-full shrink-0">
+                    <Mic className="w-5 h-5 text-muted-foreground" />
+                  </Button>
+                )}
+              </div>
             </div>
           </>
         ) : (
           /* Empty State */
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
-            <div className="w-24 h-24 rounded-full bg-muted/50 flex items-center justify-center mb-6">
-              <MessageSquare className="w-12 h-12 text-muted-foreground" />
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-gradient-to-b from-white to-slate-50">
+            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-100 to-emerald-200 flex items-center justify-center mb-6 shadow-lg">
+              <MessageSquare className="w-12 h-12 text-emerald-600" />
             </div>
             <h3 className="text-xl font-semibold text-foreground mb-2">
-              Escala Certo Pro - WhatsApp
+              Central de Atendimento
             </h3>
             <p className="text-muted-foreground max-w-sm">
-              {isConnected
-                ? "Selecione uma conversa para começar a atender"
-                : "Conecte seu WhatsApp na aba de configuração para começar"}
+              Selecione uma conversa à esquerda para começar a atender seus clientes
             </p>
           </div>
         )}

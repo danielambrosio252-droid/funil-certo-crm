@@ -165,26 +165,6 @@ export default function Settings() {
         <TabsContent value="whatsapp">
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-2xl">
             <WhatsAppSetup />
-            
-            <Card className="mt-6">
-              <CardHeader>
-                <CardTitle>Instruções de Conexão</CardTitle>
-                <CardDescription>
-                  Seu servidor WhatsApp está rodando em: <code className="bg-muted px-2 py-1 rounded text-sm font-mono">http://72.62.139.222:3001</code>
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="p-4 bg-muted/50 rounded-lg space-y-2">
-                  <p className="text-sm font-medium">1. Clique em "Configurar" acima</p>
-                  <p className="text-sm font-medium">2. Cole a URL do servidor:</p>
-                  <code className="block bg-background px-3 py-2 rounded text-sm font-mono">
-                    http://72.62.139.222:3001
-                  </code>
-                  <p className="text-sm font-medium mt-4">3. Clique em "Conectar WhatsApp"</p>
-                  <p className="text-sm font-medium">4. Escaneie o QR Code que aparecer</p>
-                </div>
-              </CardContent>
-            </Card>
           </motion.div>
         </TabsContent>
 

@@ -19,6 +19,7 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const whatsappServerUrl = Deno.env.get("WHATSAPP_SERVER_URL");
 
     // Validar autenticação
     const authHeader = req.headers.get("Authorization");
@@ -33,18 +34,17 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: authHeader } },
     });
 
-    // Validar token e obter usuário
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token);
+    // Validar usuário autenticado
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
     
-    if (claimsError || !claimsData?.claims) {
+    if (userError || !user) {
       return new Response(
         JSON.stringify({ error: "Token inválido" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const userId = claimsData.claims.sub;
+    const userId = user.id;
 
     // Buscar perfil e empresa do usuário
     const { data: profile, error: profileError } = await supabase
@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
     // Buscar sessão ativa
     const { data: session, error: sessionError } = await supabase
       .from("whatsapp_sessions")
-      .select("status, webhook_url")
+      .select("status")
       .eq("company_id", companyId)
       .single();
 
@@ -120,10 +120,10 @@ Deno.serve(async (req) => {
       .update({ last_message_at: new Date().toISOString() })
       .eq("id", contact_id);
 
-    // Enviar para o servidor externo Node.js via webhook
-    if (session.webhook_url) {
+    // Enviar para o servidor WhatsApp (URL protegida no backend)
+    if (whatsappServerUrl) {
       try {
-        const response = await fetch(session.webhook_url + "/send", {
+        const response = await fetch(whatsappServerUrl + "/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -135,16 +135,22 @@ Deno.serve(async (req) => {
         });
 
         if (!response.ok) {
-          console.error("Erro ao enviar para servidor externo:", await response.text());
+          console.error("Erro ao enviar para servidor WhatsApp:", await response.text());
           // Marcar mensagem como falha
-          await supabase
+          const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+          const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+          
+          await supabaseAdmin
             .from("whatsapp_messages")
             .update({ status: "failed" })
             .eq("id", message.id);
         }
       } catch (fetchError) {
-        console.error("Erro de conexão com servidor externo:", fetchError);
-        await supabase
+        console.error("Erro de conexão com servidor WhatsApp:", fetchError);
+        const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+        
+        await supabaseAdmin
           .from("whatsapp_messages")
           .update({ status: "failed" })
           .eq("id", message.id);

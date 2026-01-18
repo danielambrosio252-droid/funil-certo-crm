@@ -1,313 +1,392 @@
-import { useState } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import {
-  Wifi,
-  WifiOff,
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { 
+  Smartphone, 
+  Wifi, 
+  WifiOff, 
+  RefreshCw,
   QrCode,
-  Settings,
-  Loader2,
-  CheckCircle2,
+  Check,
   AlertCircle,
-  Server,
-  ExternalLink,
-  Copy,
+  Loader2,
+  MessageCircle,
+  Shield
 } from "lucide-react";
 import { useWhatsApp } from "@/hooks/useWhatsApp";
 import { useToast } from "@/hooks/use-toast";
 
+type ConnectionStatus = "disconnected" | "connecting" | "qr_code" | "connected" | "error";
+
+interface StatusConfig {
+  icon: React.ReactNode;
+  color: string;
+  bgColor: string;
+  label: string;
+  description: string;
+}
+
+const getStatusConfig = (status: ConnectionStatus): StatusConfig => {
+  switch (status) {
+    case "connected":
+      return {
+        icon: <Check className="w-5 h-5" />,
+        color: "text-emerald-600",
+        bgColor: "bg-emerald-50 border-emerald-200",
+        label: "Conectado",
+        description: "WhatsApp funcionando perfeitamente"
+      };
+    case "connecting":
+      return {
+        icon: <Loader2 className="w-5 h-5 animate-spin" />,
+        color: "text-amber-600",
+        bgColor: "bg-amber-50 border-amber-200",
+        label: "Conectando",
+        description: "Preparando conexão..."
+      };
+    case "qr_code":
+      return {
+        icon: <QrCode className="w-5 h-5" />,
+        color: "text-blue-600",
+        bgColor: "bg-blue-50 border-blue-200",
+        label: "Aguardando",
+        description: "Escaneie o QR Code para conectar"
+      };
+    case "error":
+      return {
+        icon: <AlertCircle className="w-5 h-5" />,
+        color: "text-red-600",
+        bgColor: "bg-red-50 border-red-200",
+        label: "Erro",
+        description: "Falha na conexão"
+      };
+    default:
+      return {
+        icon: <WifiOff className="w-5 h-5" />,
+        color: "text-slate-500",
+        bgColor: "bg-slate-50 border-slate-200",
+        label: "Desconectado",
+        description: "Clique para conectar seu WhatsApp"
+      };
+  }
+};
+
 export function WhatsAppSetup() {
-  const { session, loading, connect, disconnect, setWebhookUrl } = useWhatsApp();
+  const { session, loading, connect, disconnect, refetch } = useWhatsApp();
   const { toast } = useToast();
-  const [webhookInput, setWebhookInput] = useState(session?.webhook_url || "");
-  const [showSetup, setShowSetup] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
 
-  const handleSaveWebhook = async () => {
-    if (!webhookInput.trim()) {
+  const status: ConnectionStatus = (session?.status as ConnectionStatus) || "disconnected";
+  const statusConfig = getStatusConfig(status);
+
+  // Auto-open QR modal when QR code is available
+  useEffect(() => {
+    if (status === "qr_code" && session?.qr_code) {
+      setShowQrModal(true);
+    }
+  }, [status, session?.qr_code]);
+
+  // Auto-close modal when connected
+  useEffect(() => {
+    if (status === "connected") {
+      setShowQrModal(false);
+      setConnecting(false);
       toast({
-        title: "Erro",
-        description: "Informe a URL do servidor",
-        variant: "destructive",
+        title: "WhatsApp Conectado!",
+        description: "Seu WhatsApp foi conectado com sucesso.",
       });
-      return;
     }
-
-    const success = await setWebhookUrl(webhookInput.trim());
-    if (success) {
-      setShowSetup(false);
-    }
-  };
+  }, [status, toast]);
 
   const handleConnect = async () => {
-    if (!session?.webhook_url) {
+    setConnecting(true);
+    try {
+      const success = await connect();
+      if (success) {
+        setShowQrModal(true);
+      } else {
+        setConnecting(false);
+      }
+    } catch {
+      setConnecting(false);
       toast({
-        title: "Configure o servidor",
-        description: "Primeiro configure a URL do servidor Node.js externo.",
+        title: "Erro ao conectar",
+        description: "Não foi possível iniciar a conexão. Tente novamente.",
         variant: "destructive",
       });
-      setShowSetup(true);
-      return;
     }
-
-    setConnecting(true);
-    await connect();
-    setConnecting(false);
   };
 
   const handleDisconnect = async () => {
-    setConnecting(true);
-    await disconnect();
-    setConnecting(false);
-  };
-
-  const copyWebhookUrl = () => {
-    const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook`;
-    navigator.clipboard.writeText(webhookUrl);
-    toast({
-      title: "Copiado!",
-      description: "URL do webhook copiada para a área de transferência.",
-    });
-  };
-
-  const getStatusConfig = () => {
-    switch (session?.status) {
-      case "connected":
-        return {
-          icon: CheckCircle2,
-          color: "text-success",
-          bgColor: "bg-success/10",
-          label: "Conectado",
-          description: session.phone_number || "WhatsApp conectado",
-        };
-      case "connecting":
-        return {
-          icon: Loader2,
-          color: "text-warning",
-          bgColor: "bg-warning/10",
-          label: "Conectando",
-          description: "Aguardando servidor...",
-        };
-      case "qr_code":
-        return {
-          icon: QrCode,
-          color: "text-primary",
-          bgColor: "bg-primary/10",
-          label: "QR Code",
-          description: "Escaneie o código no WhatsApp",
-        };
-      default:
-        return {
-          icon: WifiOff,
-          color: "text-muted-foreground",
-          bgColor: "bg-muted",
-          label: "Desconectado",
-          description: "WhatsApp não conectado",
-        };
+    try {
+      await disconnect();
+      toast({
+        title: "WhatsApp Desconectado",
+        description: "Sua sessão foi encerrada com sucesso.",
+      });
+    } catch {
+      toast({
+        title: "Erro",
+        description: "Não foi possível desconectar.",
+        variant: "destructive",
+      });
     }
   };
 
-  const status = getStatusConfig();
-  const StatusIcon = status.icon;
+  const handleReconnect = async () => {
+    await handleDisconnect();
+    setTimeout(() => {
+      handleConnect();
+    }, 1000);
+  };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
+      <Card className="border-0 shadow-lg">
+        <CardContent className="flex items-center justify-center py-16">
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <p className="text-muted-foreground">Carregando...</p>
+          </div>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <Card className="border-border/50">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`w-12 h-12 rounded-xl ${status.bgColor} flex items-center justify-center`}>
-              <StatusIcon className={`w-6 h-6 ${status.color} ${status.label === "Conectando" ? "animate-spin" : ""}`} />
+    <>
+      <Card className="border-0 shadow-lg overflow-hidden">
+        {/* Header com gradiente */}
+        <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 p-6 text-white">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+              <MessageCircle className="w-7 h-7" />
             </div>
             <div>
-              <CardTitle className="text-lg">Status do WhatsApp</CardTitle>
-              <CardDescription>{status.description}</CardDescription>
+              <h2 className="text-xl font-semibold">WhatsApp Business</h2>
+              <p className="text-emerald-100 text-sm">Central de atendimento integrada</p>
             </div>
           </div>
-          <Badge
-            variant={session?.status === "connected" ? "default" : "secondary"}
-            className={session?.status === "connected" ? "bg-success text-success-foreground" : ""}
-          >
-            {status.label}
-          </Badge>
         </div>
-      </CardHeader>
 
-      <CardContent className="space-y-4">
-        {/* QR Code Display */}
-        {session?.status === "qr_code" && session.qr_code && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="flex flex-col items-center p-6 bg-white rounded-xl border border-border"
+        <CardContent className="p-6 space-y-6">
+          {/* Status Card */}
+          <motion.div 
+            className={`flex items-center gap-4 p-4 rounded-xl border-2 ${statusConfig.bgColor}`}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            key={status}
           >
-            <p className="text-sm text-muted-foreground mb-4">
-              Escaneie este QR Code com seu WhatsApp
-            </p>
-            <div className="p-4 bg-white rounded-lg shadow-sm">
-              <img
-                src={session.qr_code}
-                alt="QR Code WhatsApp"
-                className="w-48 h-48"
-              />
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${statusConfig.color} bg-white shadow-sm`}>
+              {statusConfig.icon}
             </div>
-            <p className="text-xs text-muted-foreground mt-4">
-              Abra o WhatsApp → Menu → Aparelhos Conectados → Conectar Aparelho
-            </p>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className={`font-semibold ${statusConfig.color}`}>{statusConfig.label}</span>
+                {status === "connected" && session?.phone_number && (
+                  <Badge variant="secondary" className="font-mono text-xs">
+                    {session.phone_number}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground">{statusConfig.description}</p>
+            </div>
+            
+            {/* Refresh button */}
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => refetch()} 
+              className="shrink-0"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </Button>
           </motion.div>
-        )}
 
-        {/* Server Configuration */}
-        <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
-          <div className="flex items-center gap-3">
-            <Server className="w-5 h-5 text-muted-foreground" />
-            <div>
-              <p className="text-sm font-medium">Servidor Node.js</p>
-              <p className="text-xs text-muted-foreground truncate max-w-[200px]">
-                {session?.webhook_url || "Não configurado"}
-              </p>
+          {/* Action Buttons */}
+          <div className="flex gap-3">
+            {status === "connected" ? (
+              <>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={handleReconnect}
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Reconectar
+                </Button>
+                <Button
+                  variant="destructive"
+                  className="flex-1"
+                  onClick={handleDisconnect}
+                >
+                  <WifiOff className="w-4 h-4 mr-2" />
+                  Desconectar
+                </Button>
+              </>
+            ) : status === "connecting" || status === "qr_code" ? (
+              <Button
+                className="w-full"
+                variant="outline"
+                onClick={() => setShowQrModal(true)}
+                disabled={status === "connecting"}
+              >
+                {status === "connecting" ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Preparando conexão...
+                  </>
+                ) : (
+                  <>
+                    <QrCode className="w-4 h-4 mr-2" />
+                    Abrir QR Code
+                  </>
+                )}
+              </Button>
+            ) : (
+              <Button
+                className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-lg"
+                onClick={handleConnect}
+                disabled={connecting}
+              >
+                {connecting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Conectando...
+                  </>
+                ) : (
+                  <>
+                    <Wifi className="w-4 h-4 mr-2" />
+                    Conectar WhatsApp
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+
+          {/* Features info */}
+          {status === "connected" && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              className="grid grid-cols-3 gap-3 pt-4 border-t"
+            >
+              <div className="text-center p-3 rounded-lg bg-muted/50">
+                <MessageCircle className="w-5 h-5 mx-auto mb-1 text-primary" />
+                <p className="text-xs text-muted-foreground">Mensagens</p>
+                <p className="font-semibold text-sm">Ativo</p>
+              </div>
+              <div className="text-center p-3 rounded-lg bg-muted/50">
+                <Shield className="w-5 h-5 mx-auto mb-1 text-primary" />
+                <p className="text-xs text-muted-foreground">Segurança</p>
+                <p className="font-semibold text-sm">Criptografado</p>
+              </div>
+              <div className="text-center p-3 rounded-lg bg-muted/50">
+                <Smartphone className="w-5 h-5 mx-auto mb-1 text-primary" />
+                <p className="text-xs text-muted-foreground">Sincronizado</p>
+                <p className="font-semibold text-sm">Em tempo real</p>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Last connection info */}
+          {session?.last_connected_at && (
+            <p className="text-xs text-muted-foreground text-center">
+              Última conexão: {new Date(session.last_connected_at).toLocaleString("pt-BR")}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* QR Code Modal */}
+      <Dialog open={showQrModal} onOpenChange={setShowQrModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="text-center">
+            <DialogTitle className="flex items-center justify-center gap-2">
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+                <QrCode className="w-5 h-5 text-emerald-600" />
+              </div>
+              <span>Conectar WhatsApp</span>
+            </DialogTitle>
+            <DialogDescription className="text-center pt-2">
+              Escaneie o código QR com seu WhatsApp para conectar
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col items-center py-6">
+            <AnimatePresence mode="wait">
+              {status === "connecting" || !session?.qr_code ? (
+                <motion.div
+                  key="loading"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="w-64 h-64 rounded-2xl bg-muted flex flex-col items-center justify-center gap-4"
+                >
+                  <Loader2 className="w-10 h-10 animate-spin text-emerald-500" />
+                  <p className="text-sm text-muted-foreground">Gerando QR Code...</p>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="qr"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  className="relative"
+                >
+                  <div className="p-4 bg-white rounded-2xl shadow-lg">
+                    <img
+                      src={session.qr_code}
+                      alt="QR Code para conectar WhatsApp"
+                      className="w-56 h-56 rounded-lg"
+                    />
+                  </div>
+                  <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg">
+                    <MessageCircle className="w-4 h-4 text-white" />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          <div className="space-y-3 text-center">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground justify-center">
+              <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xs font-medium">1</span>
+              Abra o WhatsApp no seu celular
+            </div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground justify-center">
+              <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xs font-medium">2</span>
+              Toque em Menu → Aparelhos conectados
+            </div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground justify-center">
+              <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xs font-medium">3</span>
+              Escaneie o código QR acima
             </div>
           </div>
 
-          <Dialog open={showSetup} onOpenChange={setShowSetup}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Settings className="w-4 h-4 mr-2" />
-                Configurar
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Configurar Servidor WhatsApp</DialogTitle>
-                <DialogDescription>
-                  Configure a URL do seu servidor Node.js com Baileys para gerenciar as sessões do WhatsApp.
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="webhook-url">URL do Servidor Node.js</Label>
-                  <Input
-                    id="webhook-url"
-                    placeholder="https://seu-servidor.com"
-                    value={webhookInput}
-                    onChange={(e) => setWebhookInput(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    URL base do seu servidor (sem /connect ou /send no final)
-                  </p>
-                </div>
-
-                <div className="p-4 bg-muted rounded-lg space-y-3">
-                  <p className="text-sm font-medium">Webhook URL para receber eventos:</p>
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 p-2 bg-background rounded text-xs break-all">
-                      {import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook
-                    </code>
-                    <Button variant="outline" size="icon" onClick={copyWebhookUrl}>
-                      <Copy className="w-4 h-4" />
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Configure seu servidor para enviar eventos (qr_code, connected, message_received) para este webhook.
-                  </p>
-                </div>
-
-                <div className="flex items-start gap-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
-                  <AlertCircle className="w-5 h-5 text-primary mt-0.5" />
-                  <div className="text-sm">
-                    <p className="font-medium text-foreground">Servidor externo necessário</p>
-                    <p className="text-muted-foreground">
-                      Você precisa de um servidor Node.js rodando a biblioteca Baileys. 
-                      Recomendamos hospedar no Railway ou Render.
-                    </p>
-                    <a
-                      href="https://github.com/WhiskeySockets/Baileys"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-primary hover:underline mt-1"
-                    >
-                      Ver documentação <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setShowSetup(false)}>
-                  Cancelar
-                </Button>
-                <Button onClick={handleSaveWebhook}>
-                  Salvar Configuração
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex gap-2">
-          {session?.status === "connected" ? (
+          <div className="flex gap-3 pt-4">
             <Button
-              variant="destructive"
+              variant="outline"
               className="flex-1"
-              onClick={handleDisconnect}
-              disabled={connecting}
+              onClick={() => setShowQrModal(false)}
             >
-              {connecting ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <WifiOff className="w-4 h-4 mr-2" />
-              )}
-              Desconectar
+              Cancelar
             </Button>
-          ) : (
             <Button
-              className="flex-1 gradient-primary"
-              onClick={handleConnect}
-              disabled={connecting || session?.status === "connecting" || session?.status === "qr_code"}
+              variant="outline"
+              onClick={() => refetch()}
+              className="flex-1"
             >
-              {connecting || session?.status === "connecting" ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <Wifi className="w-4 h-4 mr-2" />
-              )}
-              {session?.status === "qr_code" ? "Aguardando escaneio..." : "Conectar WhatsApp"}
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Atualizar
             </Button>
-          )}
-        </div>
-
-        {session?.last_connected_at && (
-          <p className="text-xs text-muted-foreground text-center">
-            Última conexão: {new Date(session.last_connected_at).toLocaleString("pt-BR")}
-          </p>
-        )}
-      </CardContent>
-    </Card>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
