@@ -18,6 +18,7 @@ const QRCode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
 const { logger } = require('../utils/logger');
+const { normalizePhone, isLid, phoneToJid } = require('../utils/phoneNormalizer');
 
 const RECONNECT_TIMEOUT = parseInt(process.env.RECONNECT_TIMEOUT) || 5000;
 const MAX_RECONNECT_ATTEMPTS = parseInt(process.env.MAX_RECONNECT_ATTEMPTS) || 10;
@@ -268,19 +269,20 @@ class SessionManager {
     socket.ev.on('presence.update', async ({ id, presences }) => {
       try {
         // id = jid do chat (ex: 5583999999999@s.whatsapp.net)
-        const phone = id.split('@')[0];
+        // ✅ NORMALIZAÇÃO DE TELEFONE
+        const normalizedChatPhone = normalizePhone(id);
         
         for (const [participantJid, presence] of Object.entries(presences)) {
-          const participantPhone = participantJid.split('@')[0];
+          const normalizedParticipantPhone = normalizePhone(participantJid);
           const isTyping = presence.lastKnownPresence === 'composing';
           const isRecording = presence.lastKnownPresence === 'recording';
           
           // Enviar apenas quando está digitando ou gravando
-          if (isTyping || isRecording) {
+          if ((isTyping || isRecording) && normalizedParticipantPhone) {
             await this.webhookService.send(companyId, 'presence_update', {
-              phone: participantPhone,
+              phone: normalizedParticipantPhone,  // ✅ Número normalizado
               chat_jid: id,
-              presence: presence.lastKnownPresence, // 'composing', 'recording', 'available', 'unavailable'
+              presence: presence.lastKnownPresence,
             });
           }
         }
@@ -303,7 +305,19 @@ class SessionManager {
     // Ignorar mensagens de grupo por enquanto
     if (msg.key.remoteJid?.endsWith('@g.us')) return;
 
-    const phone = msg.key.remoteJid?.replace('@s.whatsapp.net', '') || '';
+    const rawJid = msg.key.remoteJid || '';
+    
+    // ✅ NORMALIZAÇÃO DE TELEFONE - REGRA DE OURO
+    // Converte qualquer formato (@lid, @s.whatsapp.net, etc) para E.164 puro
+    const normalizedPhone = normalizePhone(rawJid);
+    
+    // Se é um LID sem número real, ignorar (não podemos identificar o contato)
+    if (!normalizedPhone && isLid(rawJid)) {
+      logger.warn(`[${companyId}] ⚠️ Ignorando mensagem de LID sem número real: ${rawJid}`);
+      return;
+    }
+    
+    const phone = normalizedPhone || rawJid.replace(/@.*$/, '');
     const senderName = msg.pushName || '';
     
     // Extrair conteúdo da mensagem
@@ -340,11 +354,12 @@ class SessionManager {
       content = '[Mensagem não suportada]';
     }
 
-    logger.info(`[${companyId}] 📩 Mensagem de ${phone}: ${content.substring(0, 50)}...`);
+    logger.info(`[${companyId}] 📩 Mensagem de ${phone} (raw: ${rawJid}): ${content.substring(0, 50)}...`);
 
     await this.webhookService.send(companyId, 'message_received', {
       message_id: msg.key.id,
-      from: phone,
+      from: phone,  // ✅ Número normalizado E.164
+      raw_jid: rawJid,  // Mantemos o JID original para debug
       content,
       sender_name: senderName,
       message_type: messageType,
@@ -426,17 +441,10 @@ class SessionManager {
 
   /**
    * Formata número de telefone para JID do WhatsApp
+   * ✅ Usa a função centralizada de normalização
    */
   _formatJid(phone) {
-    // Remover caracteres não numéricos
-    let cleaned = phone.replace(/\D/g, '');
-    
-    // Se não tiver código do país, adicionar Brasil (55)
-    if (cleaned.length <= 11) {
-      cleaned = '55' + cleaned;
-    }
-    
-    return `${cleaned}@s.whatsapp.net`;
+    return phoneToJid(phone);
   }
 
   /**

@@ -5,6 +5,67 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-webhook-secret",
 };
 
+/**
+ * =====================================================
+ * NORMALIZADOR DE TELEFONE - REGRA DE OURO
+ * =====================================================
+ * 
+ * Converte QUALQUER formato de JID do WhatsApp para 
+ * formato E.164 puro (apenas dígitos).
+ */
+function normalizePhone(input: string): string {
+  if (!input || typeof input !== 'string') {
+    return '';
+  }
+
+  let phone = input.trim();
+
+  // 1. Remover sufixos do WhatsApp
+  phone = phone
+    .replace(/@s\.whatsapp\.net$/i, '')
+    .replace(/@c\.us$/i, '')
+    .replace(/@lid$/i, '')
+    .replace(/@g\.us$/i, '')
+    .replace(/@broadcast$/i, '');
+
+  // 2. Remover parte do device ID (ex: "5583999999999:45" -> "5583999999999")
+  phone = phone.split(':')[0];
+
+  // 3. Remover todos os caracteres não numéricos
+  phone = phone.replace(/\D/g, '');
+
+  // 4. Se o número é muito longo (>15 dígitos), provavelmente é um LID
+  if (phone.length > 15) {
+    console.log(`[PhoneNormalizer] Número muito longo (possível LID): ${phone}`);
+    return '';
+  }
+
+  // 5. Garantir DDI do Brasil se número curto
+  if (phone.length >= 10 && phone.length <= 11) {
+    phone = '55' + phone;
+  }
+
+  // 6. Corrigir números brasileiros (adicionar 9 se necessário)
+  if (phone.startsWith('55') && phone.length === 12) {
+    const ddi = phone.substring(0, 2);
+    const ddd = phone.substring(2, 4);
+    const number = phone.substring(4);
+    phone = `${ddi}${ddd}9${number}`;
+  }
+
+  return phone;
+}
+
+/**
+ * Verifica se é um LID (Link ID) do WhatsApp
+ */
+function isLid(input: string): boolean {
+  if (!input || typeof input !== 'string') {
+    return false;
+  }
+  return input.includes('@lid');
+}
+
 interface WebhookPayload {
   type: "qr_code" | "connected" | "disconnected" | "message_received" | "message_sent" | "message_status" | "presence_update";
   company_id: string;
@@ -87,31 +148,50 @@ Deno.serve(async (req) => {
 
       case "message_received": {
         // Mensagem recebida do WhatsApp
-        const phone = data.from as string;
+        const rawPhone = data.from as string;
         const content = data.content as string;
         const messageType = (data.message_type as string) || "text";
         const messageId = data.message_id as string;
         const senderName = data.sender_name as string;
         const mediaUrl = data.media_url as string | undefined;
+        const rawJid = data.raw_jid as string | undefined;
 
-        // Buscar ou criar contato
+        // ✅ NORMALIZAÇÃO DE TELEFONE - REGRA DE OURO
+        // O servidor já envia normalizado, mas normalizamos novamente por segurança
+        const phone = normalizePhone(rawPhone);
+        
+        // Se não conseguiu normalizar (LID sem número), ignorar
+        if (!phone) {
+          console.warn(`[Webhook] Ignorando mensagem de número não normalizável: ${rawPhone} (raw_jid: ${rawJid})`);
+          return new Response(
+            JSON.stringify({ success: true, skipped: true, reason: "unnormalizable_phone" }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        console.log(`[Webhook] Telefone normalizado: ${rawPhone} -> ${phone}`);
+
+        // ✅ BUSCAR CONTATO PELO TELEFONE NORMALIZADO
+        // Isso garante que @lid e @s.whatsapp.net do mesmo número vão para o mesmo contato
         let { data: contact, error: contactError } = await supabase
           .from("whatsapp_contacts")
-          .select("id")
+          .select("id, phone, name")
           .eq("company_id", company_id)
           .eq("phone", phone)
           .single();
 
         if (contactError && contactError.code === "PGRST116") {
-          // Contato não existe, criar novo
+          // Contato não existe, criar novo com telefone normalizado
+          console.log(`[Webhook] Criando novo contato para telefone: ${phone}`);
+          
           const { data: newContact, error: insertError } = await supabase
             .from("whatsapp_contacts")
             .insert({
               company_id,
-              phone,
-              name: senderName || phone,
+              phone: phone, // ✅ Sempre telefone normalizado E.164
+              name: senderName || null,
             })
-            .select("id")
+            .select("id, phone, name")
             .single();
 
           if (insertError) {
@@ -119,6 +199,12 @@ Deno.serve(async (req) => {
             throw insertError;
           }
           contact = newContact;
+          console.log(`[Webhook] Novo contato criado: ${contact.id}`);
+        } else if (contactError) {
+          console.error("Erro ao buscar contato:", contactError);
+          throw contactError;
+        } else {
+          console.log(`[Webhook] Contato existente encontrado: ${contact!.id} (${contact!.phone})`);
         }
 
         // Inserir mensagem
@@ -140,19 +226,25 @@ Deno.serve(async (req) => {
           throw msgError;
         }
 
-        // Atualizar contato com última mensagem
+        // Atualizar contato com última mensagem e nome (se tiver)
+        const updateData: Record<string, unknown> = {
+          last_message_at: new Date().toISOString(),
+        };
+        
+        // Atualizar nome apenas se tiver e o contato não tiver nome
+        if (senderName && !contact!.name) {
+          updateData.name = senderName;
+        }
+        
         await supabase
           .from("whatsapp_contacts")
-          .update({
-            last_message_at: new Date().toISOString(),
-            name: senderName || undefined,
-          })
+          .update(updateData)
           .eq("id", contact!.id);
 
         // Incrementar unread_count
         await supabase.rpc("increment_unread_count", { contact_uuid: contact!.id });
 
-        console.log("Mensagem recebida salva:", messageId);
+        console.log("Mensagem recebida salva:", messageId, "para contato:", contact!.id);
         break;
       }
 
@@ -195,10 +287,18 @@ Deno.serve(async (req) => {
 
       case "presence_update": {
         // Digitando/gravando - broadcast via realtime
-        const phone = data.phone as string;
-        const presence = data.presence as string; // 'composing' | 'recording'
+        const rawPhone = data.phone as string;
+        const presence = data.presence as string;
         
-        // Buscar contato pelo telefone
+        // ✅ NORMALIZAÇÃO DE TELEFONE
+        const phone = normalizePhone(rawPhone);
+        
+        if (!phone) {
+          console.warn(`[Webhook] Ignorando presença de número não normalizável: ${rawPhone}`);
+          break;
+        }
+        
+        // Buscar contato pelo telefone NORMALIZADO
         const { data: contact } = await supabase
           .from("whatsapp_contacts")
           .select("id")
@@ -215,7 +315,7 @@ Deno.serve(async (req) => {
             payload: {
               contact_id: contact.id,
               phone,
-              presence, // 'composing' ou 'recording'
+              presence,
               timestamp: new Date().toISOString(),
             },
           });
