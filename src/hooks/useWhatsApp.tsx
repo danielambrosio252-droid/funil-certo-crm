@@ -126,18 +126,29 @@ export function useWhatsApp() {
     }
   }, [profile?.company_id]);
 
-  // Connect WhatsApp (non-blocking, with timeout)
+  // Fetch QR code from dedicated endpoint (for polling)
+  const fetchQrCode = useCallback(async (): Promise<{ status: string; qr?: string; phone_number?: string }> => {
+    try {
+      const { data, error } = await supabase.functions.invoke("whatsapp-qr");
+
+      if (error) {
+        console.error("Erro ao buscar QR:", error);
+        return { status: "ERROR" };
+      }
+
+      return data || { status: "ERROR" };
+    } catch (err) {
+      console.error("Erro ao buscar QR:", err);
+      return { status: "ERROR" };
+    }
+  }, []);
+
+  // Connect WhatsApp (non-blocking, immediate return)
   const connect = useCallback(async () => {
     try {
-      // Use AbortController for timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
-
       const { data, error } = await supabase.functions.invoke("whatsapp-session", {
         body: { action: "connect" },
       });
-
-      clearTimeout(timeoutId);
 
       if (error) {
         console.error("Erro ao conectar:", error);
@@ -149,13 +160,25 @@ export function useWhatsApp() {
         return false;
       }
 
-      toast({
-        title: "Iniciando conexão",
-        description: "Aguarde o QR Code aparecer...",
-      });
+      // Check if the response indicates success
+      if (data?.success && data?.status === "CONNECTING") {
+        toast({
+          title: "Iniciando conexão",
+          description: "Aguarde o QR Code aparecer...",
+        });
+        return true;
+      }
 
-      // Don't wait for refetch - realtime will update
-      fetchSession();
+      // If there was an error from the server
+      if (data?.error) {
+        toast({
+          title: "Erro",
+          description: data.message || data.error,
+          variant: "destructive",
+        });
+        return false;
+      }
+
       return true;
     } catch (err) {
       console.error("Erro ao conectar:", err);
@@ -166,7 +189,7 @@ export function useWhatsApp() {
       });
       return false;
     }
-  }, [fetchSession, toast]);
+  }, [toast]);
 
   // Disconnect WhatsApp
   const disconnect = useCallback(async () => {
@@ -348,6 +371,7 @@ export function useWhatsApp() {
     disconnect,
     sendMessage,
     fetchMessages,
+    fetchQrCode, // New: dedicated QR polling
     markAsRead,
     refetch,
   };

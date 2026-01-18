@@ -140,7 +140,7 @@ Deno.serve(async (req) => {
           );
         }
 
-        // Check/create session
+        // Check/create session - set to "connecting" immediately
         const { data: existingSession } = await supabaseAdmin
           .from("whatsapp_sessions")
           .select("id, status")
@@ -159,12 +159,14 @@ Deno.serve(async (req) => {
             .eq("company_id", companyId);
         }
 
-        // Notify WhatsApp server (blocking up to ~5s). This avoids "fire-and-forget" being
-        // cancelled by the runtime, which could leave the UI stuck in "connecting" forever.
-        const notifyServer = async (): Promise<boolean> => {
+        // IMMEDIATE RESPONSE: Return "CONNECTING" status right away
+        // The QR code will be fetched via separate /whatsapp-qr endpoint
+        
+        // Notify WhatsApp server in background (non-blocking)
+        const notifyServerInBackground = async () => {
           try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
             console.log("Chamando servidor WhatsApp:", whatsappServerUrl + "/connect");
             const response = await fetch(whatsappServerUrl + "/connect", {
@@ -184,12 +186,9 @@ Deno.serve(async (req) => {
                 .from("whatsapp_sessions")
                 .update({ status: "error" })
                 .eq("company_id", companyId);
-
-              return false;
+            } else {
+              console.log("Servidor WhatsApp respondeu com sucesso");
             }
-
-            console.log("Servidor WhatsApp respondeu com sucesso");
-            return true;
           } catch (e) {
             console.error("Erro ao conectar ao servidor WhatsApp:", e);
 
@@ -197,20 +196,18 @@ Deno.serve(async (req) => {
               .from("whatsapp_sessions")
               .update({ status: "error" })
               .eq("company_id", companyId);
-
-            return false;
           }
         };
 
-        const serverOk = await notifyServer();
+        // Fire in background - don't wait
+        runInBackground(notifyServerInBackground());
 
+        // Return immediately with CONNECTING status
         return new Response(
           JSON.stringify({
             success: true,
-            server_ok: serverOk,
-            message: serverOk
-              ? "Conexão iniciada. Aguarde o QR Code."
-              : "Não foi possível contatar o servidor do WhatsApp.",
+            status: "CONNECTING",
+            message: "Conexão iniciada. Use GET /whatsapp-qr para buscar o QR Code.",
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
