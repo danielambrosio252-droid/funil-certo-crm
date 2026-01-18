@@ -94,10 +94,22 @@ export function WhatsAppChat() {
   // Load messages when contact changes
   useEffect(() => {
     if (selectedContact) {
-      fetchMessages(selectedContact.id).then(setMessages);
+      // Limpar mensagens ao trocar de contato para evitar flash de mensagens antigas
+      setMessages([]);
+      setPendingMessage(null);
+      pendingContentRef.current = null;
+      
+      fetchMessages(selectedContact.id).then((msgs) => {
+        console.log(`[WhatsApp] Carregadas ${msgs.length} mensagens para contato ${selectedContact.id}`);
+        // Log para debug
+        const fromMe = msgs.filter(m => m.is_from_me).length;
+        const received = msgs.filter(m => !m.is_from_me).length;
+        console.log(`[WhatsApp] Enviadas: ${fromMe}, Recebidas: ${received}`);
+        setMessages(msgs);
+      });
       markAsRead(selectedContact.id);
     }
-  }, [selectedContact, fetchMessages, markAsRead]);
+  }, [selectedContact?.id, fetchMessages, markAsRead]);
 
   // Rastrear o conteúdo da mensagem pendente para reconciliação
   const pendingContentRef = useRef<string | null>(null);
@@ -607,6 +619,14 @@ export function WhatsAppChat() {
             {/* Messages */}
             <ScrollArea className="flex-1 p-4">
               <div className="space-y-3 max-w-3xl mx-auto">
+                {/* Debug: Total de mensagens */}
+                {messages.length > 0 && (
+                  <div className="text-center mb-4">
+                    <span className="text-xs text-muted-foreground bg-slate-100 px-3 py-1 rounded-full">
+                      {messages.length} mensagens carregadas
+                    </span>
+                  </div>
+                )}
                 <AnimatePresence mode="popLayout">
                   {messages.map((msg) => (
                     <motion.div
@@ -614,12 +634,12 @@ export function WhatsAppChat() {
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0 }}
-                      className={cn("flex", msg.is_from_me ? "justify-end" : "justify-start")}
+                      className={cn("flex", msg.is_from_me === true ? "justify-end" : "justify-start")}
                     >
                       <div
                         className={cn(
                           "max-w-[75%] rounded-2xl px-4 py-2.5 shadow-sm",
-                          msg.is_from_me
+                          msg.is_from_me === true
                             ? "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-br-md"
                             : "bg-white text-foreground rounded-bl-md border border-slate-200",
                           msg.status === "failed" && "ring-2 ring-red-300"
@@ -629,20 +649,20 @@ export function WhatsAppChat() {
                         <div
                           className={cn(
                             "flex items-center gap-1 mt-1",
-                            msg.is_from_me ? "justify-end" : "justify-start"
+                            msg.is_from_me === true ? "justify-end" : "justify-start"
                           )}
                         >
                           <span
                             className={cn(
                               "text-[10px]",
-                              msg.is_from_me
+                              msg.is_from_me === true
                                 ? "text-white/70"
                                 : "text-muted-foreground"
                             )}
                           >
                             {formatTime(msg.sent_at)}
                           </span>
-                          {msg.is_from_me && getStatusIcon(msg.status)}
+                          {msg.is_from_me === true && getStatusIcon(msg.status)}
                         </div>
                       </div>
                     </motion.div>

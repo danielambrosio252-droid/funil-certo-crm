@@ -108,20 +108,32 @@ export function useWhatsApp() {
     if (!profile?.company_id) return [];
 
     try {
-      const { data, error } = await supabase
+      console.log(`[useWhatsApp] Buscando mensagens para contactId: ${contactId}`);
+      
+      const { data, error, count } = await supabase
         .from("whatsapp_messages")
-        .select("*")
+        .select("*", { count: "exact" })
         .eq("contact_id", contactId)
-        .order("sent_at", { ascending: true });
+        .order("sent_at", { ascending: true })
+        .limit(500); // Limite explícito para evitar problemas
 
       if (error) {
-        console.error("Erro ao buscar mensagens:", error);
+        console.error("[useWhatsApp] Erro ao buscar mensagens:", error);
         return [];
       }
 
-      return data as WhatsAppMessage[];
+      console.log(`[useWhatsApp] Retornadas ${data?.length || 0} mensagens (total no banco: ${count})`);
+      
+      if (data && data.length > 0) {
+        // Log para debug - mostrar distribuição de mensagens
+        const fromMe = data.filter((m: any) => m.is_from_me === true).length;
+        const received = data.filter((m: any) => m.is_from_me === false).length;
+        console.log(`[useWhatsApp] Distribuição - Enviadas: ${fromMe}, Recebidas: ${received}`);
+      }
+
+      return (data || []) as WhatsAppMessage[];
     } catch (err) {
-      console.error("Erro ao buscar mensagens:", err);
+      console.error("[useWhatsApp] Erro ao buscar mensagens:", err);
       return [];
     }
   }, [profile?.company_id]);
