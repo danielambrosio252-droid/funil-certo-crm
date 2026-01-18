@@ -72,6 +72,12 @@ export function WhatsAppChat() {
   const [newPhoneNumber, setNewPhoneNumber] = useState("");
   const [newContactName, setNewContactName] = useState("");
   const [creatingConversation, setCreatingConversation] = useState(false);
+  
+  // Mensagem pendente exibida separadamente (NÃO no array messages)
+  const [pendingMessage, setPendingMessage] = useState<{
+    content: string;
+    timestamp: string;
+  } | null>(null);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -86,8 +92,8 @@ export function WhatsAppChat() {
     }
   }, [selectedContact, fetchMessages, markAsRead]);
 
-  // Track pending message IDs to avoid duplicates from realtime
-  const pendingMessageIds = useRef<Set<string>>(new Set());
+  // Rastrear o conteúdo da mensagem pendente para reconciliação
+  const pendingContentRef = useRef<string | null>(null);
 
   // Notification sound
   const playNotificationSound = useCallback(() => {
@@ -130,11 +136,10 @@ export function WhatsAppChat() {
         (payload) => {
           const newMessage = payload.new as Message;
           
-          // Se esta mensagem está pendente (enviada por nós), ignorar INSERT
-          // pois já foi adicionada via optimistic update
-          if (pendingMessageIds.current.has(newMessage.id)) {
-            pendingMessageIds.current.delete(newMessage.id);
-            return;
+          // Se a mensagem é nossa e bate com a pendente, limpar pendente
+          if (newMessage.is_from_me && pendingContentRef.current === newMessage.content) {
+            pendingContentRef.current = null;
+            setPendingMessage(null);
           }
           
           // Play sound for incoming messages (not from me)
@@ -145,22 +150,6 @@ export function WhatsAppChat() {
           setMessages((prev) => {
             // Evitar duplicatas por ID
             if (prev.some((m) => m.id === newMessage.id)) return prev;
-            // Evitar duplicatas por conteúdo + timestamp (para mensagens temporárias)
-            const isDuplicate = prev.some(
-              (m) => m.id.startsWith("temp-") && 
-                     m.content === newMessage.content && 
-                     m.is_from_me === newMessage.is_from_me
-            );
-            if (isDuplicate) {
-              // Substituir a mensagem temporária pela real
-              return prev.map((m) => 
-                m.id.startsWith("temp-") && 
-                m.content === newMessage.content && 
-                m.is_from_me === newMessage.is_from_me
-                  ? newMessage
-                  : m
-              );
-            }
             return [...prev, newMessage];
           });
         }
@@ -198,44 +187,23 @@ export function WhatsAppChat() {
     setMessageInput("");
     setSending(true);
 
-    // Optimistic update
-    const tempId = `temp-${Date.now()}`;
-    const optimisticMessage: Message = {
-      id: tempId,
-      contact_id: selectedContact.id,
+    // Definir mensagem pendente (exibida separadamente, fora do array)
+    pendingContentRef.current = content;
+    setPendingMessage({
       content,
-      message_type: "text",
-      media_url: null,
-      is_from_me: true,
-      status: "pending",
-      sent_at: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, optimisticMessage]);
+      timestamp: new Date().toISOString(),
+    });
 
     try {
       const messageId = await sendMessage(selectedContact.id, content);
 
-      if (messageId && typeof messageId === "string") {
-        // Registrar ID para evitar duplicata do realtime
-        pendingMessageIds.current.add(messageId);
-
-        // Update with real ID
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === tempId ? { ...m, id: messageId, status: "sent" } : m
-          )
-        );
-
-        // Limpar após 5 segundos (caso o realtime já tenha passado)
-        setTimeout(() => {
-          pendingMessageIds.current.delete(messageId);
-        }, 5000);
-      } else {
-        // Mark as failed
-        setMessages((prev) =>
-          prev.map((m) => (m.id === tempId ? { ...m, status: "failed" } : m))
-        );
+      if (!messageId || typeof messageId !== "string") {
+        // Falhou - limpar pendente e mostrar erro
+        pendingContentRef.current = null;
+        setPendingMessage(null);
+        toast.error("Erro ao enviar mensagem");
       }
+      // Se sucesso, o realtime INSERT vai adicionar a mensagem e limpar a pendente
     } finally {
       setSending(false);
       sendLockRef.current = false;
@@ -632,20 +600,23 @@ export function WhatsAppChat() {
                   ))}
                 </AnimatePresence>
                 
-                {/* Typing indicator */}
+                {/* Mensagem pendente (exibida separadamente enquanto envia) */}
                 <AnimatePresence>
-                  {sending && (
+                  {pendingMessage && (
                     <motion.div
+                      key="pending-message"
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 10 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
                       className="flex justify-end"
                     >
-                      <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-2xl rounded-br-md px-4 py-3 shadow-sm">
-                        <div className="flex items-center gap-1">
-                          <span className="w-2 h-2 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                          <span className="w-2 h-2 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                          <span className="w-2 h-2 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                      <div className="max-w-[75%] rounded-2xl px-4 py-2.5 shadow-sm bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-br-md opacity-80">
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed">{pendingMessage.content}</p>
+                        <div className="flex items-center gap-1 mt-1 justify-end">
+                          <span className="text-[10px] text-white/70">
+                            {formatTime(pendingMessage.timestamp)}
+                          </span>
+                          <Clock className="w-3 h-3 text-white/60" />
                         </div>
                       </div>
                     </motion.div>
