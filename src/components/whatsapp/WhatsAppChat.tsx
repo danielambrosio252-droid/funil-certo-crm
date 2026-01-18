@@ -209,8 +209,9 @@ export function WhatsAppChat() {
 
   const isConnected = session?.status === "connected";
 
-  // Not connected state
-  if (!loading && !isConnected) {
+  // Not connected state - ALWAYS show this immediately, don't wait for loading
+  // This ensures users can always take action
+  if (!isConnected) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-200px)] bg-card border border-border rounded-xl p-8">
         <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mb-6">
@@ -229,6 +230,12 @@ export function WhatsAppChat() {
           <Wifi className="w-4 h-4 mr-2" />
           Conectar WhatsApp
         </Button>
+        {loading && (
+          <p className="text-xs text-muted-foreground mt-4 flex items-center gap-2">
+            <span className="w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+            Sincronizando...
+          </p>
+        )}
       </div>
     );
   }

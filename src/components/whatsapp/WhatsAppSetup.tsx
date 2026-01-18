@@ -19,7 +19,8 @@ import {
 import { useWhatsApp } from "@/hooks/useWhatsApp";
 import { useToast } from "@/hooks/use-toast";
 
-type ConnectionStatus = "disconnected" | "connecting" | "qr_code" | "connected" | "error";
+// State machine: UI always shows actions, never blocks
+type UIState = "disconnected" | "connecting" | "qr_code" | "connected" | "error";
 
 interface StatusConfig {
   icon: React.ReactNode;
@@ -29,7 +30,7 @@ interface StatusConfig {
   description: string;
 }
 
-const getStatusConfig = (status: ConnectionStatus): StatusConfig => {
+const getStatusConfig = (status: UIState): StatusConfig => {
   switch (status) {
     case "connected":
       return {
@@ -61,7 +62,7 @@ const getStatusConfig = (status: ConnectionStatus): StatusConfig => {
         color: "text-red-600",
         bgColor: "bg-red-50 border-red-200",
         label: "Erro",
-        description: "Falha na conexão"
+        description: "Falha na conexão. Tente novamente."
       };
     default:
       return {
@@ -75,60 +76,88 @@ const getStatusConfig = (status: ConnectionStatus): StatusConfig => {
 };
 
 export function WhatsAppSetup() {
-  const { session, loading, connect, disconnect, refetch } = useWhatsApp();
+  const { session, connect, disconnect, refetch, initializing } = useWhatsApp();
   const { toast } = useToast();
-  const [connecting, setConnecting] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const status: ConnectionStatus = (session?.status as ConnectionStatus) || "disconnected";
-  const statusConfig = getStatusConfig(status);
+  // Derive UI state from session, with explicit fallback to "disconnected"
+  const deriveUIState = (): UIState => {
+    if (!session) return "disconnected";
+    const status = session.status;
+    if (status === "connected") return "connected";
+    if (status === "connecting") return "connecting";
+    if (status === "qr_code") return "qr_code";
+    if (status === "error") return "error";
+    return "disconnected";
+  };
+
+  const uiState = deriveUIState();
+  const statusConfig = getStatusConfig(uiState);
 
   // Auto-open QR modal when QR code is available
   useEffect(() => {
-    if (status === "qr_code" && session?.qr_code) {
+    if (uiState === "qr_code" && session?.qr_code) {
       setShowQrModal(true);
+      setActionLoading(false);
     }
-  }, [status, session?.qr_code]);
+  }, [uiState, session?.qr_code]);
 
   // Auto-close modal when connected
   useEffect(() => {
-    if (status === "connected") {
+    if (uiState === "connected") {
       setShowQrModal(false);
-      setConnecting(false);
+      setActionLoading(false);
       toast({
         title: "WhatsApp Conectado!",
         description: "Seu WhatsApp foi conectado com sucesso.",
       });
     }
-  }, [status, toast]);
+  }, [uiState, toast]);
+
+  // Handle error state
+  useEffect(() => {
+    if (uiState === "error") {
+      setActionLoading(false);
+    }
+  }, [uiState]);
 
   const handleConnect = async () => {
-    setConnecting(true);
+    setActionLoading(true);
+    setShowQrModal(true); // Open modal immediately (shows "Gerando QR Code...")
+    
     try {
       const success = await connect();
-      if (success) {
-        setShowQrModal(true);
-      } else {
-        setConnecting(false);
+      if (!success) {
+        setActionLoading(false);
+        toast({
+          title: "Erro ao conectar",
+          description: "Não foi possível iniciar a conexão. Tente novamente.",
+          variant: "destructive",
+        });
       }
+      // If success, realtime will update status to qr_code/connected
     } catch {
-      setConnecting(false);
+      setActionLoading(false);
       toast({
         title: "Erro ao conectar",
-        description: "Não foi possível iniciar a conexão. Tente novamente.",
+        description: "Servidor indisponível. Verifique a configuração.",
         variant: "destructive",
       });
     }
   };
 
   const handleDisconnect = async () => {
+    setActionLoading(true);
     try {
       await disconnect();
+      setActionLoading(false);
       toast({
         title: "WhatsApp Desconectado",
         description: "Sua sessão foi encerrada com sucesso.",
       });
     } catch {
+      setActionLoading(false);
       toast({
         title: "Erro",
         description: "Não foi possível desconectar.",
@@ -141,22 +170,14 @@ export function WhatsAppSetup() {
     await handleDisconnect();
     setTimeout(() => {
       handleConnect();
-    }, 1000);
+    }, 500);
   };
 
-  if (loading) {
-    return (
-      <Card className="border-0 shadow-lg">
-        <CardContent className="flex items-center justify-center py-16">
-          <div className="flex flex-col items-center gap-4">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p className="text-muted-foreground">Carregando...</p>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+  const handleRetry = () => {
+    handleConnect();
+  };
 
+  // NEVER block with full-screen loading - always show actionable UI
   return (
     <>
       <Card className="border-0 shadow-lg overflow-hidden">
@@ -174,12 +195,20 @@ export function WhatsAppSetup() {
         </div>
 
         <CardContent className="p-6 space-y-6">
-          {/* Status Card */}
+          {/* Syncing indicator (subtle, non-blocking) */}
+          {initializing && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              <span>Sincronizando...</span>
+            </div>
+          )}
+
+          {/* Status Card - ALWAYS visible */}
           <motion.div 
             className={`flex items-center gap-4 p-4 rounded-xl border-2 ${statusConfig.bgColor}`}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            key={status}
+            key={uiState}
           >
             <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${statusConfig.color} bg-white shadow-sm`}>
               {statusConfig.icon}
@@ -187,7 +216,7 @@ export function WhatsAppSetup() {
             <div className="flex-1">
               <div className="flex items-center gap-2">
                 <span className={`font-semibold ${statusConfig.color}`}>{statusConfig.label}</span>
-                {status === "connected" && session?.phone_number && (
+                {uiState === "connected" && session?.phone_number && (
                   <Badge variant="secondary" className="font-mono text-xs">
                     {session.phone_number}
                   </Badge>
@@ -196,64 +225,88 @@ export function WhatsAppSetup() {
               <p className="text-sm text-muted-foreground">{statusConfig.description}</p>
             </div>
             
-            {/* Refresh button */}
+            {/* Refresh button - always visible */}
             <Button 
               variant="ghost" 
               size="icon" 
               onClick={() => refetch()} 
               className="shrink-0"
+              disabled={actionLoading}
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className={`w-4 h-4 ${initializing ? 'animate-spin' : ''}`} />
             </Button>
           </motion.div>
 
-          {/* Action Buttons */}
+          {/* Action Buttons - ALWAYS visible based on state */}
           <div className="flex gap-3">
-            {status === "connected" ? (
+            {uiState === "connected" ? (
               <>
                 <Button
                   variant="outline"
                   className="flex-1"
                   onClick={handleReconnect}
+                  disabled={actionLoading}
                 >
-                  <RefreshCw className="w-4 h-4 mr-2" />
+                  {actionLoading ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                  )}
                   Reconectar
                 </Button>
                 <Button
                   variant="destructive"
                   className="flex-1"
                   onClick={handleDisconnect}
+                  disabled={actionLoading}
                 >
                   <WifiOff className="w-4 h-4 mr-2" />
                   Desconectar
                 </Button>
               </>
-            ) : status === "connecting" || status === "qr_code" ? (
-              <Button
-                className="w-full"
-                variant="outline"
-                onClick={() => setShowQrModal(true)}
-                disabled={status === "connecting"}
-              >
-                {status === "connecting" ? (
-                  <>
+            ) : uiState === "error" ? (
+              <>
+                <Button
+                  className="flex-1 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-lg"
+                  onClick={handleRetry}
+                  disabled={actionLoading}
+                >
+                  {actionLoading ? (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Preparando conexão...
-                  </>
-                ) : (
-                  <>
-                    <QrCode className="w-4 h-4 mr-2" />
-                    Abrir QR Code
-                  </>
-                )}
-              </Button>
+                  ) : (
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                  )}
+                  Tentar Novamente
+                </Button>
+              </>
+            ) : uiState === "connecting" || uiState === "qr_code" ? (
+              <>
+                <Button
+                  className="flex-1"
+                  variant="outline"
+                  onClick={() => setShowQrModal(true)}
+                >
+                  <QrCode className="w-4 h-4 mr-2" />
+                  {uiState === "qr_code" ? "Ver QR Code" : "Aguardando QR..."}
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setShowQrModal(false);
+                    setActionLoading(false);
+                  }}
+                >
+                  Cancelar
+                </Button>
+              </>
             ) : (
+              // DISCONNECTED - main action
               <Button
                 className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-lg"
                 onClick={handleConnect}
-                disabled={connecting}
+                disabled={actionLoading}
               >
-                {connecting ? (
+                {actionLoading ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     Conectando...
@@ -269,7 +322,7 @@ export function WhatsAppSetup() {
           </div>
 
           {/* Features info */}
-          {status === "connected" && (
+          {uiState === "connected" && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
@@ -319,7 +372,7 @@ export function WhatsAppSetup() {
 
           <div className="flex flex-col items-center py-6">
             <AnimatePresence mode="wait">
-              {status === "connecting" || !session?.qr_code ? (
+              {!session?.qr_code ? (
                 <motion.div
                   key="loading"
                   initial={{ opacity: 0 }}
@@ -329,6 +382,7 @@ export function WhatsAppSetup() {
                 >
                   <Loader2 className="w-10 h-10 animate-spin text-emerald-500" />
                   <p className="text-sm text-muted-foreground">Gerando QR Code...</p>
+                  <p className="text-xs text-muted-foreground">Isso pode levar alguns segundos</p>
                 </motion.div>
               ) : (
                 <motion.div
