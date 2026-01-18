@@ -87,6 +87,7 @@ export type Database = {
           is_group: boolean
           last_message_at: string | null
           name: string | null
+          normalized_phone: string | null
           phone: string
           profile_picture: string | null
           unread_count: number
@@ -99,6 +100,7 @@ export type Database = {
           is_group?: boolean
           last_message_at?: string | null
           name?: string | null
+          normalized_phone?: string | null
           phone: string
           profile_picture?: string | null
           unread_count?: number
@@ -111,6 +113,7 @@ export type Database = {
           is_group?: boolean
           last_message_at?: string | null
           name?: string | null
+          normalized_phone?: string | null
           phone?: string
           profile_picture?: string | null
           unread_count?: number
@@ -241,6 +244,7 @@ export type Database = {
         Returns: undefined
       }
       is_admin_or_owner: { Args: { user_uuid: string }; Returns: boolean }
+      normalize_whatsapp_phone: { Args: { input: string }; Returns: string }
     }
     Enums: {
       [_ in never]: never
