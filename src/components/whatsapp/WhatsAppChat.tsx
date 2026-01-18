@@ -85,12 +85,15 @@ export function WhatsAppChat() {
     }
   }, [selectedContact, fetchMessages, markAsRead]);
 
+  // Track pending message IDs to avoid duplicates from realtime
+  const pendingMessageIds = useRef<Set<string>>(new Set());
+
   // Subscribe to realtime messages
   useEffect(() => {
     if (!selectedContact || !profile?.company_id) return;
 
     const channel = supabase
-      .channel("whatsapp_messages_realtime")
+      .channel(`whatsapp_messages_${selectedContact.id}`)
       .on(
         "postgres_changes",
         {
@@ -101,9 +104,33 @@ export function WhatsAppChat() {
         },
         (payload) => {
           const newMessage = payload.new as Message;
+          
+          // Se esta mensagem está pendente (enviada por nós), ignorar INSERT
+          // pois já foi adicionada via optimistic update
+          if (pendingMessageIds.current.has(newMessage.id)) {
+            pendingMessageIds.current.delete(newMessage.id);
+            return;
+          }
+          
           setMessages((prev) => {
-            // Evitar duplicatas
+            // Evitar duplicatas por ID
             if (prev.some((m) => m.id === newMessage.id)) return prev;
+            // Evitar duplicatas por conteúdo + timestamp (para mensagens temporárias)
+            const isDuplicate = prev.some(
+              (m) => m.id.startsWith("temp-") && 
+                     m.content === newMessage.content && 
+                     m.is_from_me === newMessage.is_from_me
+            );
+            if (isDuplicate) {
+              // Substituir a mensagem temporária pela real
+              return prev.map((m) => 
+                m.id.startsWith("temp-") && 
+                m.content === newMessage.content && 
+                m.is_from_me === newMessage.is_from_me
+                  ? newMessage
+                  : m
+              );
+            }
             return [...prev, newMessage];
           });
         }
@@ -154,13 +181,21 @@ export function WhatsAppChat() {
     const messageId = await sendMessage(selectedContact.id, content);
     setSending(false);
 
-    if (messageId) {
+    if (messageId && typeof messageId === "string") {
+      // Registrar ID para evitar duplicata do realtime
+      pendingMessageIds.current.add(messageId);
+      
       // Update with real ID
       setMessages((prev) =>
         prev.map((m) =>
           m.id === tempId ? { ...m, id: messageId, status: "sent" } : m
         )
       );
+      
+      // Limpar após 5 segundos (caso o realtime já tenha passado)
+      setTimeout(() => {
+        pendingMessageIds.current.delete(messageId);
+      }, 5000);
     } else {
       // Mark as failed
       setMessages((prev) =>
