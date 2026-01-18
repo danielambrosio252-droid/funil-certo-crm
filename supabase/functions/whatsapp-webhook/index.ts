@@ -6,7 +6,7 @@ const corsHeaders = {
 };
 
 interface WebhookPayload {
-  type: "qr_code" | "connected" | "disconnected" | "message_received" | "message_sent" | "message_status";
+  type: "qr_code" | "connected" | "disconnected" | "message_received" | "message_sent" | "message_status" | "presence_update";
   company_id: string;
   data: Record<string, unknown>;
 }
@@ -190,6 +190,37 @@ Deno.serve(async (req) => {
           console.error("Erro ao atualizar status:", error);
         }
         console.log("Status da mensagem atualizado:", messageId, status);
+        break;
+      }
+
+      case "presence_update": {
+        // Digitando/gravando - broadcast via realtime
+        const phone = data.phone as string;
+        const presence = data.presence as string; // 'composing' | 'recording'
+        
+        // Buscar contato pelo telefone
+        const { data: contact } = await supabase
+          .from("whatsapp_contacts")
+          .select("id")
+          .eq("company_id", company_id)
+          .eq("phone", phone)
+          .single();
+        
+        if (contact) {
+          // Broadcast via Realtime (efêmero, não persiste)
+          const channel = supabase.channel(`typing:${company_id}`);
+          await channel.send({
+            type: "broadcast",
+            event: "typing",
+            payload: {
+              contact_id: contact.id,
+              phone,
+              presence, // 'composing' ou 'recording'
+              timestamp: new Date().toISOString(),
+            },
+          });
+          console.log("Presença broadcast:", phone, presence);
+        }
         break;
       }
 

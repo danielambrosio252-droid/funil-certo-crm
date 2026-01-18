@@ -78,6 +78,13 @@ export function WhatsAppChat() {
     content: string;
     timestamp: string;
   } | null>(null);
+  
+  // Estado para indicador de "digitando..."
+  const [contactTyping, setContactTyping] = useState<{
+    contactId: string;
+    presence: "composing" | "recording";
+  } | null>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -175,6 +182,42 @@ export function WhatsAppChat() {
       supabase.removeChannel(channel);
     };
   }, [selectedContact?.id, profile?.company_id, playNotificationSound]);
+
+  // Subscribe to typing indicators via broadcast
+  useEffect(() => {
+    if (!profile?.company_id) return;
+
+    const typingChannel = supabase
+      .channel(`typing:${profile.company_id}`)
+      .on("broadcast", { event: "typing" }, (payload) => {
+        const { contact_id, presence } = payload.payload as {
+          contact_id: string;
+          phone: string;
+          presence: "composing" | "recording";
+        };
+
+        // Só mostrar se for do contato selecionado
+        if (selectedContact?.id === contact_id) {
+          setContactTyping({ contactId: contact_id, presence });
+
+          // Limpar após 3 segundos sem nova atualização
+          if (typingTimeoutRef.current) {
+            clearTimeout(typingTimeoutRef.current);
+          }
+          typingTimeoutRef.current = setTimeout(() => {
+            setContactTyping(null);
+          }, 3000);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(typingChannel);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    };
+  }, [profile?.company_id, selectedContact?.id]);
 
   const handleSend = async () => {
     if (!messageInput.trim() || !selectedContact) return;
@@ -542,7 +585,13 @@ export function WhatsAppChat() {
                   <p className="font-semibold text-foreground">
                     {selectedContact.name || selectedContact.phone}
                   </p>
-                  <p className="text-xs text-muted-foreground">{selectedContact.phone}</p>
+                  {contactTyping?.contactId === selectedContact.id ? (
+                    <p className="text-xs text-emerald-600 font-medium animate-pulse">
+                      {contactTyping.presence === "recording" ? "Gravando áudio..." : "Digitando..."}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">{selectedContact.phone}</p>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1">
@@ -617,6 +666,27 @@ export function WhatsAppChat() {
                             {formatTime(pendingMessage.timestamp)}
                           </span>
                           <Clock className="w-3 h-3 text-white/60" />
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                
+                {/* Indicador de digitando (contato) */}
+                <AnimatePresence>
+                  {contactTyping?.contactId === selectedContact?.id && (
+                    <motion.div
+                      key="typing-indicator"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="flex justify-start"
+                    >
+                      <div className="bg-white rounded-2xl rounded-bl-md px-4 py-3 shadow-sm border border-slate-200">
+                        <div className="flex items-center gap-1">
+                          <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                          <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                          <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                         </div>
                       </div>
                     </motion.div>
