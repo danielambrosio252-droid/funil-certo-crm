@@ -14,7 +14,222 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      companies: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          company_id: string | null
+          created_at: string
+          email: string | null
+          full_name: string | null
+          id: string
+          role: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          company_id?: string | null
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          role?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string | null
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          role?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profiles_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whatsapp_contacts: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          is_group: boolean
+          last_message_at: string | null
+          name: string | null
+          phone: string
+          profile_picture: string | null
+          unread_count: number
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          is_group?: boolean
+          last_message_at?: string | null
+          name?: string | null
+          phone: string
+          profile_picture?: string | null
+          unread_count?: number
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          is_group?: boolean
+          last_message_at?: string | null
+          name?: string | null
+          phone?: string
+          profile_picture?: string | null
+          unread_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_contacts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whatsapp_messages: {
+        Row: {
+          company_id: string
+          contact_id: string
+          content: string
+          created_at: string
+          id: string
+          is_from_me: boolean
+          media_url: string | null
+          message_id: string | null
+          message_type: string
+          sent_at: string
+          status: string
+        }
+        Insert: {
+          company_id: string
+          contact_id: string
+          content: string
+          created_at?: string
+          id?: string
+          is_from_me?: boolean
+          media_url?: string | null
+          message_id?: string | null
+          message_type?: string
+          sent_at?: string
+          status?: string
+        }
+        Update: {
+          company_id?: string
+          contact_id?: string
+          content?: string
+          created_at?: string
+          id?: string
+          is_from_me?: boolean
+          media_url?: string | null
+          message_id?: string | null
+          message_type?: string
+          sent_at?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_messages_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_messages_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whatsapp_sessions: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          last_connected_at: string | null
+          phone_number: string | null
+          qr_code: string | null
+          session_data: Json | null
+          status: string
+          updated_at: string
+          webhook_url: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          last_connected_at?: string | null
+          phone_number?: string | null
+          qr_code?: string | null
+          session_data?: Json | null
+          status?: string
+          updated_at?: string
+          webhook_url?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          last_connected_at?: string | null
+          phone_number?: string | null
+          qr_code?: string | null
+          session_data?: Json | null
+          status?: string
+          updated_at?: string
+          webhook_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_sessions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
