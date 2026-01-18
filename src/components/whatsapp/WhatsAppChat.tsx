@@ -66,6 +66,7 @@ export function WhatsAppChat() {
   const [messageInput, setMessageInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [sending, setSending] = useState(false);
+  const sendLockRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [newConversationOpen, setNewConversationOpen] = useState(false);
   const [newPhoneNumber, setNewPhoneNumber] = useState("");
@@ -187,7 +188,11 @@ export function WhatsAppChat() {
   }, [selectedContact?.id, profile?.company_id, playNotificationSound]);
 
   const handleSend = async () => {
-    if (!messageInput.trim() || !selectedContact || sending) return;
+    if (!messageInput.trim() || !selectedContact) return;
+
+    // Trava síncrona para evitar disparos múltiplos (clique duplo / Enter repetido)
+    if (sendLockRef.current) return;
+    sendLockRef.current = true;
 
     const content = messageInput.trim();
     setMessageInput("");
@@ -207,37 +212,40 @@ export function WhatsAppChat() {
     };
     setMessages((prev) => [...prev, optimisticMessage]);
 
-    const messageId = await sendMessage(selectedContact.id, content);
-    setSending(false);
+    try {
+      const messageId = await sendMessage(selectedContact.id, content);
 
-    if (messageId && typeof messageId === "string") {
-      // Registrar ID para evitar duplicata do realtime
-      pendingMessageIds.current.add(messageId);
-      
-      // Update with real ID
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === tempId ? { ...m, id: messageId, status: "sent" } : m
-        )
-      );
-      
-      // Limpar após 5 segundos (caso o realtime já tenha passado)
-      setTimeout(() => {
-        pendingMessageIds.current.delete(messageId);
-      }, 5000);
-    } else {
-      // Mark as failed
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === tempId ? { ...m, status: "failed" } : m
-        )
-      );
+      if (messageId && typeof messageId === "string") {
+        // Registrar ID para evitar duplicata do realtime
+        pendingMessageIds.current.add(messageId);
+
+        // Update with real ID
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempId ? { ...m, id: messageId, status: "sent" } : m
+          )
+        );
+
+        // Limpar após 5 segundos (caso o realtime já tenha passado)
+        setTimeout(() => {
+          pendingMessageIds.current.delete(messageId);
+        }, 5000);
+      } else {
+        // Mark as failed
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, status: "failed" } : m))
+        );
+      }
+    } finally {
+      setSending(false);
+      sendLockRef.current = false;
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      if ((e as any).repeat) return;
       handleSend();
     }
   };
@@ -661,7 +669,7 @@ export function WhatsAppChat() {
                   placeholder="Digite uma mensagem..."
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
-                  onKeyPress={handleKeyPress}
+                  onKeyDown={handleKeyDown}
                   className="flex-1 rounded-full bg-slate-100 border-0 focus-visible:ring-emerald-500"
                   disabled={sending}
                 />
