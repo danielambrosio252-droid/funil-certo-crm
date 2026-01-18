@@ -235,10 +235,12 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_user_company_id: { Args: { user_uuid: string }; Returns: string }
       increment_unread_count: {
         Args: { contact_uuid: string }
         Returns: undefined
       }
+      is_admin_or_owner: { Args: { user_uuid: string }; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
