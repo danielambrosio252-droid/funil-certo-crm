@@ -1,5 +1,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// Provided by the Edge Runtime (Supabase)
+declare const EdgeRuntime:
+  | {
+      waitUntil: (promise: Promise<unknown>) => void;
+    }
+  | undefined;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -8,6 +15,19 @@ const corsHeaders = {
 interface SessionPayload {
   action: "connect" | "disconnect" | "status";
 }
+
+const runInBackground = (promise: Promise<unknown>) => {
+  try {
+    if (EdgeRuntime?.waitUntil) {
+      EdgeRuntime.waitUntil(promise);
+      return;
+    }
+  } catch {
+    // ignore
+  }
+
+  promise.catch((e) => console.error("Background task failed:", e));
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -188,7 +208,7 @@ Deno.serve(async (req) => {
         };
 
         // Fire and don't await - user gets response immediately
-        notifyServer();
+        runInBackground(notifyServer());
 
         return responsePromise;
       }
@@ -226,7 +246,7 @@ Deno.serve(async (req) => {
             }
           };
 
-          notifyDisconnect();
+          runInBackground(notifyDisconnect());
         }
 
         return response;
