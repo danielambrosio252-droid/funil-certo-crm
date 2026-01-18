@@ -198,7 +198,10 @@ Deno.serve(async (req) => {
             );
           }
 
+          // DISCONNECTED from server during initialization should be treated as WAITING
+          // because the session might still be starting up
           if (serverData?.status === "DISCONNECTED") {
+            console.log("[QR] Server returned DISCONNECTED - treating as WAITING (session may be initializing)");
             return new Response(
               JSON.stringify({ status: "WAITING" }),
               { headers: { ...corsHeaders, "Content-Type": "application/json" } }

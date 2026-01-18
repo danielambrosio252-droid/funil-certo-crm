@@ -61,7 +61,7 @@ const getStatusConfig = (status: UIState): StatusConfig => {
         color: "text-blue-600",
         bgColor: "bg-blue-50 border-blue-200",
         label: "Gerando QR",
-        description: "Aguarde: isso pode levar até 30 segundos",
+        description: "Aguarde: isso pode levar até 45 segundos",
       };
     case "QR_READY":
       return {
@@ -169,9 +169,9 @@ export function WhatsAppSetup() {
     setQrCode(null);
     setErrorMessage("");
 
-    // Countdown (30s -> 0)
-    deadlineRef.current = Date.now() + 30_000;
-    setSecondsLeft(30);
+    // Countdown (45s -> 0) - increased from 30s for better server initialization tolerance
+    deadlineRef.current = Date.now() + 45_000;
+    setSecondsLeft(45);
     countdownRef.current = setInterval(() => {
       if (!deadlineRef.current) return;
       const remainingMs = deadlineRef.current - Date.now();
@@ -179,7 +179,7 @@ export function WhatsAppSetup() {
       setSecondsLeft(remainingSec);
     }, 250);
 
-    // HARD TIMEOUT (30s): never allow infinite loading
+    // HARD TIMEOUT (45s): never allow infinite loading
     timeoutRef.current = setTimeout(() => {
       stopPolling();
       timeoutRef.current = null;
@@ -188,7 +188,7 @@ export function WhatsAppSetup() {
       setErrorMessage("Não foi possível gerar o QR Code no tempo esperado.");
       setActionLoading(false);
       stopCountdown();
-    }, 30_000);
+    }, 45_000);
 
     pollingRef.current = setInterval(async () => {
       const result = await fetchQrCode();
