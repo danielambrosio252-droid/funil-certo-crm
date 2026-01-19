@@ -495,32 +495,32 @@ class SessionManager {
     this.pendingConnections.delete(companyId);
     this.qrStore.delete(companyId);
     this.errorStore.delete(companyId);
-    logger.info(`[${companyId}] 🧹 Estado limpo`);
+    appLogger.info(`[${companyId}] 🧹 Estado limpo`);
   }
 
   _setError(companyId, reason) {
     this.errorStore.set(companyId, { reason, timestamp: new Date() });
     this._cleanupCompanyState(companyId);
     this.errorStore.set(companyId, { reason, timestamp: new Date() });
-    logger.warn(`[${companyId}] ❌ Erro registrado: ${reason}`);
+    appLogger.warn(`[${companyId}] ❌ Erro registrado: ${reason}`);
   }
 
   async createSession(companyId) {
-    logger.info(`[${companyId}] 🚀 Iniciando createSession...`);
+    appLogger.info(`[${companyId}] 🚀 Iniciando createSession...`);
     
     this._cleanupCompanyState(companyId);
 
     if (this.sessions.has(companyId)) {
       const existingSocket = this.sessions.get(companyId);
       if (existingSocket?.user) {
-        logger.info(`[${companyId}] ✅ Sessão já existe e está conectada`);
+        appLogger.info(`[${companyId}] ✅ Sessão já existe e está conectada`);
         return { status: 'already_connected', phone_number: existingSocket.user.id?.split(':')[0] };
       }
-      logger.info(`[${companyId}] 🗑️ Removendo sessão existente não conectada`);
+      appLogger.info(`[${companyId}] 🗑️ Removendo sessão existente não conectada`);
       try {
         existingSocket?.end?.();
       } catch (e) {
-        logger.warn(`[${companyId}] Erro ao encerrar socket existente:`, e.message);
+        appLogger.warn(`[${companyId}] Erro ao encerrar socket existente:`, e.message);
       }
       this.sessions.delete(companyId);
       this.sessionMeta.delete(companyId);
@@ -866,7 +866,7 @@ class SessionManager {
     const status = statusMap[update.update.status];
     if (!status) return;
 
-    logger.info(`[${companyId}] 📊 Status atualizado: ${update.key.id} -> ${status}`);
+    appLogger.info(`[${companyId}] 📊 Status atualizado: ${update.key.id} -> ${status}`);
 
     await this.webhookService.send(companyId, 'message_status', {
       message_id: update.key.id,
@@ -896,7 +896,7 @@ class SessionManager {
         result = await socket.sendMessage(jid, { text: content });
       }
 
-      logger.info(`[${companyId}] 📤 Mensagem enviada para ${phone}: ${result.key.id}`);
+      appLogger.info(`[${companyId}] 📤 Mensagem enviada para ${phone}: ${result.key.id}`);
 
       if (localMessageId) {
         await this.webhookService.send(companyId, 'message_sent', {
@@ -910,7 +910,7 @@ class SessionManager {
         whatsappMessageId: result.key.id
       };
     } catch (error) {
-      logger.error(`[${companyId}] Erro ao enviar mensagem:`, error);
+      appLogger.error(`[${companyId}] Erro ao enviar mensagem:`, error);
       throw error;
     }
   }
@@ -924,7 +924,7 @@ class SessionManager {
       try {
         await socket.logout();
       } catch (error) {
-        logger.warn(`[${companyId}] Erro ao fazer logout:`, error);
+        appLogger.warn(`[${companyId}] Erro ao fazer logout:`, error);
       }
       
       this.sessions.delete(companyId);
@@ -937,7 +937,7 @@ class SessionManager {
   }
 
   async restartSession(companyId) {
-    logger.info(`[${companyId}] 🔄 Reiniciando sessão...`);
+    appLogger.info(`[${companyId}] 🔄 Reiniciando sessão...`);
     
     this._cleanupCompanyState(companyId);
     
@@ -946,7 +946,7 @@ class SessionManager {
       try {
         socket.end?.();
       } catch (e) {
-        logger.warn(`[${companyId}] Erro ao encerrar socket:`, e.message);
+        appLogger.warn(`[${companyId}] Erro ao encerrar socket:`, e.message);
       }
       this.sessions.delete(companyId);
     }
@@ -959,7 +959,7 @@ class SessionManager {
   }
 
   async removeSession(companyId) {
-    logger.info(`[${companyId}] 🗑️ Removendo sessão completamente...`);
+    appLogger.info(`[${companyId}] 🗑️ Removendo sessão completamente...`);
     
     this._cleanupCompanyState(companyId);
     
@@ -968,7 +968,7 @@ class SessionManager {
       try {
         socket.end?.();
       } catch (e) {
-        logger.warn(`[${companyId}] Erro ao encerrar socket:`, e.message);
+        appLogger.warn(`[${companyId}] Erro ao encerrar socket:`, e.message);
       }
     }
     
@@ -986,7 +986,7 @@ class SessionManager {
     
     if (fs.existsSync(sessionPath)) {
       fs.rmSync(sessionPath, { recursive: true, force: true });
-      logger.info(`[${companyId}] Arquivos de sessão removidos`);
+      appLogger.info(`[${companyId}] Arquivos de sessão removidos`);
     }
   }
 
@@ -995,7 +995,7 @@ class SessionManager {
 
     const sessionDirs = fs.readdirSync(this.sessionsDir);
     
-    logger.info(`Restaurando ${sessionDirs.length} sessão(ões)...`);
+    appLogger.info(`Restaurando ${sessionDirs.length} sessão(ões)...`);
 
     for (const companyId of sessionDirs) {
       const sessionPath = path.join(this.sessionsDir, companyId);
@@ -1005,10 +1005,10 @@ class SessionManager {
         
         if (fs.existsSync(credsFile)) {
           try {
-            logger.info(`[${companyId}] Restaurando sessão...`);
+            appLogger.info(`[${companyId}] Restaurando sessão...`);
             await this.createSession(companyId);
           } catch (error) {
-            logger.error(`[${companyId}] Erro ao restaurar:`, error);
+            appLogger.error(`[${companyId}] Erro ao restaurar:`, error);
           }
         }
       }
