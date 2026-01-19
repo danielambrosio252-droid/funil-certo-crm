@@ -15,6 +15,7 @@ import { useFunnelStages, useFunnelLeads, FunnelLead } from "@/hooks/useFunnels"
 import { CreateStageDialog } from "./CreateStageDialog";
 import { CreateLeadDialog } from "./CreateLeadDialog";
 import { LeadDetailsDialog } from "./LeadDetailsDialog";
+import { FunnelFiltersState } from "./FunnelFilters";
 
 const sourceColors: Record<string, string> = {
   "Meta Ads": "bg-info/10 text-info",
@@ -29,9 +30,10 @@ const sourceColors: Record<string, string> = {
 
 interface KanbanBoardProps {
   funnelId: string | null;
+  filters?: FunnelFiltersState;
 }
 
-export function KanbanBoard({ funnelId }: KanbanBoardProps) {
+export function KanbanBoard({ funnelId, filters }: KanbanBoardProps) {
   const { stages, loadingStages, deleteStage } = useFunnelStages(funnelId);
   const stageIds = useMemo(() => stages.map(s => s.id), [stages]);
   const { leads, loadingLeads, moveLead, deleteLead } = useFunnelLeads(stageIds);
@@ -46,14 +48,50 @@ export function KanbanBoard({ funnelId }: KanbanBoardProps) {
     setSelectedLeadStage(stageName);
   };
 
+  // Apply filters to leads
+  const filteredLeads = useMemo(() => {
+    let result = [...leads];
+
+    if (filters) {
+      // Filter by source
+      if (filters.sources.length > 0) {
+        result = result.filter(lead => lead.source && filters.sources.includes(lead.source));
+      }
+
+      // Filter by stage
+      if (filters.stages.length > 0) {
+        result = result.filter(lead => filters.stages.includes(lead.stage_id));
+      }
+
+      // Filter by min value
+      if (filters.minValue) {
+        result = result.filter(lead => (lead.value || 0) >= parseFloat(filters.minValue));
+      }
+
+      // Filter by max value
+      if (filters.maxValue) {
+        result = result.filter(lead => (lead.value || 0) <= parseFloat(filters.maxValue));
+      }
+
+      // Filter by tags
+      if (filters.tags.length > 0) {
+        result = result.filter(lead => 
+          lead.tags && filters.tags.some(tag => lead.tags.includes(tag))
+        );
+      }
+    }
+
+    return result;
+  }, [leads, filters]);
+
   // Agrupar leads por etapa
   const leadsByStage = useMemo(() => {
     const grouped: Record<string, FunnelLead[]> = {};
     stages.forEach(stage => {
-      grouped[stage.id] = leads.filter(l => l.stage_id === stage.id).sort((a, b) => a.position - b.position);
+      grouped[stage.id] = filteredLeads.filter(l => l.stage_id === stage.id).sort((a, b) => a.position - b.position);
     });
     return grouped;
-  }, [stages, leads]);
+  }, [stages, filteredLeads]);
 
   const onDragEnd = async (result: DropResult) => {
     const { source, destination, draggableId } = result;
