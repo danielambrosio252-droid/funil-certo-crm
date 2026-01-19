@@ -7,7 +7,7 @@
  * via webhook HTTP.
  */
 
-const { logger } = require('../utils/logger');
+const { appLogger } = require('../utils/logger');
 
 class WebhookService {
   constructor(webhookUrl, webhookSecret = null) {
@@ -22,7 +22,7 @@ class WebhookService {
    */
   async send(companyId, eventType, data) {
     if (!this.webhookUrl) {
-      logger.warn(`[${companyId}] Webhook URL não configurado, evento ignorado: ${eventType}`);
+      appLogger.warn(`[${companyId}] Webhook URL não configurado, evento ignorado: ${eventType}`);
       return false;
     }
 
@@ -52,19 +52,19 @@ class WebhookService {
         });
 
         if (response.ok) {
-          logger.debug(`[${companyId}] Webhook enviado: ${eventType}`);
+          appLogger.debug(`[${companyId}] Webhook enviado: ${eventType}`);
           return true;
         }
 
         const errorText = await response.text();
-        logger.warn(`[${companyId}] Webhook falhou (${response.status}): ${errorText}`);
+        appLogger.warn(`[${companyId}] Webhook falhou (${response.status}): ${errorText}`);
 
         if (response.status >= 400 && response.status < 500) {
           // Erro do cliente, não tentar novamente
           return false;
         }
       } catch (error) {
-        logger.error(`[${companyId}] Erro no webhook (tentativa ${attempt}):`, error.message);
+        appLogger.error(`[${companyId}] Erro no webhook (tentativa ${attempt}):`, error.message);
       }
 
       // Aguardar antes de tentar novamente
@@ -73,7 +73,7 @@ class WebhookService {
       }
     }
 
-    logger.error(`[${companyId}] Webhook falhou após ${this.retryAttempts} tentativas: ${eventType}`);
+    appLogger.error(`[${companyId}] Webhook falhou após ${this.retryAttempts} tentativas: ${eventType}`);
     return false;
   }
 
