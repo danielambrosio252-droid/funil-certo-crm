@@ -89,6 +89,84 @@ export type Database = {
         }
         Relationships: []
       }
+      email_campaigns: {
+        Row: {
+          campaign_type: string
+          company_id: string
+          content: Json
+          created_at: string
+          id: string
+          list_id: string | null
+          name: string
+          preheader: string | null
+          scheduled_at: string | null
+          sent_at: string | null
+          status: string
+          subject: string
+          template: string
+          total_clicked: number | null
+          total_opened: number | null
+          total_recipients: number | null
+          total_sent: number | null
+          updated_at: string
+        }
+        Insert: {
+          campaign_type?: string
+          company_id: string
+          content?: Json
+          created_at?: string
+          id?: string
+          list_id?: string | null
+          name: string
+          preheader?: string | null
+          scheduled_at?: string | null
+          sent_at?: string | null
+          status?: string
+          subject: string
+          template: string
+          total_clicked?: number | null
+          total_opened?: number | null
+          total_recipients?: number | null
+          total_sent?: number | null
+          updated_at?: string
+        }
+        Update: {
+          campaign_type?: string
+          company_id?: string
+          content?: Json
+          created_at?: string
+          id?: string
+          list_id?: string | null
+          name?: string
+          preheader?: string | null
+          scheduled_at?: string | null
+          sent_at?: string | null
+          status?: string
+          subject?: string
+          template?: string
+          total_clicked?: number | null
+          total_opened?: number | null
+          total_recipients?: number | null
+          total_sent?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_campaigns_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_campaigns_list_id_fkey"
+            columns: ["list_id"]
+            isOneToOne: false
+            referencedRelation: "email_lists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       email_contacts: {
         Row: {
           company_id: string

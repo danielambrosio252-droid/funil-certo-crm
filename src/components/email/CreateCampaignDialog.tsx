@@ -15,6 +15,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { EmailEditor, EmailContent } from "./EmailEditor";
+import { CampaignScheduler, ScheduleData } from "./CampaignScheduler";
+import { useEmailCampaigns } from "@/hooks/useEmailCampaigns";
 import { 
   Mail, 
   Zap, 
@@ -29,6 +31,7 @@ import {
   Cake,
   ClipboardList,
   Rocket,
+  Loader2,
 } from "lucide-react";
 
 interface CreateCampaignDialogProps {
@@ -124,8 +127,10 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
   const [subject, setSubject] = useState("");
   const [preheader, setPreheader] = useState("");
   const [emailContent, setEmailContent] = useState<EmailContent | null>(null);
+  const [schedule, setSchedule] = useState<ScheduleData>({ type: "now", scheduledAt: null });
 
-  const totalSteps = 4;
+  const { createCampaign } = useEmailCampaigns();
+  const totalSteps = 5;
 
   const handleNext = () => {
     if (step === 1 && !campaignType) {
@@ -146,6 +151,10 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
         return;
       }
     }
+    if (step === 4 && !emailContent) {
+      toast.error("Configure o conteúdo do e-mail");
+      return;
+    }
     setStep(step + 1);
   };
 
@@ -153,20 +162,39 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
     setStep(step - 1);
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!emailContent) {
       toast.error("Configure o conteúdo do e-mail");
       return;
     }
 
-    // TODO: Salvar campanha no banco quando estiver configurado
-    toast.success("Campanha criada com sucesso!", {
-      description: "Configure o provedor de e-mail para enviar.",
-    });
-    
-    // Reset form
-    handleReset();
-    onOpenChange(false);
+    try {
+      await createCampaign.mutateAsync({
+        name,
+        subject,
+        preheader: preheader || undefined,
+        template,
+        campaign_type: campaignType,
+        content: emailContent,
+        status: schedule.type === "scheduled" ? "scheduled" : "draft",
+        scheduled_at: schedule.scheduledAt?.toISOString() || null,
+      });
+
+      const message = schedule.type === "scheduled" 
+        ? "Campanha agendada com sucesso!"
+        : "Campanha criada com sucesso!";
+      
+      toast.success(message, {
+        description: schedule.type === "scheduled" 
+          ? `Será enviada em ${schedule.scheduledAt?.toLocaleDateString("pt-BR")}`
+          : "Configure o provedor de e-mail para enviar.",
+      });
+      
+      handleReset();
+      onOpenChange(false);
+    } catch (error) {
+      toast.error("Erro ao criar campanha");
+    }
   };
 
   const handleReset = () => {
@@ -177,6 +205,7 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
     setSubject("");
     setPreheader("");
     setEmailContent(null);
+    setSchedule({ type: "now", scheduledAt: null });
   };
 
   const handleClose = (open: boolean) => {
@@ -204,12 +233,13 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
             {step === 2 && "Selecione um template para começar"}
             {step === 3 && "Configure os detalhes da campanha"}
             {step === 4 && "Personalize o conteúdo do seu e-mail"}
+            {step === 5 && "Escolha quando enviar sua campanha"}
           </DialogDescription>
         </DialogHeader>
 
         {/* Progress Steps */}
         <div className="flex items-center justify-center gap-2 py-2">
-          {[1, 2, 3, 4].map((s) => (
+          {[1, 2, 3, 4, 5].map((s) => (
             <div
               key={s}
               className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
@@ -317,11 +347,17 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
           />
         )}
 
+        {/* Step 5: Schedule */}
+        {step === 5 && (
+          <CampaignScheduler onScheduleChange={setSchedule} />
+        )}
+
         {/* Actions */}
         <div className="flex justify-between pt-4">
           <Button
             variant="outline"
             onClick={step === 1 ? () => handleClose(false) : handleBack}
+            disabled={createCampaign.isPending}
           >
             {step === 1 ? "Cancelar" : (
               <>
@@ -333,8 +369,16 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
           <Button
             onClick={step === totalSteps ? handleCreate : handleNext}
             className="gradient-primary text-primary-foreground"
+            disabled={createCampaign.isPending}
           >
-            {step === totalSteps ? "Criar Campanha" : (
+            {createCampaign.isPending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Salvando...
+              </>
+            ) : step === totalSteps ? (
+              schedule.type === "scheduled" ? "Agendar Campanha" : "Criar Campanha"
+            ) : (
               <>
                 Próximo
                 <ArrowRight className="w-4 h-4 ml-2" />
