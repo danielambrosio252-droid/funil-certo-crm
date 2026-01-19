@@ -34,6 +34,7 @@ import {
   FileText,
   History,
   Trash2,
+  ClipboardList,
 } from "lucide-react";
 import { FunnelLead, useFunnelLeads } from "@/hooks/useFunnels";
 import { cn } from "@/lib/utils";
@@ -233,18 +234,22 @@ export function LeadDetailsDialog({
         </DialogHeader>
 
         <Tabs defaultValue="info" className="flex-1 overflow-hidden flex flex-col">
-          <TabsList className="grid w-full grid-cols-3 flex-shrink-0">
+          <TabsList className="grid w-full grid-cols-4 flex-shrink-0">
             <TabsTrigger value="info" className="gap-2">
               <User className="w-4 h-4" />
-              Informações
+              <span className="hidden sm:inline">Informações</span>
+            </TabsTrigger>
+            <TabsTrigger value="form" className="gap-2">
+              <ClipboardList className="w-4 h-4" />
+              <span className="hidden sm:inline">Formulário</span>
             </TabsTrigger>
             <TabsTrigger value="notes" className="gap-2">
               <FileText className="w-4 h-4" />
-              Notas
+              <span className="hidden sm:inline">Notas</span>
             </TabsTrigger>
             <TabsTrigger value="history" className="gap-2">
               <History className="w-4 h-4" />
-              Histórico
+              <span className="hidden sm:inline">Histórico</span>
             </TabsTrigger>
           </TabsList>
 
@@ -472,6 +477,51 @@ export function LeadDetailsDialog({
                   </Button>
                 </div>
               </div>
+            </TabsContent>
+
+            {/* Form/Custom Fields Tab */}
+            <TabsContent value="form" className="mt-0 space-y-4">
+              {lead.custom_fields && Object.keys(lead.custom_fields).length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    Campos recebidos do formulário externo:
+                  </p>
+                  <div className="grid gap-3">
+                    {Object.entries(lead.custom_fields).map(([key, value]) => {
+                      // Format key from snake_case or camelCase to readable
+                      const formatKey = (k: string) => 
+                        k.replace(/_/g, ' ')
+                          .replace(/([A-Z])/g, ' $1')
+                          .replace(/^\w/, c => c.toUpperCase())
+                          .trim();
+                      
+                      return (
+                        <div 
+                          key={key}
+                          className="p-3 bg-muted/50 rounded-lg border"
+                        >
+                          <p className="text-xs font-medium text-muted-foreground mb-1">
+                            {formatKey(key)}
+                          </p>
+                          <p className="text-sm">
+                            {value !== null && value !== undefined 
+                              ? String(value) 
+                              : "-"}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <ClipboardList className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p>Nenhum campo de formulário</p>
+                  <p className="text-xs mt-1">
+                    Campos extras enviados via webhook aparecerão aqui
+                  </p>
+                </div>
+              )}
             </TabsContent>
 
             {/* Notes Tab */}

@@ -40,6 +40,7 @@ export interface FunnelLead {
   notes: string | null;
   position: number;
   last_contact_at: string | null;
+  custom_fields: Record<string, string | number | boolean | null> | null;
   created_at: string;
   updated_at: string;
 }
