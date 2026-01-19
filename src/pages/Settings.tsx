@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { WhatsAppSetup } from "@/components/whatsapp/WhatsAppSetup";
 import { WebhookConfigDialog } from "@/components/settings/WebhookConfigDialog";
+import { TeamManagement } from "@/components/team/TeamManagement";
 import { useAuth } from "@/hooks/useAuth";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useProfileSettings } from "@/hooks/useProfileSettings";
@@ -476,42 +477,7 @@ export default function Settings() {
 
         {/* Team Tab */}
         <TabsContent value="team">
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle>Membros da Equipe</CardTitle>
-                  <CardDescription>Gerencie os usuários da sua conta</CardDescription>
-                </div>
-                <Button className="gradient-primary text-primary-foreground">Convidar Membro</Button>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {[
-                    { name: profile?.full_name || "Você", email: profile?.email || "", role: profile?.role === "owner" ? "Proprietário" : "Admin" },
-                  ].map((member) => (
-                    <div key={member.email} className="flex items-center justify-between py-3 border-b border-border last:border-0">
-                      <div className="flex items-center gap-3">
-                        <Avatar>
-                          <AvatarFallback className="bg-primary/10 text-primary">
-                            {member.name.split(" ").map(n => n[0]).join("").substring(0, 2)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-medium text-foreground">{member.name}</p>
-                          <p className="text-sm text-muted-foreground">{member.email}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <Badge variant="secondary">{member.role}</Badge>
-                        <Button variant="ghost" size="sm">Editar</Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
+          <TeamManagement />
         </TabsContent>
 
         {/* Billing Tab */}
