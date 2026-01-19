@@ -11,10 +11,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { useFunnelStages, useFunnelLeads, FunnelLead } from "@/hooks/useFunnels";
+import { useFunnelStages, useFunnelLeads, FunnelLead, FunnelStage } from "@/hooks/useFunnels";
 import { CreateStageDialog } from "./CreateStageDialog";
 import { CreateLeadDialog } from "./CreateLeadDialog";
 import { LeadDetailsDialog } from "./LeadDetailsDialog";
+import { EditStageDialog } from "./EditStageDialog";
 import { FunnelFiltersState } from "./FunnelFilters";
 
 const sourceColors: Record<string, string> = {
@@ -40,6 +41,7 @@ export function KanbanBoard({ funnelId, filters }: KanbanBoardProps) {
   
   const [showNewStage, setShowNewStage] = useState(false);
   const [showNewLead, setShowNewLead] = useState<string | null>(null);
+  const [stageToEdit, setStageToEdit] = useState<FunnelStage | null>(null);
   const [selectedLead, setSelectedLead] = useState<FunnelLead | null>(null);
   const [selectedLeadStage, setSelectedLeadStage] = useState<string | undefined>();
 
@@ -157,6 +159,9 @@ export function KanbanBoard({ funnelId, filters }: KanbanBoardProps) {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setStageToEdit(stage)}>
+                        Editar etapa
+                      </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setShowNewLead(stage.id)}>
                         Adicionar lead
                       </DropdownMenuItem>
@@ -345,6 +350,15 @@ export function KanbanBoard({ funnelId, filters }: KanbanBoardProps) {
         stageIds={stageIds}
         stageName={selectedLeadStage}
       />
+
+      {funnelId && (
+        <EditStageDialog
+          open={!!stageToEdit}
+          onOpenChange={(open) => !open && setStageToEdit(null)}
+          stage={stageToEdit}
+          funnelId={funnelId}
+        />
+      )}
     </>
   );
 }
