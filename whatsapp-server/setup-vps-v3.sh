@@ -288,6 +288,7 @@ log_success "phoneNormalizer.js criado"
 
 # ===== CRIAR LOGGER (CommonJS + Baileys compatível) =====
 log_step "Criando utils/logger.js..."
+cat > "$INSTALL_DIR/src/utils/logger.js" << 'LOGGER_EOF'
 /**
  * =====================================================
  * UTILITÁRIO DE LOGS - COMPATÍVEL COM BAILEYS
@@ -339,6 +340,7 @@ log_success "logger.js criado (CommonJS + Baileys compatível)"
 
 # ===== CRIAR WEBHOOK SERVICE (CommonJS) =====
 log_step "Criando services/WebhookService.js..."
+cat > "$INSTALL_DIR/src/services/WebhookService.js" << 'WEBHOOK_EOF'
 /**
  * =====================================================
  * SERVIÇO DE WEBHOOK
