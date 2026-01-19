@@ -123,9 +123,16 @@ Deno.serve(async (req) => {
     // Enviar para o servidor WhatsApp (URL protegida no backend)
     if (whatsappServerUrl) {
       try {
+        const whatsappServerSecret = Deno.env.get("WHATSAPP_SERVER_SECRET");
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (whatsappServerSecret) {
+          headers["x-server-token"] = whatsappServerSecret;
+        }
+
+        console.log(`[whatsapp-send] Enviando para: ${whatsappServerUrl}/send`);
         const response = await fetch(whatsappServerUrl + "/send", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             company_id: companyId,
             message_id: message.id,

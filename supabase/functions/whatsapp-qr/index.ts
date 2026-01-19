@@ -69,14 +69,21 @@ Deno.serve(async (req) => {
     // O servidor VPS tem o estado mais atualizado (QR em memória, status real)
     if (whatsappServerUrl) {
       try {
+        const whatsappServerSecret = Deno.env.get("WHATSAPP_SERVER_SECRET");
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
 
         const url = `${whatsappServerUrl}/api/whatsapp/qr?company_id=${encodeURIComponent(companyId)}`;
         console.log(`[QR] Fetching from VPS: ${url}`);
         
+        const headers: Record<string, string> = {};
+        if (whatsappServerSecret) {
+          headers["x-server-token"] = whatsappServerSecret;
+        }
+
         const resp = await fetch(url, { 
           method: "GET", 
+          headers,
           signal: controller.signal 
         });
 
