@@ -37,7 +37,7 @@ interface KanbanBoardProps {
 export function KanbanBoard({ funnelId, filters }: KanbanBoardProps) {
   const { stages, loadingStages, deleteStage } = useFunnelStages(funnelId);
   const stageIds = useMemo(() => stages.map(s => s.id), [stages]);
-  const { leads, loadingLeads, moveLead, deleteLead } = useFunnelLeads(stageIds);
+  const { leads, loadingLeads, moveLead, deleteLead } = useFunnelLeads(stageIds, funnelId);
   
   const [showNewStage, setShowNewStage] = useState(false);
   const [showNewLead, setShowNewLead] = useState<string | null>(null);
@@ -340,6 +340,7 @@ export function KanbanBoard({ funnelId, filters }: KanbanBoardProps) {
           onOpenChange={(open) => !open && setShowNewLead(null)}
           stageId={showNewLead}
           stageIds={stageIds}
+          funnelId={funnelId}
         />
       )}
 
@@ -349,6 +350,7 @@ export function KanbanBoard({ funnelId, filters }: KanbanBoardProps) {
         lead={selectedLead}
         stageIds={stageIds}
         stageName={selectedLeadStage}
+        funnelId={funnelId}
       />
 
       {funnelId && (

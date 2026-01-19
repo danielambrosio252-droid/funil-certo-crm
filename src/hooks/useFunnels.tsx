@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 import { toast } from "sonner";
+import { runAutomations, detectChanges } from "@/lib/automationEngine";
 
 export interface Funnel {
   id: string;
@@ -256,7 +257,7 @@ export function useFunnelStages(funnelId: string | null) {
   };
 }
 
-export function useFunnelLeads(stageIds: string[]) {
+export function useFunnelLeads(stageIds: string[], funnelId?: string | null) {
   const { profile } = useAuth();
   const queryClient = useQueryClient();
 
@@ -314,9 +315,20 @@ export function useFunnelLeads(stageIds: string[]) {
       if (error) throw error;
       return data as FunnelLead;
     },
-    onSuccess: () => {
+    onSuccess: async (newLead) => {
       queryClient.invalidateQueries({ queryKey: ["funnel-leads"] });
       toast.success("Lead adicionado!");
+      
+      // Run automations for lead_created event
+      if (profile?.company_id && funnelId) {
+        await runAutomations(
+          { event: "lead_created", lead: newLead },
+          profile.company_id,
+          funnelId
+        );
+        // Refresh leads after automation may have moved them
+        queryClient.invalidateQueries({ queryKey: ["funnel-leads"] });
+      }
     },
     onError: (error) => {
       toast.error("Erro ao criar lead: " + error.message);
@@ -325,7 +337,7 @@ export function useFunnelLeads(stageIds: string[]) {
 
   // Atualizar lead
   const updateLead = useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<FunnelLead> & { id: string }) => {
+    mutationFn: async ({ id, previousLead, ...updates }: Partial<FunnelLead> & { id: string; previousLead?: FunnelLead }) => {
       const { data, error } = await supabase
         .from("funnel_leads")
         .update(updates)
@@ -334,10 +346,43 @@ export function useFunnelLeads(stageIds: string[]) {
         .single();
       
       if (error) throw error;
-      return data as FunnelLead;
+      return { updatedLead: data as FunnelLead, previousLead };
     },
-    onSuccess: () => {
+    onSuccess: async ({ updatedLead, previousLead }) => {
       queryClient.invalidateQueries({ queryKey: ["funnel-leads"] });
+      
+      // Run automations for lead_updated event
+      if (profile?.company_id && funnelId) {
+        const changes = detectChanges(updatedLead, previousLead);
+        
+        // Run general update automation
+        await runAutomations(
+          { event: "lead_updated", lead: updatedLead, previousLead },
+          profile.company_id,
+          funnelId
+        );
+        
+        // Run tag_added automations for each new tag
+        for (const tag of changes.tagsAdded) {
+          await runAutomations(
+            { event: "tag_added", lead: updatedLead, addedTag: tag },
+            profile.company_id,
+            funnelId
+          );
+        }
+        
+        // Run value_changed automation
+        if (changes.valueChanged) {
+          await runAutomations(
+            { event: "value_changed", lead: updatedLead, previousLead },
+            profile.company_id,
+            funnelId
+          );
+        }
+        
+        // Refresh leads after automations
+        queryClient.invalidateQueries({ queryKey: ["funnel-leads"] });
+      }
     },
     onError: (error) => {
       toast.error("Erro ao atualizar lead: " + error.message);

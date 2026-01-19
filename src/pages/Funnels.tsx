@@ -270,6 +270,7 @@ export default function Funnels() {
           onOpenChange={setShowNewLeadFromHeader}
           stageId={stages[0].id}
           stageIds={stageIds}
+          funnelId={currentFunnelId}
         />
       )}
 

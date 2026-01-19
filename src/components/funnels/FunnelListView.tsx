@@ -50,7 +50,7 @@ type SortOrder = "asc" | "desc";
 export function FunnelListView({ funnelId, filters }: FunnelListViewProps) {
   const { stages, loadingStages } = useFunnelStages(funnelId);
   const stageIds = useMemo(() => stages.map(s => s.id), [stages]);
-  const { leads, loadingLeads, deleteLead } = useFunnelLeads(stageIds);
+  const { leads, loadingLeads, deleteLead } = useFunnelLeads(stageIds, funnelId);
   
   const [searchTerm, setSearchTerm] = useState("");
   const [sortField, setSortField] = useState<SortField>("created_at");
@@ -386,6 +386,7 @@ export function FunnelListView({ funnelId, filters }: FunnelListViewProps) {
           onOpenChange={(open) => !open && setShowNewLead(null)}
           stageId={showNewLead}
           stageIds={stageIds}
+          funnelId={funnelId}
         />
       )}
 
@@ -395,6 +396,7 @@ export function FunnelListView({ funnelId, filters }: FunnelListViewProps) {
         lead={selectedLead}
         stageIds={stageIds}
         stageName={selectedLeadStage}
+        funnelId={funnelId}
       />
     </>
   );
