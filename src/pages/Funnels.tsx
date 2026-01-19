@@ -7,9 +7,10 @@ import { CreateLeadDialog } from "@/components/funnels/CreateLeadDialog";
 import { EditFunnelDialog } from "@/components/funnels/EditFunnelDialog";
 import { FunnelFilters, FunnelFiltersState } from "@/components/funnels/FunnelFilters";
 import { ExportLeads } from "@/components/funnels/ExportLeads";
+import { AutomationsDialog } from "@/components/funnels/AutomationsDialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Kanban, List, Download, Loader2, Trash2, Pencil } from "lucide-react";
+import { Plus, Kanban, List, Download, Loader2, Trash2, Pencil, Zap } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -34,6 +35,7 @@ export default function Funnels() {
   const [showCreateFunnel, setShowCreateFunnel] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showNewLeadFromHeader, setShowNewLeadFromHeader] = useState(false);
+  const [showAutomations, setShowAutomations] = useState(false);
   const [funnelToEdit, setFunnelToEdit] = useState<Funnel | null>(null);
   const [selectedFunnelId, setSelectedFunnelId] = useState<string | null>(null);
   const [funnelToDelete, setFunnelToDelete] = useState<string | null>(null);
@@ -190,6 +192,16 @@ export default function Funnels() {
             filters={filters}
             onFiltersChange={setFilters}
           />
+          {currentFunnel && (
+            <Button 
+              variant="outline" 
+              className="gap-2"
+              onClick={() => setShowAutomations(true)}
+            >
+              <Zap className="w-4 h-4" />
+              Automações
+            </Button>
+          )}
           <Button 
             variant="outline" 
             className="gap-2"
@@ -267,6 +279,17 @@ export default function Funnels() {
         onOpenChange={(open) => !open && setFunnelToEdit(null)}
         funnel={funnelToEdit}
       />
+
+      {/* Automations Dialog */}
+      {currentFunnel && (
+        <AutomationsDialog
+          open={showAutomations}
+          onOpenChange={setShowAutomations}
+          funnelId={currentFunnelId}
+          funnelName={currentFunnel.name}
+          stages={stages}
+        />
+      )}
     </MainLayout>
   );
 }
