@@ -21,7 +21,7 @@ const path = require('path');
 
 const { SessionManager } = require('./managers/SessionManager');
 const { WebhookService } = require('./services/WebhookService');
-const { logger } = require('./utils/logger');
+const { appLogger } = require('./utils/logger');
 
 // =====================================================
 // CONFIGURAÇÃO (com fallback para nomes antigos)
@@ -68,7 +68,7 @@ const sessionManager = new SessionManager(SESSIONS_DIR, webhookService);
 // =====================================================
 
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`, { 
+  appLogger.info(`${req.method} ${req.path}`, { 
     ip: req.ip,
     body: req.method === 'POST' ? req.body : undefined 
   });
@@ -88,7 +88,7 @@ const validateServerToken = (req, res, next) => {
   const token = req.headers['x-server-token'] || req.query.token;
   
   if (token !== SERVER_SECRET) {
-    logger.warn(`Tentativa de acesso não autorizado: ${req.path}`);
+    appLogger.warn(`Tentativa de acesso não autorizado: ${req.path}`);
     return res.status(401).json({ 
       success: false, 
       error: 'Token inválido' 
@@ -118,7 +118,7 @@ app.post('/connect', validateServerToken, async (req, res) => {
   }
 
   try {
-    logger.info(`[${company_id}] POST /connect - force_reset: ${force_reset}`);
+    appLogger.info(`[${company_id}] POST /connect - force_reset: ${force_reset}`);
     
     // Se force_reset, remover sessão completamente antes
     if (force_reset) {
@@ -134,7 +134,7 @@ app.post('/connect', validateServerToken, async (req, res) => {
       phone_number: result.phone_number || null
     });
   } catch (error) {
-    logger.error(`[${company_id}] Erro ao conectar:`, error);
+    appLogger.error(`[${company_id}] Erro ao conectar:`, error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -169,7 +169,7 @@ app.get('/api/whatsapp/qr', (req, res) => {
   const sessionStatus = sessionManager.getSessionStatus(companyId);
   const qr = sessionManager.getQrCode(companyId);
 
-  logger.info(`[${companyId}] GET /api/whatsapp/qr - status: ${sessionStatus.status}, hasQR: ${!!qr}`);
+  appLogger.info(`[${companyId}] GET /api/whatsapp/qr - status: ${sessionStatus.status}, hasQR: ${!!qr}`);
 
   // 1. CONNECTED
   if (sessionStatus.connected || sessionStatus.status === 'connected') {
@@ -224,7 +224,7 @@ app.post('/disconnect', validateServerToken, async (req, res) => {
   }
 
   try {
-    logger.info(`[${company_id}] Desconectando...`);
+    appLogger.info(`[${company_id}] Desconectando...`);
     
     await sessionManager.disconnectSession(company_id);
     
@@ -233,7 +233,7 @@ app.post('/disconnect', validateServerToken, async (req, res) => {
       message: 'Sessão desconectada com sucesso' 
     });
   } catch (error) {
-    logger.error(`[${company_id}] Erro ao desconectar:`, error);
+    appLogger.error(`[${company_id}] Erro ao desconectar:`, error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -269,7 +269,7 @@ app.post('/send', validateServerToken, async (req, res) => {
       targetCompanyId = activeSessions[0];
     }
 
-    logger.info(`[${targetCompanyId}] Enviando mensagem para ${phone}`);
+    appLogger.info(`[${targetCompanyId}] Enviando mensagem para ${phone}`);
 
     const result = await sessionManager.sendMessage(
       targetCompanyId,
@@ -285,7 +285,7 @@ app.post('/send', validateServerToken, async (req, res) => {
       whatsapp_message_id: result.whatsappMessageId
     });
   } catch (error) {
-    logger.error(`Erro ao enviar mensagem:`, error);
+    appLogger.error(`Erro ao enviar mensagem:`, error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -345,7 +345,7 @@ app.post('/restart/:company_id', validateServerToken, async (req, res) => {
   const { company_id } = req.params;
 
   try {
-    logger.info(`[${company_id}] Reiniciando sessão...`);
+    appLogger.info(`[${company_id}] Reiniciando sessão...`);
     
     const result = await sessionManager.restartSession(company_id);
     
@@ -355,7 +355,7 @@ app.post('/restart/:company_id', validateServerToken, async (req, res) => {
       status: result.status
     });
   } catch (error) {
-    logger.error(`[${company_id}] Erro ao reiniciar:`, error);
+    appLogger.error(`[${company_id}] Erro ao reiniciar:`, error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -372,7 +372,7 @@ app.delete('/session/:company_id', validateServerToken, async (req, res) => {
   const { company_id } = req.params;
 
   try {
-    logger.info(`[${company_id}] Removendo sessão completamente...`);
+    appLogger.info(`[${company_id}] Removendo sessão completamente...`);
     
     await sessionManager.removeSession(company_id);
     
@@ -381,7 +381,7 @@ app.delete('/session/:company_id', validateServerToken, async (req, res) => {
       message: 'Sessão removida completamente' 
     });
   } catch (error) {
-    logger.error(`[${company_id}] Erro ao remover:`, error);
+    appLogger.error(`[${company_id}] Erro ao remover:`, error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -394,14 +394,14 @@ app.delete('/session/:company_id', validateServerToken, async (req, res) => {
 // =====================================================
 
 app.listen(PORT, async () => {
-  logger.info('=========================================');
-  logger.info('🚀 SERVIDOR WHATSAPP - ESCALA CERTO PRO');
-  logger.info('=========================================');
-  logger.info(`📡 Porta: ${PORT}`);
-  logger.info(`🔗 Webhook: ${WEBHOOK_URL || 'NÃO CONFIGURADO'}`);
-  logger.info(`🔐 Auth: ${SERVER_SECRET ? 'ATIVO' : 'DESATIVADO'}`);
-  logger.info(`📁 Sessões: ${path.resolve(SESSIONS_DIR)}`);
-  logger.info('=========================================');
+  appLogger.info('=========================================');
+  appLogger.info('🚀 SERVIDOR WHATSAPP - ESCALA CERTO PRO');
+  appLogger.info('=========================================');
+  appLogger.info(`📡 Porta: ${PORT}`);
+  appLogger.info(`🔗 Webhook: ${WEBHOOK_URL || 'NÃO CONFIGURADO'}`);
+  appLogger.info(`🔐 Auth: ${SERVER_SECRET ? 'ATIVO' : 'DESATIVADO'}`);
+  appLogger.info(`📁 Sessões: ${path.resolve(SESSIONS_DIR)}`);
+  appLogger.info('=========================================');
 
   // Restaurar sessões existentes na inicialização
   await sessionManager.restoreAllSessions();
@@ -412,21 +412,21 @@ app.listen(PORT, async () => {
 // =====================================================
 
 process.on('uncaughtException', (error) => {
-  logger.error('Erro não capturado:', error);
+  appLogger.error('Erro não capturado:', error);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Promise rejeitada não tratada:', reason);
+  appLogger.error('Promise rejeitada não tratada:', reason);
 });
 
 process.on('SIGINT', async () => {
-  logger.info('Encerrando servidor...');
+  appLogger.info('Encerrando servidor...');
   await sessionManager.disconnectAllSessions();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  logger.info('Recebido SIGTERM, encerrando...');
+  appLogger.info('Recebido SIGTERM, encerrando...');
   await sessionManager.disconnectAllSessions();
   process.exit(0);
 });

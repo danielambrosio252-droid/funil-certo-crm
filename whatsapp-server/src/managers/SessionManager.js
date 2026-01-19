@@ -11,6 +11,10 @@
  * - Limpeza garantida em TODOS os cenários
  * - Auto-cleanup após loggedOut
  * - Status explícito e determinístico
+ * 
+ * LOGGER:
+ * - appLogger: logs do servidor
+ * - baileysLogger: FLAT, sem .child(), apenas para Baileys
  */
 
 const { 
@@ -23,7 +27,7 @@ const {
 const QRCode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
-const { logger, baileysLogger } = require('../utils/logger');
+const { appLogger, baileysLogger } = require('../utils/logger');
 const { normalizePhone, isLid, phoneToJid } = require('../utils/phoneNormalizer');
 
 const RECONNECT_TIMEOUT = parseInt(process.env.RECONNECT_TIMEOUT) || 5000;
@@ -59,7 +63,7 @@ class SessionManager {
     this.pendingConnections.delete(companyId);
     this.qrStore.delete(companyId);
     this.errorStore.delete(companyId);
-    logger.info(`[${companyId}] 🧹 Estado limpo (pending, qr, error)`);
+    appLogger.info(`[${companyId}] 🧹 Estado limpo (pending, qr, error)`);
   }
 
   /**
@@ -69,7 +73,7 @@ class SessionManager {
     this.errorStore.set(companyId, { reason, timestamp: new Date() });
     this._cleanupCompanyState(companyId);
     this.errorStore.set(companyId, { reason, timestamp: new Date() }); // Re-set após cleanup
-    logger.warn(`[${companyId}] ❌ Erro registrado: ${reason}`);
+    appLogger.warn(`[${companyId}] ❌ Erro registrado: ${reason}`);
   }
 
   /**
@@ -80,7 +84,7 @@ class SessionManager {
    * - Nunca fica em estado "pendente" eternamente
    */
   async createSession(companyId) {
-    logger.info(`[${companyId}] 🚀 Iniciando createSession...`);
+    appLogger.info(`[${companyId}] 🚀 Iniciando createSession...`);
     
     // PASSO 1: Limpar TUDO antes de começar
     this._cleanupCompanyState(companyId);
@@ -89,15 +93,15 @@ class SessionManager {
     if (this.sessions.has(companyId)) {
       const existingSocket = this.sessions.get(companyId);
       if (existingSocket?.user) {
-        logger.info(`[${companyId}] ✅ Sessão já existe e está conectada`);
+        appLogger.info(`[${companyId}] ✅ Sessão já existe e está conectada`);
         return { status: 'already_connected', phone_number: existingSocket.user.id?.split(':')[0] };
       }
       // Existe mas não está conectada - remover
-      logger.info(`[${companyId}] 🗑️ Removendo sessão existente não conectada`);
+      appLogger.info(`[${companyId}] 🗑️ Removendo sessão existente não conectada`);
       try {
         existingSocket?.end?.();
       } catch (e) {
-        logger.warn(`[${companyId}] Erro ao encerrar socket existente:`, e.message);
+        appLogger.warn(`[${companyId}] Erro ao encerrar socket existente:`, e.message);
       }
       this.sessions.delete(companyId);
       this.sessionMeta.delete(companyId);
@@ -106,7 +110,7 @@ class SessionManager {
     // PASSO 2: Marcar como pendente COM timestamp
     const now = Date.now();
     this.pendingConnections.set(companyId, now);
-    logger.info(`[${companyId}] ⏳ Marcado como pending: ${now}`);
+    appLogger.info(`[${companyId}] ⏳ Marcado como pending: ${now}`);
 
     // PASSO 3: Configurar TIMEOUT automático (30s)
     // Se não gerar QR em 30s, limpa e marca como erro
@@ -118,21 +122,21 @@ class SessionManager {
       
       // Só dispara timeout se ainda está pendente, sem QR e não conectado
       if (pendingTime === now && !hasQr && !isConnected) {
-        logger.error(`[${companyId}] ⏰ TIMEOUT: QR não gerado em ${QR_TIMEOUT_MS/1000}s`);
+        appLogger.error(`[${companyId}] ⏰ TIMEOUT: QR não gerado em ${QR_TIMEOUT_MS/1000}s`);
         this._setError(companyId, 'qr_timeout');
         
         // Notificar webhook
         this.webhookService.send(companyId, 'error', {
           reason: 'qr_timeout',
           message: 'QR Code não foi gerado no tempo esperado'
-        }).catch(e => logger.error(`[${companyId}] Erro ao enviar webhook de timeout:`, e));
+        }).catch(e => appLogger.error(`[${companyId}] Erro ao enviar webhook de timeout:`, e));
         
         // Limpar socket se existir
         if (socket && !isConnected) {
           try {
             socket.end?.();
           } catch (e) {
-            logger.warn(`[${companyId}] Erro ao encerrar socket no timeout:`, e.message);
+            appLogger.warn(`[${companyId}] Erro ao encerrar socket no timeout:`, e.message);
           }
           this.sessions.delete(companyId);
           this.sessionMeta.delete(companyId);
@@ -154,13 +158,13 @@ class SessionManager {
       // Buscar versão mais recente do Baileys
       const { version } = await fetchLatestBaileysVersion();
 
-      // Criar socket com baileysLogger (compatível com trace/child/fatal)
+      // Criar socket com baileysLogger (SEM .child() - flat)
       const socket = makeWASocket({
         version,
-        logger: baileysLogger.child({ companyId }),
+        logger: baileysLogger,
         auth: {
           creds: state.creds,
-          keys: makeCacheableSignalKeyStore(state.keys, baileysLogger.child({ companyId, module: 'keys' }))
+          keys: makeCacheableSignalKeyStore(state.keys, baileysLogger)
         },
         browser: ['Escala Certo Pro', 'Chrome', '120.0.0.0'],
         connectTimeoutMs: 60000,
@@ -192,7 +196,7 @@ class SessionManager {
       // SEMPRE limpar em caso de erro
       clearTimeout(qrTimeoutId);
       this._setError(companyId, 'create_session_error');
-      logger.error(`[${companyId}] 💥 Erro ao criar sessão:`, error);
+      appLogger.error(`[${companyId}] 💥 Erro ao criar sessão:`, error);
       throw error;
     }
   }
@@ -227,7 +231,7 @@ class SessionManager {
           
           // ✅ Manter pendingConnections ATIVO (ainda aguardando scan)
 
-          logger.info(`[${companyId}] 📱 QR Code gerado com sucesso`);
+          appLogger.info(`[${companyId}] 📱 QR Code gerado com sucesso`);
 
           // Webhook para atualizar o backend
           await this.webhookService.send(companyId, 'qr_code', {
@@ -240,7 +244,7 @@ class SessionManager {
             meta.lastQrCode = new Date();
           }
         } catch (error) {
-          logger.error(`[${companyId}] Erro ao gerar QR Code:`, error);
+          appLogger.error(`[${companyId}] Erro ao gerar QR Code:`, error);
           this._setError(companyId, 'qr_generation_error');
         }
       }
@@ -259,7 +263,7 @@ class SessionManager {
         this.pendingConnections.delete(companyId);
         this.errorStore.delete(companyId);
 
-        logger.info(`[${companyId}] ✅ CONECTADO: ${phoneNumber}`);
+        appLogger.info(`[${companyId}] ✅ CONECTADO: ${phoneNumber}`);
 
         // Atualizar metadata
         const meta = this.sessionMeta.get(companyId);
@@ -297,7 +301,7 @@ class SessionManager {
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const reason = DisconnectReason[statusCode] || statusCode;
 
-        logger.warn(`[${companyId}] ❌ Desconectado: ${reason} (${statusCode})`);
+        appLogger.warn(`[${companyId}] ❌ Desconectado: ${reason} (${statusCode})`);
 
         // Verificar se deve reconectar
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
@@ -312,7 +316,7 @@ class SessionManager {
               meta.reconnecting = true;
             }
 
-            logger.info(`[${companyId}] 🔄 Reconectando... (tentativa ${attempts + 1}/${MAX_RECONNECT_ATTEMPTS})`);
+            appLogger.info(`[${companyId}] 🔄 Reconectando... (tentativa ${attempts + 1}/${MAX_RECONNECT_ATTEMPTS})`);
 
             // Limpar sessão atual
             this.sessions.delete(companyId);
@@ -320,12 +324,12 @@ class SessionManager {
             // Reconectar após delay
             setTimeout(() => {
               this.createSession(companyId).catch(err => {
-                logger.error(`[${companyId}] Erro na reconexão:`, err);
+                appLogger.error(`[${companyId}] Erro na reconexão:`, err);
                 this._setError(companyId, 'reconnect_failed');
               });
             }, RECONNECT_TIMEOUT);
           } else {
-            logger.error(`[${companyId}] Máximo de tentativas de reconexão atingido`);
+            appLogger.error(`[${companyId}] Máximo de tentativas de reconexão atingido`);
             this._setError(companyId, 'max_reconnect_attempts');
 
             await this.webhookService.send(companyId, 'disconnected', {
@@ -336,7 +340,7 @@ class SessionManager {
           }
         } else {
           // ========== LOGOUT - LIMPAR TUDO ==========
-          logger.info(`[${companyId}] 🚪 LOGOUT: Limpando sessão completamente`);
+          appLogger.info(`[${companyId}] 🚪 LOGOUT: Limpando sessão completamente`);
 
           this._setError(companyId, 'logged_out');
 
@@ -352,9 +356,9 @@ class SessionManager {
           // Isso permite que o usuário conecte um novo número
           try {
             await this._removeSessionFiles(companyId);
-            logger.info(`[${companyId}] 🗑️ Arquivos de sessão removidos após logout`);
+            appLogger.info(`[${companyId}] 🗑️ Arquivos de sessão removidos após logout`);
           } catch (e) {
-            logger.error(`[${companyId}] Erro ao remover arquivos após logout:`, e);
+            appLogger.error(`[${companyId}] Erro ao remover arquivos após logout:`, e);
           }
         }
       }
@@ -371,7 +375,7 @@ class SessionManager {
         try {
           await this._processIncomingMessage(companyId, msg);
         } catch (error) {
-          logger.error(`[${companyId}] Erro ao processar mensagem:`, error);
+          appLogger.error(`[${companyId}] Erro ao processar mensagem:`, error);
         }
       }
     });
@@ -382,7 +386,7 @@ class SessionManager {
         try {
           await this._processMessageUpdate(companyId, update);
         } catch (error) {
-          logger.error(`[${companyId}] Erro ao processar atualização:`, error);
+          appLogger.error(`[${companyId}] Erro ao processar atualização:`, error);
         }
       }
     });
@@ -406,7 +410,7 @@ class SessionManager {
           }
         }
       } catch (error) {
-        logger.error(`[${companyId}] Erro ao processar presença:`, error);
+        appLogger.error(`[${companyId}] Erro ao processar presença:`, error);
       }
     });
   }
@@ -423,7 +427,7 @@ class SessionManager {
     const normalizedPhone = normalizePhone(rawJid);
     
     if (!normalizedPhone && isLid(rawJid)) {
-      logger.warn(`[${companyId}] ⚠️ Ignorando mensagem de LID sem número real: ${rawJid}`);
+      appLogger.warn(`[${companyId}] ⚠️ Ignorando mensagem de LID sem número real: ${rawJid}`);
       return;
     }
     
@@ -463,7 +467,7 @@ class SessionManager {
       content = '[Mensagem não suportada]';
     }
 
-    logger.info(`[${companyId}] 📩 Mensagem de ${phone}: ${content.substring(0, 50)}...`);
+    appLogger.info(`[${companyId}] 📩 Mensagem de ${phone}: ${content.substring(0, 50)}...`);
 
     await this.webhookService.send(companyId, 'message_received', {
       message_id: msg.key.id,
@@ -493,7 +497,7 @@ class SessionManager {
     const status = statusMap[update.update.status];
     if (!status) return;
 
-    logger.info(`[${companyId}] 📊 Status atualizado: ${update.key.id} -> ${status}`);
+    appLogger.info(`[${companyId}] 📊 Status atualizado: ${update.key.id} -> ${status}`);
 
     await this.webhookService.send(companyId, 'message_status', {
       message_id: update.key.id,
@@ -526,7 +530,7 @@ class SessionManager {
         result = await socket.sendMessage(jid, { text: content });
       }
 
-      logger.info(`[${companyId}] 📤 Mensagem enviada para ${phone}: ${result.key.id}`);
+      appLogger.info(`[${companyId}] 📤 Mensagem enviada para ${phone}: ${result.key.id}`);
 
       if (localMessageId) {
         await this.webhookService.send(companyId, 'message_sent', {
@@ -540,7 +544,7 @@ class SessionManager {
         whatsappMessageId: result.key.id
       };
     } catch (error) {
-      logger.error(`[${companyId}] Erro ao enviar mensagem:`, error);
+      appLogger.error(`[${companyId}] Erro ao enviar mensagem:`, error);
       throw error;
     }
   }
@@ -565,7 +569,7 @@ class SessionManager {
       try {
         await socket.logout();
       } catch (error) {
-        logger.warn(`[${companyId}] Erro ao fazer logout:`, error);
+        appLogger.warn(`[${companyId}] Erro ao fazer logout:`, error);
       }
       
       this.sessions.delete(companyId);
@@ -581,7 +585,7 @@ class SessionManager {
    * Reinicia uma sessão (mantém credenciais)
    */
   async restartSession(companyId) {
-    logger.info(`[${companyId}] 🔄 Reiniciando sessão...`);
+    appLogger.info(`[${companyId}] 🔄 Reiniciando sessão...`);
     
     // Limpar estados
     this._cleanupCompanyState(companyId);
@@ -591,7 +595,7 @@ class SessionManager {
       try {
         socket.end?.();
       } catch (e) {
-        logger.warn(`[${companyId}] Erro ao encerrar socket:`, e.message);
+        appLogger.warn(`[${companyId}] Erro ao encerrar socket:`, e.message);
       }
       this.sessions.delete(companyId);
     }
@@ -609,7 +613,7 @@ class SessionManager {
    * Permite conectar um novo número
    */
   async removeSession(companyId) {
-    logger.info(`[${companyId}] 🗑️ Removendo sessão completamente...`);
+    appLogger.info(`[${companyId}] 🗑️ Removendo sessão completamente...`);
     
     // Limpar todos os estados
     this._cleanupCompanyState(companyId);
@@ -619,7 +623,7 @@ class SessionManager {
       try {
         socket.end?.();
       } catch (e) {
-        logger.warn(`[${companyId}] Erro ao encerrar socket:`, e.message);
+        appLogger.warn(`[${companyId}] Erro ao encerrar socket:`, e.message);
       }
     }
     
@@ -640,7 +644,7 @@ class SessionManager {
     
     if (fs.existsSync(sessionPath)) {
       fs.rmSync(sessionPath, { recursive: true, force: true });
-      logger.info(`[${companyId}] Arquivos de sessão removidos`);
+      appLogger.info(`[${companyId}] Arquivos de sessão removidos`);
     }
   }
 
@@ -652,7 +656,7 @@ class SessionManager {
 
     const sessionDirs = fs.readdirSync(this.sessionsDir);
     
-    logger.info(`Restaurando ${sessionDirs.length} sessão(ões)...`);
+    appLogger.info(`Restaurando ${sessionDirs.length} sessão(ões)...`);
 
     for (const companyId of sessionDirs) {
       const sessionPath = path.join(this.sessionsDir, companyId);
@@ -662,10 +666,10 @@ class SessionManager {
         
         if (fs.existsSync(credsFile)) {
           try {
-            logger.info(`[${companyId}] Restaurando sessão...`);
+            appLogger.info(`[${companyId}] Restaurando sessão...`);
             await this.createSession(companyId);
           } catch (error) {
-            logger.error(`[${companyId}] Erro ao restaurar:`, error);
+            appLogger.error(`[${companyId}] Erro ao restaurar:`, error);
           }
         }
       }
@@ -687,7 +691,7 @@ class SessionManager {
         }
         this.sessions.delete(companyId);
       } catch (error) {
-        logger.warn(`[${companyId}] Erro ao desconectar:`, error);
+        appLogger.warn(`[${companyId}] Erro ao desconectar:`, error);
       }
     }
   }
