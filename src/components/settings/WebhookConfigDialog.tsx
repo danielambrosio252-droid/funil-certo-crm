@@ -330,8 +330,64 @@ export function WebhookConfigDialog({ open, onOpenChange }: WebhookConfigDialogP
                 </div>
               </div>
 
-              <h4 className="font-medium mt-4 mb-3 flex items-center gap-2">
-                💡 Exemplo de Requisição
+              {/* Campos Personalizados */}
+              <h4 className="font-medium mt-6 mb-3 flex items-center gap-2">
+                🎨 Campos Personalizados
+              </h4>
+              <p className="text-sm text-muted-foreground mb-3">
+                Qualquer campo adicional enviado no payload será automaticamente salvo como campo personalizado 
+                e aparecerá na aba "Formulário" do lead.
+              </p>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs bg-primary/10">Flexível</Badge>
+                  <code className="bg-muted px-2 py-0.5 rounded">empresa</code>
+                  <span className="text-muted-foreground">Nome da empresa</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs bg-primary/10">Flexível</Badge>
+                  <code className="bg-muted px-2 py-0.5 rounded">tipo_negocio</code>
+                  <span className="text-muted-foreground">Tipo de negócio</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs bg-primary/10">Flexível</Badge>
+                  <code className="bg-muted px-2 py-0.5 rounded">objetivo_principal</code>
+                  <span className="text-muted-foreground">Objetivo do cliente</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs bg-primary/10">Flexível</Badge>
+                  <code className="bg-muted px-2 py-0.5 rounded">desafio_atual</code>
+                  <span className="text-muted-foreground">Desafio/problema atual</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs bg-primary/10">Flexível</Badge>
+                  <code className="bg-muted px-2 py-0.5 rounded">investe_anuncios</code>
+                  <span className="text-muted-foreground">Se já investe em anúncios</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs bg-primary/10">Flexível</Badge>
+                  <code className="bg-muted px-2 py-0.5 rounded">investimento_mensal</code>
+                  <span className="text-muted-foreground">Valor investido por mês</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs bg-primary/10">Flexível</Badge>
+                  <code className="bg-muted px-2 py-0.5 rounded">prazo_comecar</code>
+                  <span className="text-muted-foreground">Prazo para começar</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs bg-primary/10">Flexível</Badge>
+                  <code className="bg-muted px-2 py-0.5 rounded">instagram</code>
+                  <span className="text-muted-foreground">Perfil do Instagram</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs bg-primary/10">Flexível</Badge>
+                  <code className="bg-muted px-2 py-0.5 rounded">orcamento_aprovado</code>
+                  <span className="text-muted-foreground">Se aceita o orçamento</span>
+                </div>
+              </div>
+
+              <h4 className="font-medium mt-6 mb-3 flex items-center gap-2">
+                💡 Exemplo Básico
               </h4>
               <pre className="bg-muted p-3 rounded-lg text-xs overflow-x-auto">
 {`curl -X POST "${webhookUrl}" \\
@@ -346,6 +402,35 @@ export function WebhookConfigDialog({ open, onOpenChange }: WebhookConfigDialogP
     "tags": ["interessado", "facebook"]
   }'`}
               </pre>
+
+              <h4 className="font-medium mt-6 mb-3 flex items-center gap-2">
+                📝 Exemplo com Campos Personalizados
+              </h4>
+              <pre className="bg-muted p-3 rounded-lg text-xs overflow-x-auto">
+{`curl -X POST "${webhookUrl}" \\
+  -H "Content-Type: application/json" \\
+  -H "X-Webhook-Secret: SEU_TOKEN_AQUI" \\
+  -d '{
+    "name": "Maria Souza",
+    "email": "maria@empresa.com",
+    "phone": "11988887777",
+    "source": "Landing Page",
+    "empresa": "Empresa XYZ",
+    "tipo_negocio": "E-commerce",
+    "objetivo_principal": "Aumentar vendas online",
+    "desafio_atual": "Baixo tráfego no site",
+    "investe_anuncios": "Sim",
+    "investimento_mensal": "R$ 2.000",
+    "prazo_comecar": "Próximas 2 semanas",
+    "instagram": "@empresaxyz",
+    "orcamento_aprovado": "Sim, dentro da realidade"
+  }'`}
+              </pre>
+
+              <p className="text-xs text-muted-foreground mt-3 p-2 bg-primary/5 rounded">
+                💡 <strong>Dica:</strong> Os campos personalizados aparecerão na aba "Formulário" 
+                quando você abrir os detalhes do lead. Use nomes de campos descritivos para facilitar a leitura.
+              </p>
             </CardContent>
           </Card>
 
