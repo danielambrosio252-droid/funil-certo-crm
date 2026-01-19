@@ -1,4 +1,4 @@
-import { Bell, Search, Plus, User, LogOut, Settings, CreditCard } from "lucide-react";
+import { Bell, Search, Plus, User, LogOut, Settings, CreditCard, Menu } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,19 +44,25 @@ export function Header({ title, subtitle, onNewLead }: HeaderProps) {
   };
 
   return (
-    <header className="h-16 border-b border-border bg-card/50 backdrop-blur-sm flex items-center justify-between px-6 sticky top-0 z-40">
-      <div>
-        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
-        {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
+    <header className="h-16 border-b border-border bg-card/50 backdrop-blur-sm flex items-center justify-between px-4 sm:px-6 sticky top-0 z-40">
+      {/* Left section with title */}
+      <div className="flex items-center gap-4">
+        {/* Spacer for mobile menu button */}
+        <div className="w-10 lg:hidden" />
+        <div className="min-w-0">
+          <h1 className="text-lg sm:text-xl font-semibold text-foreground truncate">{title}</h1>
+          {subtitle && <p className="text-xs sm:text-sm text-muted-foreground truncate hidden sm:block">{subtitle}</p>}
+        </div>
       </div>
 
-      <div className="flex items-center gap-4">
-        {/* Search */}
-        <div className="relative hidden md:block">
+      {/* Right section */}
+      <div className="flex items-center gap-2 sm:gap-4">
+        {/* Search - hidden on small screens */}
+        <div className="relative hidden lg:block">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
             placeholder="Buscar leads, funis..."
-            className="w-64 pl-10 bg-background/50"
+            className="w-48 xl:w-64 pl-10 bg-background/50"
           />
         </div>
 

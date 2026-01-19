@@ -133,11 +133,11 @@ export function KanbanBoard({ funnelId, filters }: KanbanBoardProps) {
   return (
     <>
       <DragDropContext onDragEnd={onDragEnd}>
-        <div className="flex gap-4 overflow-x-auto pb-4 min-h-[calc(100vh-200px)]">
+        <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 min-h-[calc(100vh-280px)] sm:min-h-[calc(100vh-200px)] -mx-4 px-4 sm:mx-0 sm:px-0">
           {stages.map((stage) => (
             <div
               key={stage.id}
-              className="flex-shrink-0 w-80 bg-muted/30 rounded-xl border border-border"
+              className="flex-shrink-0 w-72 sm:w-80 bg-muted/30 rounded-xl border border-border"
             >
               {/* Stage Header */}
               <div className="p-4 border-b border-border">
