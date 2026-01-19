@@ -288,126 +288,57 @@ log_success "phoneNormalizer.js criado"
 
 # ===== CRIAR LOGGER (CommonJS + Baileys compatível) =====
 log_step "Criando utils/logger.js..."
-cat > "$INSTALL_DIR/src/utils/logger.js" << 'LOGGER_EOF'
 /**
  * =====================================================
  * UTILITÁRIO DE LOGS - COMPATÍVEL COM BAILEYS
  * =====================================================
  * 
- * Logger para o servidor WhatsApp.
- * Exporta:
- * - logger: para logs do app (info, warn, error, debug)
- * - baileysLogger: para Baileys (com trace, child, fatal)
+ * Dois loggers distintos:
+ * - appLogger: usado pelo servidor (info, warn, error, debug)
+ * - baileysLogger: usado APENAS pelo Baileys (trace, child, fatal)
  * 
- * IMPORTANTE: Baileys REQUER que o logger tenha:
- * - trace(), debug(), info(), warn(), error(), fatal()
- * - child() que retorna outro logger
+ * REQUISITOS OBRIGATÓRIOS do baileysLogger:
+ * - trace(), child(), fatal() devem existir
+ * - child() DEVE retornar ele mesmo (flat)
+ * - NÃO depende de contexto (companyId, etc)
+ * - NÃO usa pino-pretty
  */
 
 const pino = require('pino');
 
-const isProduction = process.env.NODE_ENV === 'production';
-const LOG_LEVEL = process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug');
-
-// Verificar se pino-pretty está disponível (dev only)
-let hasPinoPretty = false;
-if (!isProduction) {
-  try {
-    require.resolve('pino-pretty');
-    hasPinoPretty = true;
-  } catch {
-    hasPinoPretty = false;
-  }
+let baseLogger;
+try {
+  baseLogger = pino({ level: process.env.LOG_LEVEL || 'info' });
+} catch {
+  baseLogger = console;
 }
 
-// Logger principal para a aplicação
-const logger = pino({
-  level: LOG_LEVEL,
-  transport: (!isProduction && hasPinoPretty) 
-    ? {
-        target: 'pino-pretty',
-        options: {
-          colorize: true,
-          translateTime: 'SYS:standard',
-          ignore: 'pid,hostname'
-        }
-      }
-    : undefined,
-  base: {
-    service: 'escala-whatsapp'
-  }
-});
-
-/**
- * Logger compatível com Baileys
- * 
- * Baileys chama internamente: logger.trace(), logger.child()
- * Se esses métodos não existirem, dá erro:
- * "TypeError: logger.trace is not a function"
- * 
- * Este logger silencia trace/debug/info do Baileys (muito verboso)
- * mas mantém warn/error/fatal visíveis
- */
-const createBaileysLogger = (parentLogger, context = {}) => {
-  const baileysLogger = {
-    level: 'silent', // Baileys verifica isso
-    
-    // Métodos silenciosos (Baileys é MUITO verboso)
-    trace: () => {},
-    debug: () => {},
-    info: () => {},
-    
-    // Métodos que logam (apenas warnings e erros)
-    warn: (...args) => {
-      if (args.length === 1 && typeof args[0] === 'object') {
-        parentLogger.warn({ ...context, ...args[0] });
-      } else if (args.length === 2 && typeof args[0] === 'object') {
-        parentLogger.warn({ ...context, ...args[0] }, args[1]);
-      } else {
-        parentLogger.warn(context, ...args);
-      }
-    },
-    error: (...args) => {
-      if (args.length === 1 && typeof args[0] === 'object') {
-        parentLogger.error({ ...context, ...args[0] });
-      } else if (args.length === 2 && typeof args[0] === 'object') {
-        parentLogger.error({ ...context, ...args[0] }, args[1]);
-      } else {
-        parentLogger.error(context, ...args);
-      }
-    },
-    fatal: (...args) => {
-      if (args.length === 1 && typeof args[0] === 'object') {
-        parentLogger.error({ ...context, ...args[0], fatal: true });
-      } else if (args.length === 2 && typeof args[0] === 'object') {
-        parentLogger.error({ ...context, ...args[0], fatal: true }, args[1]);
-      } else {
-        parentLogger.error({ ...context, fatal: true }, ...args);
-      }
-    },
-    
-    // child() DEVE retornar outro logger com mesma interface
-    child: (childContext = {}) => {
-      return createBaileysLogger(parentLogger, { ...context, ...childContext });
-    }
-  };
-  
-  return baileysLogger;
+// Logger para o app/servidor
+const appLogger = {
+  info: (...a) => baseLogger.info?.(...a) ?? console.log(...a),
+  warn: (...a) => baseLogger.warn?.(...a) ?? console.warn(...a),
+  error: (...a) => baseLogger.error?.(...a) ?? console.error(...a),
+  debug: (...a) => baseLogger.debug?.(...a) ?? console.debug(...a),
 };
 
-// Instância do baileysLogger para exportar
-const baileysLogger = createBaileysLogger(logger);
-
-module.exports = { 
-  logger, 
-  baileysLogger 
+// Logger para Baileys - FLAT, sem child dinâmico
+const baileysLogger = {
+  level: 'silent',
+  info: () => {},
+  debug: () => {},
+  trace: () => {},
+  warn: (...a) => appLogger.warn(...a),
+  error: (...a) => appLogger.error(...a),
+  fatal: (...a) => appLogger.error(...a),
+  child: () => baileysLogger,
 };
+
+module.exports = { appLogger, baileysLogger };
 LOGGER_EOF
 log_success "logger.js criado (CommonJS + Baileys compatível)"
 
 # ===== CRIAR WEBHOOK SERVICE (CommonJS) =====
 log_step "Criando services/WebhookService.js..."
-cat > "$INSTALL_DIR/src/services/WebhookService.js" << 'WEBHOOK_EOF'
 /**
  * =====================================================
  * SERVIÇO DE WEBHOOK
@@ -417,7 +348,7 @@ cat > "$INSTALL_DIR/src/services/WebhookService.js" << 'WEBHOOK_EOF'
  * via webhook HTTP.
  */
 
-const { logger } = require('../utils/logger');
+const { appLogger } = require('../utils/logger');
 
 class WebhookService {
   constructor(webhookUrl, webhookSecret = null) {
@@ -432,7 +363,7 @@ class WebhookService {
    */
   async send(companyId, eventType, data) {
     if (!this.webhookUrl) {
-      logger.warn(`[${companyId}] Webhook URL não configurado, evento ignorado: ${eventType}`);
+      appLogger.warn(`[${companyId}] Webhook URL não configurado, evento ignorado: ${eventType}`);
       return false;
     }
 
@@ -462,19 +393,19 @@ class WebhookService {
         });
 
         if (response.ok) {
-          logger.debug(`[${companyId}] Webhook enviado: ${eventType}`);
+          appLogger.debug(`[${companyId}] Webhook enviado: ${eventType}`);
           return true;
         }
 
         const errorText = await response.text();
-        logger.warn(`[${companyId}] Webhook falhou (${response.status}): ${errorText}`);
+        appLogger.warn(`[${companyId}] Webhook falhou (${response.status}): ${errorText}`);
 
         if (response.status >= 400 && response.status < 500) {
           // Erro do cliente, não tentar novamente
           return false;
         }
       } catch (error) {
-        logger.error(`[${companyId}] Erro no webhook (tentativa ${attempt}):`, error.message);
+        appLogger.error(`[${companyId}] Erro no webhook (tentativa ${attempt}):`, error.message);
       }
 
       // Aguardar antes de tentar novamente
@@ -483,7 +414,7 @@ class WebhookService {
       }
     }
 
-    logger.error(`[${companyId}] Webhook falhou após ${this.retryAttempts} tentativas: ${eventType}`);
+    appLogger.error(`[${companyId}] Webhook falhou após ${this.retryAttempts} tentativas: ${eventType}`);
     return false;
   }
 
@@ -540,7 +471,7 @@ const {
 const QRCode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
-const { logger, baileysLogger } = require('../utils/logger');
+const { appLogger, baileysLogger } = require('../utils/logger');
 const { normalizePhone, isLid, phoneToJid } = require('../utils/phoneNormalizer');
 
 const RECONNECT_TIMEOUT = parseInt(process.env.RECONNECT_TIMEOUT) || 5000;
@@ -597,28 +528,28 @@ class SessionManager {
 
     const now = Date.now();
     this.pendingConnections.set(companyId, now);
-    logger.info(`[${companyId}] ⏳ Marcado como pending: ${now}`);
+    appLogger.info(`[${companyId}] ⏳ Marcado como pending: ${now}`);
 
     const qrTimeoutId = setTimeout(() => {
       const pendingTime = this.pendingConnections.get(companyId);
       const hasQr = this.qrStore.has(companyId);
       const socket = this.sessions.get(companyId);
       const isConnected = !!socket?.user;
-      
+
       if (pendingTime === now && !hasQr && !isConnected) {
-        logger.error(`[${companyId}] ⏰ TIMEOUT: QR não gerado em ${QR_TIMEOUT_MS/1000}s`);
+        appLogger.error(`[${companyId}] ⏰ TIMEOUT: QR não gerado em ${QR_TIMEOUT_MS/1000}s`);
         this._setError(companyId, 'qr_timeout');
-        
+
         this.webhookService.send(companyId, 'error', {
           reason: 'qr_timeout',
           message: 'QR Code não foi gerado no tempo esperado'
-        }).catch(e => logger.error(`[${companyId}] Erro ao enviar webhook de timeout:`, e));
-        
+        }).catch(e => appLogger.error(`[${companyId}] Erro ao enviar webhook de timeout:`, e));
+
         if (socket && !isConnected) {
           try {
             socket.end?.();
           } catch (e) {
-            logger.warn(`[${companyId}] Erro ao encerrar socket no timeout:`, e.message);
+            appLogger.warn(`[${companyId}] Erro ao encerrar socket no timeout:`, e.message);
           }
           this.sessions.delete(companyId);
           this.sessionMeta.delete(companyId);
@@ -627,7 +558,7 @@ class SessionManager {
     }, QR_TIMEOUT_MS);
 
     const sessionPath = path.join(this.sessionsDir, companyId);
-    
+
     if (!fs.existsSync(sessionPath)) {
       fs.mkdirSync(sessionPath, { recursive: true });
     }
@@ -636,13 +567,13 @@ class SessionManager {
       const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
       const { version } = await fetchLatestBaileysVersion();
 
-      // IMPORTANTE: Usar baileysLogger para Baileys
+      // IMPORTANTE: Usar baileysLogger para Baileys (FLAT, sem .child())
       const socket = makeWASocket({
         version,
-        logger: baileysLogger.child({ companyId }),
+        logger: baileysLogger,
         auth: {
           creds: state.creds,
-          keys: makeCacheableSignalKeyStore(state.keys, baileysLogger.child({ companyId, module: 'keys' }))
+          keys: makeCacheableSignalKeyStore(state.keys, baileysLogger)
         },
         browser: ['Escala Certo Pro', 'Chrome', '120.0.0.0'],
         connectTimeoutMs: 60000,
@@ -671,7 +602,7 @@ class SessionManager {
     } catch (error) {
       clearTimeout(qrTimeoutId);
       this._setError(companyId, 'create_session_error');
-      logger.error(`[${companyId}] 💥 Erro ao criar sessão:`, error);
+      appLogger.error(`[${companyId}] 💥 Erro ao criar sessão:`, error);
       throw error;
     }
   }
@@ -695,7 +626,7 @@ class SessionManager {
           this.qrStore.set(companyId, { qr: qrImage, createdAt: new Date() });
           this.errorStore.delete(companyId);
 
-          logger.info(`[${companyId}] 📱 QR Code gerado com sucesso`);
+          appLogger.info(`[${companyId}] 📱 QR Code gerado com sucesso`);
 
           await this.webhookService.send(companyId, 'qr_code', {
             qr_code: qrImage
@@ -1250,7 +1181,7 @@ const path = require('path');
 
 const { SessionManager } = require('./managers/SessionManager');
 const { WebhookService } = require('./services/WebhookService');
-const { logger } = require('./utils/logger');
+const { appLogger } = require('./utils/logger');
 
 // =====================================================
 // CONFIGURAÇÃO (com fallback para nomes antigos)
@@ -1297,7 +1228,7 @@ const sessionManager = new SessionManager(SESSIONS_DIR, webhookService);
 // =====================================================
 
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`, { 
+  appLogger.info(`${req.method} ${req.path}`, { 
     ip: req.ip,
     body: req.method === 'POST' ? req.body : undefined 
   });
@@ -1309,6 +1240,7 @@ app.use((req, res, next) => {
 // =====================================================
 
 const validateServerToken = (req, res, next) => {
+  // Se não há secret configurado, pular validação
   if (!SERVER_SECRET) {
     return next();
   }
@@ -1316,7 +1248,7 @@ const validateServerToken = (req, res, next) => {
   const token = req.headers['x-server-token'] || req.query.token;
   
   if (token !== SERVER_SECRET) {
-    logger.warn(`Tentativa de acesso não autorizado: ${req.path}`);
+    appLogger.warn(`Tentativa de acesso não autorizado: ${req.path}`);
     return res.status(401).json({ 
       success: false, 
       error: 'Token inválido' 
@@ -1332,6 +1264,8 @@ const validateServerToken = (req, res, next) => {
 
 /**
  * POST /connect
+ * Inicia uma nova sessão WhatsApp para a empresa
+ * FORÇA reset da sessão anterior
  */
 app.post('/connect', validateServerToken, async (req, res) => {
   const { company_id, force_reset } = req.body;
@@ -1344,8 +1278,9 @@ app.post('/connect', validateServerToken, async (req, res) => {
   }
 
   try {
-    logger.info(`[${company_id}] POST /connect - force_reset: ${force_reset}`);
+    appLogger.info(`[${company_id}] POST /connect - force_reset: ${force_reset}`);
     
+    // Se force_reset, remover sessão completamente antes
     if (force_reset) {
       await sessionManager.removeSession(company_id);
     }
@@ -1359,7 +1294,7 @@ app.post('/connect', validateServerToken, async (req, res) => {
       phone_number: result.phone_number || null
     });
   } catch (error) {
-    logger.error(`[${company_id}] Erro ao conectar:`, error);
+    appLogger.error(`[${company_id}] Erro ao conectar:`, error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -1369,6 +1304,16 @@ app.post('/connect', validateServerToken, async (req, res) => {
 
 /**
  * GET /api/whatsapp/qr
+ * ENDPOINT DETERMINÍSTICO para polling
+ * 
+ * Retorna status EXPLÍCITO:
+ * - CONNECTING: Sessão iniciando, aguarde
+ * - QR: QR Code disponível (inclui qr base64)
+ * - CONNECTED: Já conectado (inclui phone_number)
+ * - ERROR: Erro ocorreu (inclui reason)
+ * - DISCONNECTED: Sem sessão ativa
+ * 
+ * NUNCA retorna WAITING infinito!
  */
 app.get('/api/whatsapp/qr', (req, res) => {
   const companyId = req.query.company_id || req.query.companyId;
@@ -1380,11 +1325,13 @@ app.get('/api/whatsapp/qr', (req, res) => {
     });
   }
 
+  // Usar o novo método determinístico
   const sessionStatus = sessionManager.getSessionStatus(companyId);
   const qr = sessionManager.getQrCode(companyId);
 
-  logger.info(`[${companyId}] GET /api/whatsapp/qr - status: ${sessionStatus.status}, hasQR: ${!!qr}`);
+  appLogger.info(`[${companyId}] GET /api/whatsapp/qr - status: ${sessionStatus.status}, hasQR: ${!!qr}`);
 
+  // 1. CONNECTED
   if (sessionStatus.connected || sessionStatus.status === 'connected') {
     return res.json({
       status: 'CONNECTED',
@@ -1392,6 +1339,7 @@ app.get('/api/whatsapp/qr', (req, res) => {
     });
   }
 
+  // 2. QR disponível
   if (qr || sessionStatus.status === 'qr') {
     return res.json({
       status: 'QR',
@@ -1399,6 +1347,7 @@ app.get('/api/whatsapp/qr', (req, res) => {
     });
   }
 
+  // 3. ERROR
   if (sessionStatus.status === 'error') {
     return res.json({
       status: 'ERROR',
@@ -1406,6 +1355,7 @@ app.get('/api/whatsapp/qr', (req, res) => {
     });
   }
 
+  // 4. CONNECTING (com idade)
   if (sessionStatus.status === 'connecting' || sessionStatus.connecting) {
     return res.json({
       status: 'CONNECTING',
@@ -1413,6 +1363,7 @@ app.get('/api/whatsapp/qr', (req, res) => {
     });
   }
 
+  // 5. DISCONNECTED
   return res.json({ 
     status: 'DISCONNECTED' 
   });
@@ -1420,6 +1371,7 @@ app.get('/api/whatsapp/qr', (req, res) => {
 
 /**
  * POST /disconnect
+ * Desconecta uma sessão WhatsApp
  */
 app.post('/disconnect', validateServerToken, async (req, res) => {
   const { company_id } = req.body;
@@ -1432,7 +1384,7 @@ app.post('/disconnect', validateServerToken, async (req, res) => {
   }
 
   try {
-    logger.info(`[${company_id}] Desconectando...`);
+    appLogger.info(`[${company_id}] Desconectando...`);
     
     await sessionManager.disconnectSession(company_id);
     
@@ -1441,7 +1393,7 @@ app.post('/disconnect', validateServerToken, async (req, res) => {
       message: 'Sessão desconectada com sucesso' 
     });
   } catch (error) {
-    logger.error(`[${company_id}] Erro ao desconectar:`, error);
+    appLogger.error(`[${company_id}] Erro ao desconectar:`, error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -1451,6 +1403,7 @@ app.post('/disconnect', validateServerToken, async (req, res) => {
 
 /**
  * POST /send
+ * Envia uma mensagem de texto
  */
 app.post('/send', validateServerToken, async (req, res) => {
   const { company_id, message_id, phone, content, message_type = 'text' } = req.body;
@@ -1476,7 +1429,7 @@ app.post('/send', validateServerToken, async (req, res) => {
       targetCompanyId = activeSessions[0];
     }
 
-    logger.info(`[${targetCompanyId}] Enviando mensagem para ${phone}`);
+    appLogger.info(`[${targetCompanyId}] Enviando mensagem para ${phone}`);
 
     const result = await sessionManager.sendMessage(
       targetCompanyId,
@@ -1492,7 +1445,7 @@ app.post('/send', validateServerToken, async (req, res) => {
       whatsapp_message_id: result.whatsappMessageId
     });
   } catch (error) {
-    logger.error(`Erro ao enviar mensagem:`, error);
+    appLogger.error(`Erro ao enviar mensagem:`, error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -1502,6 +1455,7 @@ app.post('/send', validateServerToken, async (req, res) => {
 
 /**
  * GET /status
+ * Retorna o status de todas as sessões
  */
 app.get('/status', (req, res) => {
   const sessions = sessionManager.getAllSessionsStatus();
@@ -1517,6 +1471,7 @@ app.get('/status', (req, res) => {
 
 /**
  * GET /status/:company_id
+ * Retorna o status de uma sessão específica
  */
 app.get('/status/:company_id', (req, res) => {
   const { company_id } = req.params;
@@ -1531,6 +1486,7 @@ app.get('/status/:company_id', (req, res) => {
 
 /**
  * GET /health
+ * Health check para load balancers e monitoramento
  */
 app.get('/health', (req, res) => {
   res.json({ 
@@ -1542,34 +1498,14 @@ app.get('/health', (req, res) => {
 });
 
 /**
- * GET /diagnostics
- * Endpoint para debug - mostra config sem secrets
- */
-app.get('/diagnostics', (req, res) => {
-  res.json({
-    status: 'ok',
-    config: {
-      port: PORT,
-      webhook_url: WEBHOOK_URL ? WEBHOOK_URL.substring(0, 50) + '...' : 'NOT SET',
-      webhook_secret_set: !!WEBHOOK_SECRET,
-      server_secret_set: !!SERVER_SECRET,
-      sessions_dir: path.resolve(SESSIONS_DIR),
-      node_env: process.env.NODE_ENV || 'development'
-    },
-    sessions: sessionManager.getAllSessionsStatus(),
-    uptime: process.uptime(),
-    memory: process.memoryUsage()
-  });
-});
-
-/**
  * POST /restart/:company_id
+ * Reinicia uma sessão específica (mantém credenciais)
  */
 app.post('/restart/:company_id', validateServerToken, async (req, res) => {
   const { company_id } = req.params;
 
   try {
-    logger.info(`[${company_id}] Reiniciando sessão...`);
+    appLogger.info(`[${company_id}] Reiniciando sessão...`);
     
     const result = await sessionManager.restartSession(company_id);
     
@@ -1579,7 +1515,7 @@ app.post('/restart/:company_id', validateServerToken, async (req, res) => {
       status: result.status
     });
   } catch (error) {
-    logger.error(`[${company_id}] Erro ao reiniciar:`, error);
+    appLogger.error(`[${company_id}] Erro ao reiniciar:`, error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -1589,12 +1525,14 @@ app.post('/restart/:company_id', validateServerToken, async (req, res) => {
 
 /**
  * DELETE /session/:company_id
+ * Remove completamente uma sessão (incluindo arquivos)
+ * Permite conectar um novo número
  */
 app.delete('/session/:company_id', validateServerToken, async (req, res) => {
   const { company_id } = req.params;
 
   try {
-    logger.info(`[${company_id}] Removendo sessão completamente...`);
+    appLogger.info(`[${company_id}] Removendo sessão completamente...`);
     
     await sessionManager.removeSession(company_id);
     
@@ -1603,7 +1541,7 @@ app.delete('/session/:company_id', validateServerToken, async (req, res) => {
       message: 'Sessão removida completamente' 
     });
   } catch (error) {
-    logger.error(`[${company_id}] Erro ao remover:`, error);
+    appLogger.error(`[${company_id}] Erro ao remover:`, error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -1616,15 +1554,16 @@ app.delete('/session/:company_id', validateServerToken, async (req, res) => {
 // =====================================================
 
 app.listen(PORT, async () => {
-  logger.info('=========================================');
-  logger.info('🚀 SERVIDOR WHATSAPP - ESCALA CERTO PRO');
-  logger.info('=========================================');
-  logger.info(`📡 Porta: ${PORT}`);
-  logger.info(`🔗 Webhook: ${WEBHOOK_URL || 'NÃO CONFIGURADO'}`);
-  logger.info(`🔐 Auth: ${SERVER_SECRET ? 'ATIVO' : 'DESATIVADO'}`);
-  logger.info(`📁 Sessões: ${path.resolve(SESSIONS_DIR)}`);
-  logger.info('=========================================');
+  appLogger.info('=========================================');
+  appLogger.info('🚀 SERVIDOR WHATSAPP - ESCALA CERTO PRO');
+  appLogger.info('=========================================');
+  appLogger.info(`📡 Porta: ${PORT}`);
+  appLogger.info(`🔗 Webhook: ${WEBHOOK_URL || 'NÃO CONFIGURADO'}`);
+  appLogger.info(`🔐 Auth: ${SERVER_SECRET ? 'ATIVO' : 'DESATIVADO'}`);
+  appLogger.info(`📁 Sessões: ${path.resolve(SESSIONS_DIR)}`);
+  appLogger.info('=========================================');
 
+  // Restaurar sessões existentes na inicialização
   await sessionManager.restoreAllSessions();
 });
 
@@ -1633,21 +1572,21 @@ app.listen(PORT, async () => {
 // =====================================================
 
 process.on('uncaughtException', (error) => {
-  logger.error('Erro não capturado:', error);
+  appLogger.error('Erro não capturado:', error);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Promise rejeitada não tratada:', reason);
+  appLogger.error('Promise rejeitada não tratada:', reason);
 });
 
 process.on('SIGINT', async () => {
-  logger.info('Encerrando servidor...');
+  appLogger.info('Encerrando servidor...');
   await sessionManager.disconnectAllSessions();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  logger.info('Recebido SIGTERM, encerrando...');
+  appLogger.info('Recebido SIGTERM, encerrando...');
   await sessionManager.disconnectAllSessions();
   process.exit(0);
 });
