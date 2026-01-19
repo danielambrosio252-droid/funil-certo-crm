@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { KanbanBoard } from "@/components/funnels/KanbanBoard";
+import { FunnelListView } from "@/components/funnels/FunnelListView";
 import { CreateFunnelDialog } from "@/components/funnels/CreateFunnelDialog";
+import { FunnelFilters, FunnelFiltersState } from "@/components/funnels/FunnelFilters";
+import { ExportLeads } from "@/components/funnels/ExportLeads";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Kanban, List, Filter, Download, Loader2, Trash2 } from "lucide-react";
+import { Plus, Kanban, List, Download, Loader2, Trash2 } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -12,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useFunnels } from "@/hooks/useFunnels";
+import { useFunnels, useFunnelStages, useFunnelLeads } from "@/hooks/useFunnels";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,14 +30,61 @@ import {
 export default function Funnels() {
   const [view, setView] = useState<"kanban" | "list">("kanban");
   const [showCreateFunnel, setShowCreateFunnel] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [selectedFunnelId, setSelectedFunnelId] = useState<string | null>(null);
   const [funnelToDelete, setFunnelToDelete] = useState<string | null>(null);
+  const [filters, setFilters] = useState<FunnelFiltersState>({
+    sources: [],
+    stages: [],
+    minValue: "",
+    maxValue: "",
+    tags: [],
+  });
   
   const { funnels, loadingFunnels, deleteFunnel } = useFunnels();
 
   // Selecionar primeiro funil automaticamente
   const currentFunnelId = selectedFunnelId || (funnels.length > 0 ? funnels[0].id : null);
   const currentFunnel = funnels.find(f => f.id === currentFunnelId);
+
+  // Get stages and leads for current funnel (for export and filters)
+  const { stages } = useFunnelStages(currentFunnelId);
+  const stageIds = useMemo(() => stages.map(s => s.id), [stages]);
+  const { leads } = useFunnelLeads(stageIds);
+
+  // Apply filters to leads
+  const filteredLeads = useMemo(() => {
+    let result = [...leads];
+
+    // Filter by source
+    if (filters.sources.length > 0) {
+      result = result.filter(lead => lead.source && filters.sources.includes(lead.source));
+    }
+
+    // Filter by stage
+    if (filters.stages.length > 0) {
+      result = result.filter(lead => filters.stages.includes(lead.stage_id));
+    }
+
+    // Filter by min value
+    if (filters.minValue) {
+      result = result.filter(lead => (lead.value || 0) >= parseFloat(filters.minValue));
+    }
+
+    // Filter by max value
+    if (filters.maxValue) {
+      result = result.filter(lead => (lead.value || 0) <= parseFloat(filters.maxValue));
+    }
+
+    // Filter by tags
+    if (filters.tags.length > 0) {
+      result = result.filter(lead => 
+        lead.tags && filters.tags.some(tag => lead.tags.includes(tag))
+      );
+    }
+
+    return result;
+  }, [leads, filters]);
 
   const handleDeleteFunnel = async () => {
     if (!funnelToDelete) return;
@@ -52,7 +102,7 @@ export default function Funnels() {
     >
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           {loadingFunnels ? (
             <div className="w-48 h-10 flex items-center justify-center">
               <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -110,12 +160,18 @@ export default function Funnels() {
           </Tabs>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button variant="outline" className="gap-2">
-            <Filter className="w-4 h-4" />
-            Filtros
-          </Button>
-          <Button variant="outline" className="gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <FunnelFilters
+            stages={stages}
+            filters={filters}
+            onFiltersChange={setFilters}
+          />
+          <Button 
+            variant="outline" 
+            className="gap-2"
+            onClick={() => setShowExport(true)}
+            disabled={filteredLeads.length === 0}
+          >
             <Download className="w-4 h-4" />
             Exportar
           </Button>
@@ -131,19 +187,23 @@ export default function Funnels() {
 
       {/* Content */}
       {view === "kanban" ? (
-        <KanbanBoard funnelId={currentFunnelId} />
+        <KanbanBoard funnelId={currentFunnelId} filters={filters} />
       ) : (
-        <div className="bg-card border border-border rounded-xl p-8 text-center">
-          <List className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-          <h3 className="text-lg font-semibold text-foreground mb-2">Visualização em Lista</h3>
-          <p className="text-muted-foreground">Em breve disponível</p>
-        </div>
+        <FunnelListView funnelId={currentFunnelId} filters={filters} />
       )}
 
       {/* Create Funnel Dialog */}
       <CreateFunnelDialog
         open={showCreateFunnel}
         onOpenChange={setShowCreateFunnel}
+      />
+
+      {/* Export Dialog */}
+      <ExportLeads
+        open={showExport}
+        onOpenChange={setShowExport}
+        leads={filteredLeads}
+        stages={stages}
       />
 
       {/* Delete Confirmation */}
