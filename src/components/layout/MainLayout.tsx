@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
-import { Sidebar } from "./Sidebar";
+import { Sidebar, SidebarProvider, useSidebar } from "./Sidebar";
 import { Header } from "./Header";
+import { motion } from "framer-motion";
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -9,16 +10,33 @@ interface MainLayoutProps {
   onNewLead?: () => void;
 }
 
-export function MainLayout({ children, title, subtitle, onNewLead }: MainLayoutProps) {
+function MainContent({ children, title, subtitle, onNewLead }: MainLayoutProps) {
+  const { collapsed, isMobile } = useSidebar();
+
+  // Calculate padding based on sidebar state
+  const paddingLeft = isMobile ? 0 : (collapsed ? 80 : 280);
+
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
-      <div className="pl-[280px] min-h-screen">
+      <motion.div 
+        className="min-h-screen transition-all duration-300"
+        animate={{ paddingLeft }}
+        transition={{ duration: 0.3, ease: "easeInOut" }}
+      >
         <Header title={title} subtitle={subtitle} onNewLead={onNewLead} />
-        <main className="p-6">
+        <main className="p-4 sm:p-6">
           {children}
         </main>
-      </div>
+      </motion.div>
     </div>
+  );
+}
+
+export function MainLayout(props: MainLayoutProps) {
+  return (
+    <SidebarProvider>
+      <MainContent {...props} />
+    </SidebarProvider>
   );
 }

@@ -117,19 +117,20 @@ export default function Funnels() {
       onNewLead={handleNewLeadFromHeader}
     >
       {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex flex-col gap-4 mb-6">
+        {/* Top row: Funnel selector and view toggle */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
           {loadingFunnels ? (
             <div className="w-48 h-10 flex items-center justify-center">
               <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
             </div>
           ) : funnels.length > 0 ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <Select 
                 value={currentFunnelId || undefined} 
                 onValueChange={setSelectedFunnelId}
               >
-                <SelectTrigger className="w-48">
+                <SelectTrigger className="w-full sm:w-48">
                   <SelectValue placeholder="Selecionar funil" />
                 </SelectTrigger>
                 <SelectContent>
@@ -172,20 +173,21 @@ export default function Funnels() {
             <p className="text-muted-foreground text-sm">Nenhum funil criado</p>
           )}
           
-          <Tabs value={view} onValueChange={(v) => setView(v as "kanban" | "list")}>
-            <TabsList>
-              <TabsTrigger value="kanban" className="gap-2">
+          <Tabs value={view} onValueChange={(v) => setView(v as "kanban" | "list")} className="w-full sm:w-auto">
+            <TabsList className="w-full sm:w-auto">
+              <TabsTrigger value="kanban" className="gap-2 flex-1 sm:flex-none">
                 <Kanban className="w-4 h-4" />
-                Kanban
+                <span className="hidden xs:inline">Kanban</span>
               </TabsTrigger>
-              <TabsTrigger value="list" className="gap-2">
+              <TabsTrigger value="list" className="gap-2 flex-1 sm:flex-none">
                 <List className="w-4 h-4" />
-                Lista
+                <span className="hidden xs:inline">Lista</span>
               </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
 
+        {/* Bottom row: Actions */}
         <div className="flex items-center gap-2 flex-wrap">
           <FunnelFilters
             stages={stages}
@@ -195,28 +197,31 @@ export default function Funnels() {
           {currentFunnel && (
             <Button 
               variant="outline" 
+              size="sm"
               className="gap-2"
               onClick={() => setShowAutomations(true)}
             >
               <Zap className="w-4 h-4" />
-              Automações
+              <span className="hidden sm:inline">Automações</span>
             </Button>
           )}
           <Button 
             variant="outline" 
+            size="sm"
             className="gap-2"
             onClick={() => setShowExport(true)}
             disabled={filteredLeads.length === 0}
           >
             <Download className="w-4 h-4" />
-            Exportar
+            <span className="hidden sm:inline">Exportar</span>
           </Button>
           <Button 
-            className="gap-2 gradient-primary text-primary-foreground"
+            size="sm"
+            className="gap-2 gradient-primary text-primary-foreground ml-auto"
             onClick={() => setShowCreateFunnel(true)}
           >
             <Plus className="w-4 h-4" />
-            Novo Funil
+            <span className="hidden sm:inline">Novo Funil</span>
           </Button>
         </div>
       </div>
