@@ -10,7 +10,7 @@
  * CAMPOS OBRIGATÓRIOS:
  * - name: string (nome do lead)
  * 
- * CAMPOS OPCIONAIS:
+ * CAMPOS OPCIONAIS PADRÃO:
  * - email: string (e-mail do lead)
  * - phone: string (telefone do lead)
  * - value: number (valor potencial)
@@ -20,11 +20,15 @@
  * - funnel_id: string (UUID do funil - se não informado, usa o padrão)
  * - stage_id: string (UUID do estágio - se não informado, usa o primeiro do funil)
  * 
+ * CAMPOS PERSONALIZADOS:
+ * - custom_fields: object (campos extras personalizados)
+ * - OU qualquer campo extra será automaticamente salvo em custom_fields
+ * 
  * HEADERS OBRIGATÓRIOS:
  * - X-Webhook-Secret: string (token de autenticação)
  * - Content-Type: application/json
  * 
- * EXEMPLO DE PAYLOAD:
+ * EXEMPLO DE PAYLOAD COM CAMPOS PERSONALIZADOS:
  * {
  *   "name": "João Silva",
  *   "email": "joao@email.com",
@@ -32,7 +36,26 @@
  *   "value": 1500,
  *   "source": "Facebook Ads",
  *   "tags": ["interessado", "facebook"],
- *   "notes": "Interessado no produto X"
+ *   "notes": "Interessado no produto X",
+ *   "custom_fields": {
+ *     "empresa": "Empresa ABC",
+ *     "tipo_negocio": "E-commerce",
+ *     "objetivo_principal": "Aumentar vendas",
+ *     "investe_em_anuncios": "Sim",
+ *     "investimento_mensal": "R$ 2.000",
+ *     "instagram": "@empresaabc",
+ *     "quando_comecar": "Imediatamente"
+ *   }
+ * }
+ * 
+ * OU envie os campos extras diretamente (serão salvos em custom_fields):
+ * {
+ *   "name": "João Silva",
+ *   "email": "joao@email.com",
+ *   "phone": "11999999999",
+ *   "empresa": "Empresa ABC",
+ *   "tipo_negocio": "E-commerce",
+ *   "objetivo_principal": "Aumentar vendas"
  * }
  */
 
@@ -54,6 +77,9 @@ interface LeadPayload {
   notes?: string;
   funnel_id?: string;
   stage_id?: string;
+  custom_fields?: Record<string, unknown>;
+  // Allow any extra field to be captured automatically
+  [key: string]: unknown;
 }
 
 Deno.serve(async (req) => {
@@ -193,6 +219,25 @@ Deno.serve(async (req) => {
 
     const position = (count || 0) + 1;
 
+    // Extrair campos personalizados
+    // Campos padrão que não devem ir para custom_fields
+    const standardFields = new Set([
+      "name", "email", "phone", "value", "source", 
+      "tags", "notes", "funnel_id", "stage_id", "custom_fields"
+    ]);
+    
+    // Combinar custom_fields explícitos com campos extras
+    const customFields: Record<string, unknown> = {
+      ...(payload.custom_fields || {}),
+    };
+    
+    // Capturar qualquer campo extra não-padrão
+    for (const [key, value] of Object.entries(payload)) {
+      if (!standardFields.has(key) && value !== undefined) {
+        customFields[key] = value;
+      }
+    }
+
     // Criar o lead
     const { data: newLead, error: leadError } = await supabase
       .from("funnel_leads")
@@ -207,6 +252,7 @@ Deno.serve(async (req) => {
         tags: payload.tags || [],
         notes: payload.notes?.trim() || null,
         position,
+        custom_fields: Object.keys(customFields).length > 0 ? customFields : {},
       })
       .select()
       .single();
