@@ -23,7 +23,7 @@ const {
 const QRCode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
-const { logger } = require('../utils/logger');
+const { logger, baileysLogger } = require('../utils/logger');
 const { normalizePhone, isLid, phoneToJid } = require('../utils/phoneNormalizer');
 
 const RECONNECT_TIMEOUT = parseInt(process.env.RECONNECT_TIMEOUT) || 5000;
@@ -154,14 +154,14 @@ class SessionManager {
       // Buscar versão mais recente do Baileys
       const { version } = await fetchLatestBaileysVersion();
 
-      // Criar socket
+      // Criar socket com baileysLogger (compatível com trace/child/fatal)
       const socket = makeWASocket({
         version,
+        logger: baileysLogger.child({ companyId }),
         auth: {
           creds: state.creds,
-          keys: makeCacheableSignalKeyStore(state.keys, logger)
+          keys: makeCacheableSignalKeyStore(state.keys, baileysLogger.child({ companyId, module: 'keys' }))
         },
-        // printQRInTerminal removido (deprecated)
         browser: ['Escala Certo Pro', 'Chrome', '120.0.0.0'],
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
