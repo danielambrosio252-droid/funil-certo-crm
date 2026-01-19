@@ -193,36 +193,56 @@ SESSIONS_DIR=./sessions
 ENV_EOF
 
 # src/utils/logger.js
-cat > src/utils/logger.js << 'LOGGER_EOF'
+/**
+ * =====================================================
+ * UTILITÁRIO DE LOGS - COMPATÍVEL COM BAILEYS
+ * =====================================================
+ * 
+ * Dois loggers distintos:
+ * - appLogger: usado pelo servidor (info, warn, error, debug)
+ * - baileysLogger: usado APENAS pelo Baileys (trace, child, fatal)
+ * 
+ * REQUISITOS OBRIGATÓRIOS do baileysLogger:
+ * - trace(), child(), fatal() devem existir
+ * - child() DEVE retornar ele mesmo (flat)
+ * - NÃO depende de contexto (companyId, etc)
+ * - NÃO usa pino-pretty
+ */
+
 const pino = require('pino');
 
-const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
-  transport: {
-    target: 'pino-pretty',
-    options: {
-      colorize: true,
-      translateTime: 'SYS:standard',
-      ignore: 'pid,hostname'
-    }
-  }
-});
+let baseLogger;
+try {
+  baseLogger = pino({ level: process.env.LOG_LEVEL || 'info' });
+} catch {
+  baseLogger = console;
+}
 
-// Fallback se pino-pretty não estiver disponível
-const simpleLogger = {
-  info: (...args) => console.log('[INFO]', new Date().toISOString(), ...args),
-  warn: (...args) => console.warn('[WARN]', new Date().toISOString(), ...args),
-  error: (...args) => console.error('[ERROR]', new Date().toISOString(), ...args),
-  debug: (...args) => console.log('[DEBUG]', new Date().toISOString(), ...args),
-  child: () => simpleLogger
+// Logger para o app/servidor
+const appLogger = {
+  info: (...a) => baseLogger.info?.(...a) ?? console.log(...a),
+  warn: (...a) => baseLogger.warn?.(...a) ?? console.warn(...a),
+  error: (...a) => baseLogger.error?.(...a) ?? console.error(...a),
+  debug: (...a) => baseLogger.debug?.(...a) ?? console.debug(...a),
 };
 
-module.exports = process.env.NODE_ENV === 'production' ? simpleLogger : (logger || simpleLogger);
+// Logger para Baileys - FLAT, sem child dinâmico
+const baileysLogger = {
+  level: 'silent',
+  info: () => {},
+  debug: () => {},
+  trace: () => {},
+  warn: (...a) => appLogger.warn(...a),
+  error: (...a) => appLogger.error(...a),
+  fatal: (...a) => appLogger.error(...a),
+  child: () => baileysLogger,
+};
+
+module.exports = { appLogger, baileysLogger };
 LOGGER_EOF
 
 # src/services/WebhookService.js
-cat > src/services/WebhookService.js << 'WEBHOOK_EOF'
-const logger = require('../utils/logger');
+const { appLogger } = require('../utils/logger');
 
 class WebhookService {
   constructor(webhookUrl, webhookSecret) {
@@ -234,7 +254,7 @@ class WebhookService {
 
   async send(companyId, eventType, data) {
     if (!this.webhookUrl) {
-      logger.warn('Webhook URL não configurada');
+      appLogger.warn('Webhook URL não configurada');
       return false;
     }
 
@@ -262,13 +282,13 @@ class WebhookService {
         });
 
         if (response.ok) {
-          logger.info('Webhook enviado: ' + eventType + ' para empresa ' + companyId);
+          appLogger.info('Webhook enviado: ' + eventType + ' para empresa ' + companyId);
           return true;
         }
 
-        logger.warn('Webhook falhou (tentativa ' + attempt + '): ' + response.status);
+        appLogger.warn('Webhook falhou (tentativa ' + attempt + '): ' + response.status);
       } catch (error) {
-        logger.error('Erro no webhook (tentativa ' + attempt + '):', error.message);
+        appLogger.error('Erro no webhook (tentativa ' + attempt + '):', error.message);
       }
 
       if (attempt < this.retryAttempts) {
@@ -290,7 +310,7 @@ const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = r
 const qrcode = require('qrcode-terminal');
 const path = require('path');
 const fs = require('fs');
-const logger = require('../utils/logger');
+const { appLogger, baileysLogger } = require('../utils/logger');
 
 class SessionManager {
   constructor(webhookService) {
@@ -309,13 +329,13 @@ class SessionManager {
 
   async createSession(companyId) {
     const self = this;
-    logger.info('Criando sessão para empresa: ' + companyId);
+    appLogger.info('Criando sessão para empresa: ' + companyId);
     
     // Verificar se já existe sessão ativa
     if (this.sessions.has(companyId)) {
       const status = this.sessionStatus.get(companyId);
       if (status === 'connected') {
-        logger.warn('Sessão já conectada para empresa: ' + companyId);
+        appLogger.warn('Sessão já conectada para empresa: ' + companyId);
         return { status: 'already_connected' };
       }
       // Desconectar sessão anterior
@@ -337,7 +357,7 @@ class SessionManager {
         version: version,
         auth: state,
         printQRInTerminal: false,
-        logger: logger.child({ company: companyId }),
+        logger: baileysLogger,
         browser: ['Escala Certo Pro', 'Chrome', '120.0.0'],
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
@@ -350,7 +370,7 @@ class SessionManager {
 
       return { status: 'connecting', message: 'Aguardando QR Code...' };
     } catch (error) {
-      logger.error('Erro ao criar sessão ' + companyId + ':', error);
+      appLogger.error('Erro ao criar sessão ' + companyId + ':', error);
       this.sessionStatus.set(companyId, 'error');
       throw error;
     }
@@ -367,7 +387,7 @@ class SessionManager {
 
       // QR Code gerado
       if (qr) {
-        logger.info('QR Code gerado para empresa: ' + companyId);
+        appLogger.info('QR Code gerado para empresa: ' + companyId);
         self.sessionStatus.set(companyId, 'qr_code');
         
         // Exibir QR no terminal
@@ -387,7 +407,7 @@ class SessionManager {
 
       // Conexão estabelecida
       if (connection === 'open') {
-        logger.info('WhatsApp conectado para empresa: ' + companyId);
+        appLogger.info('WhatsApp conectado para empresa: ' + companyId);
         self.sessionStatus.set(companyId, 'connected');
         self.reconnectAttempts.set(companyId, 0);
 
@@ -409,11 +429,11 @@ class SessionManager {
           statusCode = lastDisconnect.error.output.statusCode;
         }
 
-        logger.warn('Conexão fechada para ' + companyId + ': código ' + statusCode);
+        appLogger.warn('Conexão fechada para ' + companyId + ': código ' + statusCode);
 
         // Logout manual - limpar sessão
         if (statusCode === DisconnectReason.loggedOut) {
-          logger.info('Logout detectado para empresa: ' + companyId);
+          appLogger.info('Logout detectado para empresa: ' + companyId);
           self.sessionStatus.set(companyId, 'disconnected');
           await self._clearSessionFiles(companyId);
           await self.webhookService.send(companyId, 'disconnected', { reason: 'logged_out' });
@@ -425,7 +445,7 @@ class SessionManager {
         if (attempts < self.maxReconnectAttempts) {
           self.reconnectAttempts.set(companyId, attempts + 1);
           var nextAttempt = attempts + 1;
-          logger.info('Reconectando ' + companyId + ' (tentativa ' + nextAttempt + '/' + self.maxReconnectAttempts + ')...');
+          appLogger.info('Reconectando ' + companyId + ' (tentativa ' + nextAttempt + '/' + self.maxReconnectAttempts + ')...');
           
           self.sessionStatus.set(companyId, 'reconnecting');
           await self.webhookService.send(companyId, 'reconnecting', { attempt: nextAttempt });
@@ -434,7 +454,7 @@ class SessionManager {
             self.createSession(companyId); 
           }, 5000);
         } else {
-          logger.error('Máximo de tentativas atingido para ' + companyId);
+          appLogger.error('Máximo de tentativas atingido para ' + companyId);
           self.sessionStatus.set(companyId, 'disconnected');
           await self.webhookService.send(companyId, 'disconnected', { reason: 'max_retries' });
         }
@@ -490,7 +510,7 @@ class SessionManager {
         }
 
         var contentPreview = content.substring(0, 50);
-        logger.info('Mensagem recebida de ' + phone + ': ' + contentPreview + '...');
+        appLogger.info('Mensagem recebida de ' + phone + ': ' + contentPreview + '...');
 
         var msgTimestamp = msg.messageTimestamp ? new Date(msg.messageTimestamp * 1000).toISOString() : new Date().toISOString();
         var pushName = msg.pushName || null;
@@ -698,7 +718,7 @@ const express = require('express');
 const cors = require('cors');
 const SessionManager = require('./managers/SessionManager');
 const WebhookService = require('./services/WebhookService');
-const logger = require('./utils/logger');
+const { appLogger } = require('./utils/logger');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -737,7 +757,7 @@ app.post('/connect', async function(req, res) {
     var result = await sessionManager.createSession(company_id);
     res.json(result);
   } catch (error) {
-    logger.error('Erro ao conectar:', error);
+    appLogger.error('Erro ao conectar:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -754,7 +774,7 @@ app.post('/disconnect', async function(req, res) {
     var result = await sessionManager.disconnectSession(company_id);
     res.json(result);
   } catch (error) {
-    logger.error('Erro ao desconectar:', error);
+    appLogger.error('Erro ao desconectar:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -782,7 +802,7 @@ app.post('/send', async function(req, res) {
     
     res.json(result);
   } catch (error) {
-    logger.error('Erro ao enviar mensagem:', error);
+    appLogger.error('Erro ao enviar mensagem:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -811,8 +831,8 @@ app.listen(PORT, '0.0.0.0', async function() {
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('\n');
   
-  logger.info('Servidor iniciado em http://0.0.0.0:' + PORT);
-  logger.info('Webhook URL: ' + (process.env.WEBHOOK_URL || 'NÃO CONFIGURADO'));
+  appLogger.info('Servidor iniciado em http://0.0.0.0:' + PORT);
+  appLogger.info('Webhook URL: ' + (process.env.WEBHOOK_URL || 'NÃO CONFIGURADO'));
   
   // Restaurar sessões existentes
   await sessionManager.restoreAllSessions();
@@ -829,16 +849,16 @@ app.listen(PORT, '0.0.0.0', async function() {
 
 // Tratamento de erros
 process.on('uncaughtException', function(error) {
-  logger.error('Uncaught Exception:', error);
+  appLogger.error('Uncaught Exception:', error);
 });
 
 process.on('unhandledRejection', function(reason, promise) {
-  logger.error('Unhandled Rejection:', reason);
+  appLogger.error('Unhandled Rejection:', reason);
 });
 
 // Graceful shutdown
 var shutdown = async function() {
-  logger.info('Encerrando servidor...');
+  appLogger.info('Encerrando servidor...');
   await sessionManager.disconnectAllSessions();
   process.exit(0);
 };
