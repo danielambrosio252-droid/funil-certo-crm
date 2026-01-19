@@ -81,11 +81,24 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const expectedSecret = Deno.env.get("WHATSAPP_SERVER_SECRET");
+    
+    // Validar secret do webhook (se configurado)
+    if (expectedSecret) {
+      const receivedSecret = req.headers.get("X-Webhook-Secret");
+      if (receivedSecret !== expectedSecret) {
+        console.warn("[Webhook] Invalid or missing secret");
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
     
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     
     const payload: WebhookPayload = await req.json();
-    console.log("Webhook recebido:", payload.type, "para empresa:", payload.company_id);
+    console.log("[Webhook] Recebido:", payload.type, "empresa:", payload.company_id);
 
     const { type, company_id, data } = payload;
 
