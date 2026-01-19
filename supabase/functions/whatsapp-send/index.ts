@@ -127,9 +127,10 @@ Deno.serve(async (req) => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            company_id: companyId,
             message_id: message.id,
             phone: contact.phone,
-            content,
+            message: content,
             message_type,
           }),
         });
