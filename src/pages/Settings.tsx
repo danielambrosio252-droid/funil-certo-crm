@@ -23,6 +23,7 @@ import {
   Upload,
 } from "lucide-react";
 import { WhatsAppSetup } from "@/components/whatsapp/WhatsAppSetup";
+import { WebhookConfigDialog } from "@/components/settings/WebhookConfigDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useProfileSettings } from "@/hooks/useProfileSettings";
@@ -71,6 +72,7 @@ export default function Settings() {
     address: "",
   });
   const [savingCompany, setSavingCompany] = useState(false);
+  const [webhookDialogOpen, setWebhookDialogOpen] = useState(false);
 
   // Carregar dados do perfil
   useEffect(() => {
@@ -456,12 +458,19 @@ export default function Settings() {
                   </div>
                   <div>
                     <p className="font-medium text-foreground">Webhooks</p>
-                    <p className="text-sm text-muted-foreground">Integre com sistemas externos via API</p>
+                    <p className="text-sm text-muted-foreground">Receba leads de formulários externos via API</p>
                   </div>
                 </div>
-                <Button variant="outline" size="sm">Configurar</Button>
+                <Button variant="outline" size="sm" onClick={() => setWebhookDialogOpen(true)}>
+                  Configurar
+                </Button>
               </CardContent>
             </Card>
+
+            <WebhookConfigDialog 
+              open={webhookDialogOpen} 
+              onOpenChange={setWebhookDialogOpen} 
+            />
           </motion.div>
         </TabsContent>
 
