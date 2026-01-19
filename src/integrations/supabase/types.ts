@@ -357,6 +357,61 @@ export type Database = {
           },
         ]
       }
+      webhook_configs: {
+        Row: {
+          company_id: string
+          created_at: string
+          default_funnel_id: string | null
+          default_stage_id: string | null
+          id: string
+          is_active: boolean
+          updated_at: string
+          webhook_secret: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          default_funnel_id?: string | null
+          default_stage_id?: string | null
+          id?: string
+          is_active?: boolean
+          updated_at?: string
+          webhook_secret?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          default_funnel_id?: string | null
+          default_stage_id?: string | null
+          id?: string
+          is_active?: boolean
+          updated_at?: string
+          webhook_secret?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "webhook_configs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "webhook_configs_default_funnel_id_fkey"
+            columns: ["default_funnel_id"]
+            isOneToOne: false
+            referencedRelation: "funnels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "webhook_configs_default_stage_id_fkey"
+            columns: ["default_stage_id"]
+            isOneToOne: false
+            referencedRelation: "funnel_stages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       whatsapp_contacts: {
         Row: {
           company_id: string
