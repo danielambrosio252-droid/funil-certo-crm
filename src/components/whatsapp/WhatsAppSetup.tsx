@@ -92,7 +92,7 @@ const getStatusConfig = (status: UIState): StatusConfig => {
 };
 
 export function WhatsAppSetup() {
-  const { session, connect, disconnect, refetch, fetchQrCode, initializing } = useWhatsApp();
+  const { session, connect, disconnect, refetch, fetchQrCode, restart, reset, initializing } = useWhatsApp();
   const { toast } = useToast();
 
   const [showQrModal, setShowQrModal] = useState(false);
@@ -436,9 +436,9 @@ export function WhatsAppSetup() {
                 </Button>
               </>
             ) : uiState === "ERROR" ? (
-              <>
+              <div className="flex flex-col gap-2 w-full">
                 <Button
-                  className="flex-1 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-lg"
+                  className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-lg"
                   onClick={handleRetry}
                   disabled={actionLoading}
                 >
@@ -449,7 +449,50 @@ export function WhatsAppSetup() {
                   )}
                   Tentar Novamente
                 </Button>
-              </>
+                <div className="flex gap-2 w-full">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={async () => {
+                      setActionLoading(true);
+                      try {
+                        await restart();
+                        toast({ title: "Sessão reiniciada", description: "Tente conectar novamente." });
+                        handleConnect();
+                      } catch {
+                        toast({ title: "Erro", description: "Falha ao reiniciar sessão.", variant: "destructive" });
+                      } finally {
+                        setActionLoading(false);
+                      }
+                    }}
+                    disabled={actionLoading}
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Reiniciar Sessão
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    className="flex-1"
+                    onClick={async () => {
+                      setActionLoading(true);
+                      try {
+                        await reset();
+                        toast({ title: "Sessão resetada", description: "Todos os dados removidos. Conecte novamente." });
+                        setUiState("IDLE");
+                        refetch();
+                      } catch {
+                        toast({ title: "Erro", description: "Falha ao resetar sessão.", variant: "destructive" });
+                      } finally {
+                        setActionLoading(false);
+                      }
+                    }}
+                    disabled={actionLoading}
+                  >
+                    <WifiOff className="w-4 h-4 mr-2" />
+                    Resetar Tudo
+                  </Button>
+                </div>
+              </div>
             ) : uiState === "CONNECTING" || uiState === "WAITING_QR" || uiState === "QR_READY" ? (
               <>
                 <Button
