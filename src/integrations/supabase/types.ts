@@ -14,6 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      automation_logs: {
+        Row: {
+          automation_id: string
+          company_id: string
+          details: Json | null
+          id: string
+          lead_id: string
+          success: boolean
+          triggered_at: string
+        }
+        Insert: {
+          automation_id: string
+          company_id: string
+          details?: Json | null
+          id?: string
+          lead_id: string
+          success?: boolean
+          triggered_at?: string
+        }
+        Update: {
+          automation_id?: string
+          company_id?: string
+          details?: Json | null
+          id?: string
+          lead_id?: string
+          success?: boolean
+          triggered_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "automation_logs_automation_id_fkey"
+            columns: ["automation_id"]
+            isOneToOne: false
+            referencedRelation: "funnel_automations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "automation_logs_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "funnel_leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       companies: {
         Row: {
           created_at: string
@@ -37,6 +82,69 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      funnel_automations: {
+        Row: {
+          action_config: Json
+          action_type: string
+          company_id: string
+          conditions: Json
+          created_at: string
+          description: string | null
+          funnel_id: string
+          id: string
+          is_active: boolean
+          name: string
+          trigger_config: Json
+          trigger_type: string
+          updated_at: string
+        }
+        Insert: {
+          action_config?: Json
+          action_type: string
+          company_id: string
+          conditions?: Json
+          created_at?: string
+          description?: string | null
+          funnel_id: string
+          id?: string
+          is_active?: boolean
+          name: string
+          trigger_config?: Json
+          trigger_type: string
+          updated_at?: string
+        }
+        Update: {
+          action_config?: Json
+          action_type?: string
+          company_id?: string
+          conditions?: Json
+          created_at?: string
+          description?: string | null
+          funnel_id?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          trigger_config?: Json
+          trigger_type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "funnel_automations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "funnel_automations_funnel_id_fkey"
+            columns: ["funnel_id"]
+            isOneToOne: false
+            referencedRelation: "funnels"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       funnel_leads: {
         Row: {
