@@ -557,10 +557,10 @@ class SessionManager {
     try {
       if (fs.existsSync(sessionPath)) {
         fs.rmSync(sessionPath, { recursive: true, force: true });
-        logger.info('Arquivos de sessão removidos: ' + companyId);
+        appLogger.info('Arquivos de sessão removidos: ' + companyId);
       }
     } catch (error) {
-      logger.error('Erro ao limpar sessão ' + companyId + ':', error);
+      appLogger.error('Erro ao limpar sessão ' + companyId + ':', error);
     }
   }
 
@@ -591,7 +591,7 @@ class SessionManager {
       var result = await socket.sendMessage(jid, message);
       
       var contentPreview = content.substring(0, 50);
-      logger.info('Mensagem enviada para ' + phone + ': ' + contentPreview + '...');
+      appLogger.info('Mensagem enviada para ' + phone + ': ' + contentPreview + '...');
       
       await this.webhookService.send(companyId, 'message_sent', {
         message_id: result.key.id,
@@ -606,7 +606,7 @@ class SessionManager {
         message_id: result.key.id
       };
     } catch (error) {
-      logger.error('Erro ao enviar mensagem para ' + phone + ':', error);
+      appLogger.error('Erro ao enviar mensagem para ' + phone + ':', error);
       throw error;
     }
   }
@@ -632,13 +632,13 @@ class SessionManager {
       try {
         await socket.logout();
       } catch (error) {
-        logger.warn('Erro ao fazer logout ' + companyId + ':', error.message);
+        appLogger.warn('Erro ao fazer logout ' + companyId + ':', error.message);
       }
       
       try {
         socket.end();
       } catch (error) {
-        logger.warn('Erro ao encerrar socket ' + companyId + ':', error.message);
+        appLogger.warn('Erro ao encerrar socket ' + companyId + ':', error.message);
       }
       
       this.sessions.delete(companyId);
@@ -647,13 +647,13 @@ class SessionManager {
     this.sessionStatus.set(companyId, 'disconnected');
     await this._clearSessionFiles(companyId);
     
-    logger.info('Sessão desconectada: ' + companyId);
+    appLogger.info('Sessão desconectada: ' + companyId);
     return { success: true };
   }
 
   async restoreAllSessions() {
     var self = this;
-    logger.info('Restaurando sessões existentes...');
+    appLogger.info('Restaurando sessões existentes...');
     
     try {
       var dirs = fs.readdirSync(this.sessionsDir);
@@ -665,7 +665,7 @@ class SessionManager {
           // Verificar se tem arquivos de credenciais
           var credsPath = path.join(sessionPath, 'creds.json');
           if (fs.existsSync(credsPath)) {
-            logger.info('Restaurando sessão: ' + companyId);
+            appLogger.info('Restaurando sessão: ' + companyId);
             await this.createSession(companyId);
             // Esperar um pouco entre restaurações
             await new Promise(function(r) { setTimeout(r, 2000); });
@@ -673,7 +673,7 @@ class SessionManager {
         }
       }
     } catch (error) {
-      logger.error('Erro ao restaurar sessões:', error);
+      appLogger.error('Erro ao restaurar sessões:', error);
     }
   }
 

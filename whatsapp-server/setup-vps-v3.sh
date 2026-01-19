@@ -686,7 +686,7 @@ class SessionManager {
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const reason = DisconnectReason[statusCode] || statusCode;
 
-        logger.warn(`[${companyId}] ❌ Desconectado: ${reason} (${statusCode})`);
+        appLogger.warn(`[${companyId}] ❌ Desconectado: ${reason} (${statusCode})`);
 
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
@@ -700,18 +700,18 @@ class SessionManager {
               meta.reconnecting = true;
             }
 
-            logger.info(`[${companyId}] 🔄 Reconectando... (tentativa ${attempts + 1}/${MAX_RECONNECT_ATTEMPTS})`);
+            appLogger.info(`[${companyId}] 🔄 Reconectando... (tentativa ${attempts + 1}/${MAX_RECONNECT_ATTEMPTS})`);
 
             this.sessions.delete(companyId);
 
             setTimeout(() => {
               this.createSession(companyId).catch(err => {
-                logger.error(`[${companyId}] Erro na reconexão:`, err);
+                appLogger.error(`[${companyId}] Erro na reconexão:`, err);
                 this._setError(companyId, 'reconnect_failed');
               });
             }, RECONNECT_TIMEOUT);
           } else {
-            logger.error(`[${companyId}] Máximo de tentativas de reconexão atingido`);
+            appLogger.error(`[${companyId}] Máximo de tentativas de reconexão atingido`);
             this._setError(companyId, 'max_reconnect_attempts');
 
             await this.webhookService.send(companyId, 'disconnected', {
@@ -721,7 +721,7 @@ class SessionManager {
             this.sessions.delete(companyId);
           }
         } else {
-          logger.info(`[${companyId}] 🚪 LOGOUT: Limpando sessão completamente`);
+          appLogger.info(`[${companyId}] 🚪 LOGOUT: Limpando sessão completamente`);
 
           this._setError(companyId, 'logged_out');
 
@@ -735,9 +735,9 @@ class SessionManager {
 
           try {
             await this._removeSessionFiles(companyId);
-            logger.info(`[${companyId}] 🗑️ Arquivos de sessão removidos após logout`);
+            appLogger.info(`[${companyId}] 🗑️ Arquivos de sessão removidos após logout`);
           } catch (e) {
-            logger.error(`[${companyId}] Erro ao remover arquivos após logout:`, e);
+            appLogger.error(`[${companyId}] Erro ao remover arquivos após logout:`, e);
           }
         }
       }
@@ -752,7 +752,7 @@ class SessionManager {
         try {
           await this._processIncomingMessage(companyId, msg);
         } catch (error) {
-          logger.error(`[${companyId}] Erro ao processar mensagem:`, error);
+          appLogger.error(`[${companyId}] Erro ao processar mensagem:`, error);
         }
       }
     });
@@ -762,7 +762,7 @@ class SessionManager {
         try {
           await this._processMessageUpdate(companyId, update);
         } catch (error) {
-          logger.error(`[${companyId}] Erro ao processar atualização:`, error);
+          appLogger.error(`[${companyId}] Erro ao processar atualização:`, error);
         }
       }
     });
@@ -785,7 +785,7 @@ class SessionManager {
           }
         }
       } catch (error) {
-        logger.error(`[${companyId}] Erro ao processar presença:`, error);
+        appLogger.error(`[${companyId}] Erro ao processar presença:`, error);
       }
     });
   }
@@ -799,7 +799,7 @@ class SessionManager {
     const normalizedPhone = normalizePhone(rawJid);
     
     if (!normalizedPhone && isLid(rawJid)) {
-      logger.warn(`[${companyId}] ⚠️ Ignorando mensagem de LID sem número real: ${rawJid}`);
+      appLogger.warn(`[${companyId}] ⚠️ Ignorando mensagem de LID sem número real: ${rawJid}`);
       return;
     }
     
@@ -839,7 +839,7 @@ class SessionManager {
       content = '[Mensagem não suportada]';
     }
 
-    logger.info(`[${companyId}] 📩 Mensagem de ${phone}: ${content.substring(0, 50)}...`);
+    appLogger.info(`[${companyId}] 📩 Mensagem de ${phone}: ${content.substring(0, 50)}...`);
 
     await this.webhookService.send(companyId, 'message_received', {
       message_id: msg.key.id,
@@ -1027,7 +1027,7 @@ class SessionManager {
         }
         this.sessions.delete(companyId);
       } catch (error) {
-        logger.warn(`[${companyId}] Erro ao desconectar:`, error);
+        appLogger.warn(`[${companyId}] Erro ao desconectar:`, error);
       }
     }
   }
