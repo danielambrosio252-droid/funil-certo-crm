@@ -3,6 +3,7 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { KanbanBoard } from "@/components/funnels/KanbanBoard";
 import { FunnelListView } from "@/components/funnels/FunnelListView";
 import { CreateFunnelDialog } from "@/components/funnels/CreateFunnelDialog";
+import { CreateLeadDialog } from "@/components/funnels/CreateLeadDialog";
 import { FunnelFilters, FunnelFiltersState } from "@/components/funnels/FunnelFilters";
 import { ExportLeads } from "@/components/funnels/ExportLeads";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ export default function Funnels() {
   const [view, setView] = useState<"kanban" | "list">("kanban");
   const [showCreateFunnel, setShowCreateFunnel] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showNewLeadFromHeader, setShowNewLeadFromHeader] = useState(false);
   const [selectedFunnelId, setSelectedFunnelId] = useState<string | null>(null);
   const [funnelToDelete, setFunnelToDelete] = useState<string | null>(null);
   const [filters, setFilters] = useState<FunnelFiltersState>({
@@ -95,10 +97,20 @@ export default function Funnels() {
     setFunnelToDelete(null);
   };
 
+  // Handle new lead from header button
+  const handleNewLeadFromHeader = () => {
+    if (stages.length > 0) {
+      setShowNewLeadFromHeader(true);
+    } else if (funnels.length === 0) {
+      setShowCreateFunnel(true);
+    }
+  };
+
   return (
     <MainLayout
       title="Funis"
       subtitle="Gerencie suas etapas de vendas"
+      onNewLead={handleNewLeadFromHeader}
     >
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
@@ -226,6 +238,16 @@ export default function Funnels() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* New Lead from Header */}
+      {showNewLeadFromHeader && stages.length > 0 && (
+        <CreateLeadDialog
+          open={showNewLeadFromHeader}
+          onOpenChange={setShowNewLeadFromHeader}
+          stageId={stages[0].id}
+          stageIds={stageIds}
+        />
+      )}
     </MainLayout>
   );
 }

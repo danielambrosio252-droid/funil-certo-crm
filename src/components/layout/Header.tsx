@@ -16,9 +16,10 @@ import { useAuth } from "@/hooks/useAuth";
 interface HeaderProps {
   title: string;
   subtitle?: string;
+  onNewLead?: () => void;
 }
 
-export function Header({ title, subtitle }: HeaderProps) {
+export function Header({ title, subtitle, onNewLead }: HeaderProps) {
   const { user, profile, company, signOut } = useAuth();
   const navigate = useNavigate();
 
@@ -60,7 +61,11 @@ export function Header({ title, subtitle }: HeaderProps) {
         </div>
 
         {/* Quick Add */}
-        <Button size="sm" className="gap-2 gradient-primary text-primary-foreground shadow-md hover:shadow-lg transition-shadow">
+        <Button 
+          size="sm" 
+          className="gap-2 gradient-primary text-primary-foreground shadow-md hover:shadow-lg transition-shadow"
+          onClick={onNewLead}
+        >
           <Plus className="w-4 h-4" />
           <span className="hidden sm:inline">Novo Lead</span>
         </Button>
