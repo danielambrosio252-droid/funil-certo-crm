@@ -26,6 +26,8 @@ import { WhatsAppSetup } from "@/components/whatsapp/WhatsAppSetup";
 import { useAuth } from "@/hooks/useAuth";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useProfileSettings } from "@/hooks/useProfileSettings";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 const integrations = [
   { name: "Meta Ads", description: "Conecte sua conta do Facebook Business", connected: true, icon: "📊" },
@@ -61,6 +63,14 @@ export default function Settings() {
     email: "",
     phone: "",
   });
+  
+  // Estado para dados da empresa
+  const [companyData, setCompanyData] = useState({
+    name: "",
+    cnpj: "",
+    address: "",
+  });
+  const [savingCompany, setSavingCompany] = useState(false);
 
   // Carregar dados do perfil
   useEffect(() => {
@@ -70,6 +80,17 @@ export default function Settings() {
       setAvatarUrl(getAvatarUrl());
     }
   }, [profile, getProfileData, getAvatarUrl]);
+
+  // Carregar dados da empresa
+  useEffect(() => {
+    if (company) {
+      setCompanyData({
+        name: company.name || "",
+        cnpj: (company as any).cnpj || "",
+        address: (company as any).address || "",
+      });
+    }
+  }, [company]);
 
   // Handler para upload de arquivo
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,6 +111,35 @@ export default function Settings() {
   // Handler para salvar perfil
   const handleSaveProfile = async () => {
     await saveProfile(formData);
+  };
+
+  // Handler para salvar empresa
+  const handleSaveCompany = async () => {
+    if (!company) return;
+    
+    setSavingCompany(true);
+    try {
+      const { error } = await supabase
+        .from('companies')
+        .update({
+          name: companyData.name,
+          cnpj: companyData.cnpj,
+          address: companyData.address,
+        })
+        .eq('id', company.id);
+
+      if (error) {
+        console.error("Erro ao salvar empresa:", error);
+        toast.error("Erro ao salvar dados da empresa");
+      } else {
+        toast.success("Dados da empresa salvos com sucesso!");
+      }
+    } catch (error) {
+      console.error("Erro:", error);
+      toast.error("Erro ao salvar dados da empresa");
+    } finally {
+      setSavingCompany(false);
+    }
   };
 
   // Handler para testar notificação
@@ -316,18 +366,42 @@ export default function Settings() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Nome da Empresa</Label>
-                    <Input defaultValue={company?.name || ""} />
+                    <Input 
+                      value={companyData.name}
+                      onChange={(e) => setCompanyData(prev => ({ ...prev, name: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>CNPJ</Label>
-                    <Input placeholder="12.345.678/0001-90" />
+                    <Input 
+                      value={companyData.cnpj}
+                      onChange={(e) => setCompanyData(prev => ({ ...prev, cnpj: e.target.value }))}
+                      placeholder="12.345.678/0001-90" 
+                    />
                   </div>
                   <div className="space-y-2 col-span-1 sm:col-span-2">
                     <Label>Endereço</Label>
-                    <Input placeholder="Rua das Empresas, 123 - São Paulo, SP" />
+                    <Input 
+                      value={companyData.address}
+                      onChange={(e) => setCompanyData(prev => ({ ...prev, address: e.target.value }))}
+                      placeholder="Rua das Empresas, 123 - São Paulo, SP" 
+                    />
                   </div>
                 </div>
-                <Button className="gradient-primary text-primary-foreground">Salvar</Button>
+                <Button 
+                  className="gradient-primary text-primary-foreground"
+                  onClick={handleSaveCompany}
+                  disabled={savingCompany}
+                >
+                  {savingCompany ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Salvando...
+                    </>
+                  ) : (
+                    "Salvar"
+                  )}
+                </Button>
               </CardContent>
             </Card>
           </motion.div>
