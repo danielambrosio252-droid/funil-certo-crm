@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
             );
           }
 
-          if (status === "CONNECTING") {
+          if (status === "CONNECTING" || status === "RECONNECTING") {
             return new Response(
               JSON.stringify({ 
                 status: "CONNECTING",
