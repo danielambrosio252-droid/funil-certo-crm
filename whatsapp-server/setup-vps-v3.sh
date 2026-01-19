@@ -637,7 +637,7 @@ class SessionManager {
             meta.lastQrCode = new Date();
           }
         } catch (error) {
-          logger.error(`[${companyId}] Erro ao gerar QR Code:`, error);
+          appLogger.error(`[${companyId}] Erro ao gerar QR Code:`, error);
           this._setError(companyId, 'qr_generation_error');
         }
       }
@@ -653,7 +653,7 @@ class SessionManager {
         this.pendingConnections.delete(companyId);
         this.errorStore.delete(companyId);
 
-        logger.info(`[${companyId}] ✅ CONECTADO: ${phoneNumber}`);
+        appLogger.info(`[${companyId}] ✅ CONECTADO: ${phoneNumber}`);
 
         const meta = this.sessionMeta.get(companyId);
         if (meta) {
