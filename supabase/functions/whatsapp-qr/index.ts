@@ -73,7 +73,8 @@ Deno.serve(async (req) => {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-        const url = `${whatsappServerUrl}/api/whatsapp/qr?company_id=${encodeURIComponent(companyId)}`;
+        // O servidor VPS usa a rota /status?company_id=... (não /api/whatsapp/qr)
+        const url = `${whatsappServerUrl}/status?company_id=${encodeURIComponent(companyId)}`;
         console.log(`[QR] Fetching from VPS: ${url}`);
         
         const headers: Record<string, string> = {};
@@ -94,49 +95,64 @@ Deno.serve(async (req) => {
           console.log(`[QR] VPS response: ${JSON.stringify(serverData)}`);
 
           // Mapear resposta do servidor para frontend
-          switch (serverData?.status) {
-            case "CONNECTED":
-              return new Response(
-                JSON.stringify({ 
-                  status: "CONNECTED", 
-                  phone_number: serverData.phone_number 
-                }),
-                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-              );
-
-            case "QR":
-              if (serverData.qr) {
-                return new Response(
-                  JSON.stringify({ status: "QR", qr: serverData.qr }),
-                  { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-                );
-              }
-              break;
-
-            case "CONNECTING":
-              return new Response(
-                JSON.stringify({ 
-                  status: "CONNECTING",
-                  pending_age_ms: serverData.pending_age_ms || 0
-                }),
-                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-              );
-
-            case "ERROR":
-              return new Response(
-                JSON.stringify({ 
-                  status: "ERROR", 
-                  reason: serverData.reason || "unknown" 
-                }),
-                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-              );
-
-            case "DISCONNECTED":
-              return new Response(
-                JSON.stringify({ status: "DISCONNECTED" }),
-                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-              );
+          // O servidor antigo retorna { company_id, status, connected }
+          // O servidor novo (v3) retorna { status: "CONNECTED"|"QR"|etc, qr?, phone_number? }
+          
+          const status = serverData?.status?.toUpperCase?.() || serverData?.status;
+          
+          if (status === "CONNECTED" || serverData?.connected === true) {
+            return new Response(
+              JSON.stringify({ 
+                status: "CONNECTED", 
+                phone_number: serverData.phone_number 
+              }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
           }
+
+          if (status === "QR" && serverData.qr) {
+            return new Response(
+              JSON.stringify({ status: "QR", qr: serverData.qr }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          if (status === "QR_CODE" && serverData.qr) {
+            return new Response(
+              JSON.stringify({ status: "QR", qr: serverData.qr }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          if (status === "CONNECTING") {
+            return new Response(
+              JSON.stringify({ 
+                status: "CONNECTING",
+                pending_age_ms: serverData.pending_age_ms || 0
+              }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          if (status === "ERROR") {
+            return new Response(
+              JSON.stringify({ 
+                status: "ERROR", 
+                reason: serverData.reason || "unknown" 
+              }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          if (status === "DISCONNECTED" || status === "NOT_FOUND") {
+            return new Response(
+              JSON.stringify({ status: "DISCONNECTED" }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+          
+          // Qualquer outro status não mapeado -> continuar para DB fallback
+          console.log(`[QR] VPS status não mapeado: ${status}`);
         } else {
           console.error(`[QR] VPS error: ${resp.status}`);
         }
