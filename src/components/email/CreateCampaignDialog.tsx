@@ -31,6 +31,10 @@ import {
   CheckCircle,
   ArrowRight,
   ArrowLeft,
+  ShoppingCart,
+  Cake,
+  ClipboardList,
+  Rocket,
 } from "lucide-react";
 
 interface CreateCampaignDialogProps {
@@ -86,6 +90,34 @@ const templates = [
     name: "Follow-up",
     description: "Acompanhamento de propostas e leads",
     icon: CheckCircle,
+    category: "Vendas",
+  },
+  {
+    id: "abandoned-cart",
+    name: "Carrinho Abandonado",
+    description: "Recupere vendas de carrinhos não finalizados",
+    icon: ShoppingCart,
+    category: "Recuperação",
+  },
+  {
+    id: "birthday",
+    name: "Aniversário",
+    description: "Parabenize clientes no aniversário deles",
+    icon: Cake,
+    category: "Relacionamento",
+  },
+  {
+    id: "survey",
+    name: "Pesquisa de Satisfação",
+    description: "Colete feedback dos seus clientes",
+    icon: ClipboardList,
+    category: "Engajamento",
+  },
+  {
+    id: "product-launch",
+    name: "Lançamento de Produto",
+    description: "Anuncie novos produtos ou serviços",
+    icon: Rocket,
     category: "Vendas",
   },
 ];
