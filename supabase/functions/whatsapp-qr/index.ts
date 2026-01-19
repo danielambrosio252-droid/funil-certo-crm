@@ -70,54 +70,58 @@ Deno.serve(async (req) => {
     if (whatsappServerUrl) {
       try {
         const whatsappServerSecret = Deno.env.get("WHATSAPP_SERVER_SECRET");
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-        // O servidor VPS usa a rota /status?company_id=... (não /api/whatsapp/qr)
-        const url = `${whatsappServerUrl}/status?company_id=${encodeURIComponent(companyId)}`;
-        console.log(`[QR] Fetching from VPS: ${url}`);
-        
         const headers: Record<string, string> = {};
         if (whatsappServerSecret) {
           headers["x-server-token"] = whatsappServerSecret;
         }
 
-        const resp = await fetch(url, { 
-          method: "GET", 
-          headers,
-          signal: controller.signal 
-        });
+        const urlsToTry = [
+          // VPS v3 (fonte de verdade: QR em memória)
+          `${whatsappServerUrl}/api/whatsapp/qr?company_id=${encodeURIComponent(companyId)}`,
+          // VPS legado
+          `${whatsappServerUrl}/status?company_id=${encodeURIComponent(companyId)}`,
+        ];
 
-        clearTimeout(timeoutId);
+        for (const url of urlsToTry) {
+          console.log(`[QR] Fetching from VPS: ${url}`);
 
-        if (resp.ok) {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+          const resp = await fetch(url, {
+            method: "GET",
+            headers,
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!resp.ok) {
+            console.error(`[QR] VPS error (${resp.status}) on ${url}`);
+            continue;
+          }
+
           const serverData = await resp.json();
           console.log(`[QR] VPS response: ${JSON.stringify(serverData)}`);
 
           // Mapear resposta do servidor para frontend
-          // O servidor antigo retorna { company_id, status, connected }
-          // O servidor novo (v3) retorna { status: "CONNECTED"|"QR"|etc, qr?, phone_number? }
-          
+          // v3: { status: "CONNECTED"|"QR"|"CONNECTING"|"ERROR"|"DISCONNECTED", qr?, phone_number?, reason?, pending_age_ms? }
+          // legado: { company_id, status: "connected"|"connecting"|"reconnecting"|..., connected: boolean }
+
           const status = serverData?.status?.toUpperCase?.() || serverData?.status;
-          
+
           if (status === "CONNECTED" || serverData?.connected === true) {
             return new Response(
-              JSON.stringify({ 
-                status: "CONNECTED", 
-                phone_number: serverData.phone_number 
+              JSON.stringify({
+                status: "CONNECTED",
+                phone_number: serverData.phone_number,
               }),
               { headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
           }
 
-          if (status === "QR" && serverData.qr) {
-            return new Response(
-              JSON.stringify({ status: "QR", qr: serverData.qr }),
-              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-          }
-
-          if (status === "QR_CODE" && serverData.qr) {
+          if ((status === "QR" || status === "QR_CODE") && serverData.qr) {
             return new Response(
               JSON.stringify({ status: "QR", qr: serverData.qr }),
               { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -126,9 +130,9 @@ Deno.serve(async (req) => {
 
           if (status === "CONNECTING" || status === "RECONNECTING") {
             return new Response(
-              JSON.stringify({ 
+              JSON.stringify({
                 status: "CONNECTING",
-                pending_age_ms: serverData.pending_age_ms || 0
+                pending_age_ms: serverData.pending_age_ms || 0,
               }),
               { headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
@@ -136,9 +140,9 @@ Deno.serve(async (req) => {
 
           if (status === "ERROR") {
             return new Response(
-              JSON.stringify({ 
-                status: "ERROR", 
-                reason: serverData.reason || "unknown" 
+              JSON.stringify({
+                status: "ERROR",
+                reason: serverData.reason || "unknown",
               }),
               { headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
@@ -150,11 +154,10 @@ Deno.serve(async (req) => {
               { headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
           }
-          
-          // Qualquer outro status não mapeado -> continuar para DB fallback
+
           console.log(`[QR] VPS status não mapeado: ${status}`);
-        } else {
-          console.error(`[QR] VPS error: ${resp.status}`);
+          // Se chegou aqui e foi um endpoint legado, não vale insistir nele.
+          // Vamos tentar o próximo endpoint e, se falhar, cair no DB fallback.
         }
       } catch (e) {
         console.error("[QR] Erro ao buscar do VPS:", e);
