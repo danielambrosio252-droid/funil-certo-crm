@@ -24,14 +24,23 @@ const { WebhookService } = require('./services/WebhookService');
 const { logger } = require('./utils/logger');
 
 // =====================================================
-// CONFIGURAÇÃO
+// CONFIGURAÇÃO (com fallback para nomes antigos)
 // =====================================================
 
 const PORT = process.env.PORT || 3001;
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
-const SERVER_SECRET = process.env.WHATSAPP_SERVER_SECRET; // Opcional: para autenticação
-const SESSIONS_DIR = process.env.SESSIONS_DIR || './sessions';
+
+// Aceitar múltiplas variantes de nomes (retrocompatibilidade)
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET 
+  || process.env.WHATSAPP_WEBHOOK_SECRET 
+  || process.env.SERVER_SECRET;
+
+const SERVER_SECRET = process.env.WHATSAPP_SERVER_SECRET 
+  || process.env.SERVER_SECRET;
+
+const SESSIONS_DIR = process.env.SESSIONS_DIR 
+  || process.env.SESSION_DIR 
+  || './sessions';
 
 // Criar diretórios necessários
 if (!fs.existsSync(SESSIONS_DIR)) {
