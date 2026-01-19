@@ -14,8 +14,7 @@
  * - "83999999999" -> "5583999999999"
  */
 
-const { logger } = require('./logger');
-
+const { appLogger } = require('./logger');
 /**
  * Normaliza qualquer identificador do WhatsApp para formato E.164 puro
  * @param {string} input - JID, número de telefone ou qualquer formato
@@ -50,7 +49,7 @@ function normalizePhone(input) {
   // 5. Se o número é muito longo (>15 dígitos), provavelmente é um LID
   // LIDs têm formato como "231924207509546" que são 15+ dígitos
   if (phone.length > 15) {
-    logger.warn(`[PhoneNormalizer] Número muito longo (possível LID): ${phone}`);
+    appLogger.warn(`[PhoneNormalizer] Número muito longo (possível LID): ${phone}`);
     // Retornar vazio para LIDs - eles não são números válidos
     return '';
   }
@@ -99,7 +98,7 @@ function extractPhoneFromJid(jid) {
   if (!jid) return null;
   
   if (isLid(jid)) {
-    logger.warn(`[PhoneNormalizer] Ignorando LID (não é número real): ${jid}`);
+    appLogger.warn(`[PhoneNormalizer] Ignorando LID (não é número real): ${jid}`);
     return null;
   }
   
