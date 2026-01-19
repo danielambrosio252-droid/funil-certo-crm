@@ -627,6 +627,11 @@ export type Database = {
         Returns: undefined
       }
       is_admin_or_owner: { Args: { user_uuid: string }; Returns: boolean }
+      is_admin_or_owner_safe: {
+        Args: { check_user_id: string }
+        Returns: boolean
+      }
+      is_owner_safe: { Args: { check_user_id: string }; Returns: boolean }
       normalize_whatsapp_phone: { Args: { input: string }; Returns: string }
     }
     Enums: {
