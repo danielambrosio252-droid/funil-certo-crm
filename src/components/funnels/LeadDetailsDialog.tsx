@@ -68,6 +68,7 @@ interface LeadDetailsDialogProps {
   lead: FunnelLead | null;
   stageIds: string[];
   stageName?: string;
+  funnelId?: string | null;
 }
 
 export function LeadDetailsDialog({
@@ -76,8 +77,9 @@ export function LeadDetailsDialog({
   lead,
   stageIds,
   stageName,
+  funnelId,
 }: LeadDetailsDialogProps) {
-  const { updateLead, deleteLead } = useFunnelLeads(stageIds);
+  const { updateLead, deleteLead } = useFunnelLeads(stageIds, funnelId);
   const [isEditing, setIsEditing] = useState(false);
   const [newNote, setNewNote] = useState("");
   const [newTag, setNewTag] = useState("");
@@ -114,6 +116,7 @@ export function LeadDetailsDialog({
   const handleSave = async () => {
     await updateLead.mutateAsync({
       id: lead.id,
+      previousLead: lead, // Pass previous lead for automation comparison
       name: formData.name,
       email: formData.email || null,
       phone: formData.phone || null,
@@ -152,6 +155,7 @@ export function LeadDetailsDialog({
     
     await updateLead.mutateAsync({
       id: lead.id,
+      previousLead: lead, // Pass previous lead for automation comparison
       notes: updatedNotes,
       last_contact_at: new Date().toISOString(),
     });

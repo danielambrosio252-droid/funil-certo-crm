@@ -22,15 +22,16 @@ interface CreateLeadDialogProps {
   onOpenChange: (open: boolean) => void;
   stageId: string;
   stageIds: string[];
+  funnelId?: string | null;
 }
 
-export function CreateLeadDialog({ open, onOpenChange, stageId, stageIds }: CreateLeadDialogProps) {
+export function CreateLeadDialog({ open, onOpenChange, stageId, stageIds, funnelId }: CreateLeadDialogProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [value, setValue] = useState("");
   const [source, setSource] = useState("");
-  const { createLead } = useFunnelLeads(stageIds);
+  const { createLead } = useFunnelLeads(stageIds, funnelId);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
