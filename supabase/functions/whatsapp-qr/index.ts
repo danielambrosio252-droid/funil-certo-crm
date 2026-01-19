@@ -6,15 +6,15 @@ const corsHeaders = {
 };
 
 /**
- * Dedicated endpoint for polling QR code status.
+ * ENDPOINT DETERMINÍSTICO para polling de QR code
  * GET /whatsapp-qr
  * 
- * Returns:
- * - { status: "QR", qr: "<base64>" } when QR is ready
- * - { status: "WAITING" } when still connecting
- * - { status: "CONNECTED" } when already connected
- * - { status: "ERROR" } when connection failed
- * - { status: "DISCONNECTED" } when no session
+ * Retorna status EXPLÍCITO (NUNCA WAITING infinito):
+ * - { status: "QR", qr: "<base64>" } quando QR está pronto
+ * - { status: "CONNECTING" } quando está iniciando (max 30s)
+ * - { status: "CONNECTED", phone_number: "..." } quando já conectado
+ * - { status: "ERROR", reason: "..." } quando falhou
+ * - { status: "DISCONNECTED" } quando sem sessão
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -57,74 +57,110 @@ Deno.serve(async (req) => {
 
     if (!profile?.company_id) {
       return new Response(
-        JSON.stringify({ status: "ERROR" }),
+        JSON.stringify({ status: "ERROR", reason: "no_profile" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     const companyId = profile.company_id;
-    console.log(`[QR] company_id: ${companyId}, WHATSAPP_SERVER_URL: ${whatsappServerUrl ? 'SET' : 'NOT SET'}`);
+    console.log(`[QR] company_id: ${companyId}`);
 
-    // Fetch session directly from database
+    // ESTRATÉGIA: Buscar do servidor VPS primeiro (fonte de verdade em tempo real)
+    // O servidor VPS tem o estado mais atualizado (QR em memória, status real)
+    if (whatsappServerUrl) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        const url = `${whatsappServerUrl}/api/whatsapp/qr?company_id=${encodeURIComponent(companyId)}`;
+        console.log(`[QR] Fetching from VPS: ${url}`);
+        
+        const resp = await fetch(url, { 
+          method: "GET", 
+          signal: controller.signal 
+        });
+
+        clearTimeout(timeoutId);
+
+        if (resp.ok) {
+          const serverData = await resp.json();
+          console.log(`[QR] VPS response: ${JSON.stringify(serverData)}`);
+
+          // Mapear resposta do servidor para frontend
+          switch (serverData?.status) {
+            case "CONNECTED":
+              return new Response(
+                JSON.stringify({ 
+                  status: "CONNECTED", 
+                  phone_number: serverData.phone_number 
+                }),
+                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+
+            case "QR":
+              if (serverData.qr) {
+                return new Response(
+                  JSON.stringify({ status: "QR", qr: serverData.qr }),
+                  { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+              }
+              break;
+
+            case "CONNECTING":
+              return new Response(
+                JSON.stringify({ 
+                  status: "CONNECTING",
+                  pending_age_ms: serverData.pending_age_ms || 0
+                }),
+                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+
+            case "ERROR":
+              return new Response(
+                JSON.stringify({ 
+                  status: "ERROR", 
+                  reason: serverData.reason || "unknown" 
+                }),
+                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+
+            case "DISCONNECTED":
+              return new Response(
+                JSON.stringify({ status: "DISCONNECTED" }),
+                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+          }
+        } else {
+          console.error(`[QR] VPS error: ${resp.status}`);
+        }
+      } catch (e) {
+        console.error("[QR] Erro ao buscar do VPS:", e);
+        // Continuar para fallback do banco de dados
+      }
+    } else {
+      console.log("[QR] WHATSAPP_SERVER_URL não configurado");
+    }
+
+    // FALLBACK: Buscar do banco de dados
     const { data: session, error } = await supabase
       .from("whatsapp_sessions")
       .select("status, qr_code, phone_number")
       .eq("company_id", companyId)
       .maybeSingle();
 
-    console.log(`[QR] DB session status: ${session?.status}, has_qr: ${!!session?.qr_code}`);
+    console.log(`[QR] DB fallback - status: ${session?.status}, has_qr: ${!!session?.qr_code}`);
 
     if (error) {
       console.error("Erro ao buscar sessão:", error);
       return new Response(
-        JSON.stringify({ status: "ERROR" }),
+        JSON.stringify({ status: "ERROR", reason: "db_error" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     if (!session) {
-      // Mesmo sem sessão no banco, ainda pode existir QR no servidor.
-      // Vamos tentar buscar do servidor antes de responder DISCONNECTED.
-      if (whatsappServerUrl) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-          const resp = await fetch(
-            `${whatsappServerUrl}/api/whatsapp/qr?company_id=${encodeURIComponent(companyId)}`,
-            { method: "GET", signal: controller.signal }
-          );
-
-          clearTimeout(timeoutId);
-
-          if (resp.ok) {
-            const serverData = await resp.json();
-            if (serverData?.status === "QR" && serverData.qr) {
-              return new Response(
-                JSON.stringify({ status: "QR", qr: serverData.qr }),
-                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-              );
-            }
-            if (serverData?.status === "CONNECTED") {
-              return new Response(
-                JSON.stringify({ status: "CONNECTED", phone_number: serverData.phone_number }),
-                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-              );
-            }
-            if (serverData?.status === "WAITING") {
-              return new Response(
-                JSON.stringify({ status: "WAITING" }),
-                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-              );
-            }
-          }
-        } catch (e) {
-          console.error("Erro ao buscar QR no servidor:", e);
-        }
-      }
-
       return new Response(
-        JSON.stringify({ status: "WAITING" }),
+        JSON.stringify({ status: "DISCONNECTED" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -144,7 +180,7 @@ Deno.serve(async (req) => {
 
     if (dbStatus === "error") {
       return new Response(
-        JSON.stringify({ status: "ERROR" }),
+        JSON.stringify({ status: "ERROR", reason: "session_error" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -159,82 +195,23 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Fallback: buscar QR diretamente do WhatsApp Server (cache em memória)
-    if (whatsappServerUrl) {
-      try {
-        const url = `${whatsappServerUrl}/api/whatsapp/qr?company_id=${encodeURIComponent(companyId)}`;
-        console.log(`[QR] Fetching from server: ${url}`);
-        
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-        const resp = await fetch(url, { method: "GET", signal: controller.signal });
-
-        clearTimeout(timeoutId);
-        console.log(`[QR] Server response status: ${resp.status}`);
-
-        if (resp.ok) {
-          const serverData = await resp.json();
-          console.log(`[QR] Server data: ${JSON.stringify(serverData)}`);
-
-          if (serverData?.status === "QR" && serverData.qr) {
-            return new Response(
-              JSON.stringify({ status: "QR", qr: serverData.qr }),
-              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-          }
-
-          if (serverData?.status === "CONNECTED") {
-            return new Response(
-              JSON.stringify({ status: "CONNECTED", phone_number: serverData.phone_number }),
-              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-          }
-
-          if (serverData?.status === "WAITING") {
-            return new Response(
-              JSON.stringify({ status: "WAITING" }),
-              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-          }
-
-          // DISCONNECTED from server during initialization should be treated as WAITING
-          // because the session might still be starting up
-          if (serverData?.status === "DISCONNECTED") {
-            console.log("[QR] Server returned DISCONNECTED - treating as WAITING (session may be initializing)");
-            return new Response(
-              JSON.stringify({ status: "WAITING" }),
-              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-          }
-
-          if (serverData?.status === "ERROR") {
-            return new Response(
-              JSON.stringify({ status: "ERROR" }),
-              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-          }
-        } else {
-          const errorText = await resp.text();
-          console.error(`[QR] Server error: ${resp.status} - ${errorText}`);
-        }
-      } catch (e) {
-        console.error("[QR] Erro ao buscar QR no servidor:", e);
-      }
-    } else {
-      console.log("[QR] No WHATSAPP_SERVER_URL configured");
+    if (dbStatus === "connecting") {
+      return new Response(
+        JSON.stringify({ status: "CONNECTING" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    // Still connecting, no QR yet
+    // Default: disconnected
     return new Response(
-      JSON.stringify({ status: "WAITING" }),
+      JSON.stringify({ status: "DISCONNECTED" }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
   } catch (error) {
     console.error("Erro:", error);
     return new Response(
-      JSON.stringify({ status: "ERROR" }),
+      JSON.stringify({ status: "ERROR", reason: "internal_error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

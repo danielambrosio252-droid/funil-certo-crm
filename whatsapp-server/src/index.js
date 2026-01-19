@@ -6,8 +6,10 @@
  * Servidor Node.js com Baileys para gerenciamento de
  * sessões WhatsApp Web com suporte a multi-tenant.
  * 
- * Autor: Escala Certo Pro
- * Versão: 1.0.0
+ * VERSÃO DEFINITIVA:
+ * - Endpoint /api/whatsapp/qr com status explícito
+ * - Nunca retorna WAITING infinito
+ * - Timeout automático para sessões travadas
  */
 
 require('dotenv').config();
@@ -28,6 +30,7 @@ const { logger } = require('./utils/logger');
 const PORT = process.env.PORT || 3001;
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+const SERVER_SECRET = process.env.WHATSAPP_SERVER_SECRET; // Opcional: para autenticação
 const SESSIONS_DIR = process.env.SESSIONS_DIR || './sessions';
 
 // Criar diretórios necessários
@@ -64,15 +67,39 @@ app.use((req, res, next) => {
 });
 
 // =====================================================
+// MIDDLEWARE DE AUTENTICAÇÃO (opcional)
+// =====================================================
+
+const validateServerToken = (req, res, next) => {
+  // Se não há secret configurado, pular validação
+  if (!SERVER_SECRET) {
+    return next();
+  }
+  
+  const token = req.headers['x-server-token'] || req.query.token;
+  
+  if (token !== SERVER_SECRET) {
+    logger.warn(`Tentativa de acesso não autorizado: ${req.path}`);
+    return res.status(401).json({ 
+      success: false, 
+      error: 'Token inválido' 
+    });
+  }
+  
+  next();
+};
+
+// =====================================================
 // ENDPOINTS
 // =====================================================
 
 /**
  * POST /connect
  * Inicia uma nova sessão WhatsApp para a empresa
+ * FORÇA reset da sessão anterior
  */
-app.post('/connect', async (req, res) => {
-  const { company_id } = req.body;
+app.post('/connect', validateServerToken, async (req, res) => {
+  const { company_id, force_reset } = req.body;
 
   if (!company_id) {
     return res.status(400).json({ 
@@ -82,14 +109,20 @@ app.post('/connect', async (req, res) => {
   }
 
   try {
-    logger.info(`[${company_id}] Iniciando conexão...`);
+    logger.info(`[${company_id}] POST /connect - force_reset: ${force_reset}`);
+    
+    // Se force_reset, remover sessão completamente antes
+    if (force_reset) {
+      await sessionManager.removeSession(company_id);
+    }
     
     const result = await sessionManager.createSession(company_id);
     
     res.json({ 
       success: true, 
       message: 'Conexão iniciada. Aguarde o QR Code.',
-      status: result.status
+      status: result.status,
+      phone_number: result.phone_number || null
     });
   } catch (error) {
     logger.error(`[${company_id}] Erro ao conectar:`, error);
@@ -102,8 +135,16 @@ app.post('/connect', async (req, res) => {
 
 /**
  * GET /api/whatsapp/qr
- * Retorna o QR Code atual (cacheado) ou status de conexão.
- * Query: ?company_id=...
+ * ENDPOINT DETERMINÍSTICO para polling
+ * 
+ * Retorna status EXPLÍCITO:
+ * - CONNECTING: Sessão iniciando, aguarde
+ * - QR: QR Code disponível (inclui qr base64)
+ * - CONNECTED: Já conectado (inclui phone_number)
+ * - ERROR: Erro ocorreu (inclui reason)
+ * - DISCONNECTED: Sem sessão ativa
+ * 
+ * NUNCA retorna WAITING infinito!
  */
 app.get('/api/whatsapp/qr', (req, res) => {
   const companyId = req.query.company_id || req.query.companyId;
@@ -115,38 +156,55 @@ app.get('/api/whatsapp/qr', (req, res) => {
     });
   }
 
-  const session = sessionManager.getSessionStatus(companyId);
+  // Usar o novo método determinístico
+  const sessionStatus = sessionManager.getSessionStatus(companyId);
   const qr = sessionManager.getQrCode(companyId);
 
-  logger.info(`[${companyId}] GET /api/whatsapp/qr - exists: ${session?.exists}, connecting: ${session?.connecting}, connected: ${session?.connected}, hasQR: ${!!qr}`);
+  logger.info(`[${companyId}] GET /api/whatsapp/qr - status: ${sessionStatus.status}, hasQR: ${!!qr}`);
 
-  if (session?.connected) {
+  // 1. CONNECTED
+  if (sessionStatus.connected || sessionStatus.status === 'connected') {
     return res.json({
       status: 'CONNECTED',
-      phone_number: session.phoneNumber
+      phone_number: sessionStatus.phoneNumber
     });
   }
 
-  if (qr) {
+  // 2. QR disponível
+  if (qr || sessionStatus.status === 'qr') {
     return res.json({
       status: 'QR',
-      qr
+      qr: qr || null
     });
   }
 
-  // Session exists OR is in connecting state -> return WAITING
-  if (session?.exists || session?.connecting) {
-    return res.json({ status: 'WAITING' });
+  // 3. ERROR
+  if (sessionStatus.status === 'error') {
+    return res.json({
+      status: 'ERROR',
+      reason: sessionStatus.error_reason || 'unknown'
+    });
   }
 
-  return res.json({ status: 'DISCONNECTED' });
+  // 4. CONNECTING (com idade)
+  if (sessionStatus.status === 'connecting' || sessionStatus.connecting) {
+    return res.json({
+      status: 'CONNECTING',
+      pending_age_ms: sessionStatus.pending_age_ms || 0
+    });
+  }
+
+  // 5. DISCONNECTED
+  return res.json({ 
+    status: 'DISCONNECTED' 
+  });
 });
 
 /**
  * POST /disconnect
  * Desconecta uma sessão WhatsApp
  */
-app.post('/disconnect', async (req, res) => {
+app.post('/disconnect', validateServerToken, async (req, res) => {
   const { company_id } = req.body;
 
   if (!company_id) {
@@ -178,7 +236,7 @@ app.post('/disconnect', async (req, res) => {
  * POST /send
  * Envia uma mensagem de texto
  */
-app.post('/send', async (req, res) => {
+app.post('/send', validateServerToken, async (req, res) => {
   const { company_id, message_id, phone, content, message_type = 'text' } = req.body;
 
   if (!phone || !content) {
@@ -189,7 +247,6 @@ app.post('/send', async (req, res) => {
   }
 
   try {
-    // Se company_id não for fornecido, tentar encontrar sessão ativa
     let targetCompanyId = company_id;
     
     if (!targetCompanyId) {
@@ -252,13 +309,6 @@ app.get('/status/:company_id', (req, res) => {
   
   const session = sessionManager.getSessionStatus(company_id);
   
-  if (!session) {
-    return res.status(404).json({ 
-      success: false, 
-      error: 'Sessão não encontrada' 
-    });
-  }
-
   res.json({
     success: true,
     session
@@ -280,19 +330,20 @@ app.get('/health', (req, res) => {
 
 /**
  * POST /restart/:company_id
- * Reinicia uma sessão específica
+ * Reinicia uma sessão específica (mantém credenciais)
  */
-app.post('/restart/:company_id', async (req, res) => {
+app.post('/restart/:company_id', validateServerToken, async (req, res) => {
   const { company_id } = req.params;
 
   try {
     logger.info(`[${company_id}] Reiniciando sessão...`);
     
-    await sessionManager.restartSession(company_id);
+    const result = await sessionManager.restartSession(company_id);
     
     res.json({ 
       success: true, 
-      message: 'Sessão reiniciada' 
+      message: 'Sessão reiniciada',
+      status: result.status
     });
   } catch (error) {
     logger.error(`[${company_id}] Erro ao reiniciar:`, error);
@@ -306,12 +357,13 @@ app.post('/restart/:company_id', async (req, res) => {
 /**
  * DELETE /session/:company_id
  * Remove completamente uma sessão (incluindo arquivos)
+ * Permite conectar um novo número
  */
-app.delete('/session/:company_id', async (req, res) => {
+app.delete('/session/:company_id', validateServerToken, async (req, res) => {
   const { company_id } = req.params;
 
   try {
-    logger.info(`[${company_id}] Removendo sessão...`);
+    logger.info(`[${company_id}] Removendo sessão completamente...`);
     
     await sessionManager.removeSession(company_id);
     
@@ -338,6 +390,7 @@ app.listen(PORT, async () => {
   logger.info('=========================================');
   logger.info(`📡 Porta: ${PORT}`);
   logger.info(`🔗 Webhook: ${WEBHOOK_URL || 'NÃO CONFIGURADO'}`);
+  logger.info(`🔐 Auth: ${SERVER_SECRET ? 'ATIVO' : 'DESATIVADO'}`);
   logger.info(`📁 Sessões: ${path.resolve(SESSIONS_DIR)}`);
   logger.info('=========================================');
 

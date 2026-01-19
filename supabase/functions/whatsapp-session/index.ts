@@ -13,7 +13,8 @@ const corsHeaders = {
 };
 
 interface SessionPayload {
-  action: "connect" | "disconnect" | "status";
+  action: "connect" | "disconnect" | "status" | "restart" | "reset";
+  force_reset?: boolean;
 }
 
 const runInBackground = (promise: Promise<unknown>) => {
@@ -38,6 +39,7 @@ Deno.serve(async (req) => {
   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const whatsappServerUrl = Deno.env.get("WHATSAPP_SERVER_URL");
+  const whatsappServerSecret = Deno.env.get("WHATSAPP_SERVER_SECRET");
 
   try {
     // Validate auth
@@ -73,7 +75,7 @@ Deno.serve(async (req) => {
 
     // Handle missing profile gracefully for status action
     const payload: SessionPayload = await req.json();
-    const { action } = payload;
+    const { action, force_reset } = payload;
 
     if (!profile?.company_id) {
       // For status, return disconnected immediately
@@ -93,7 +95,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Check permissions for connect/disconnect
+    // Check permissions for connect/disconnect/restart/reset
     if (action !== "status" && !["owner", "admin"].includes(profile.role)) {
       return new Response(
         JSON.stringify({ error: "Sem permissão para gerenciar sessão WhatsApp" }),
@@ -104,7 +106,15 @@ Deno.serve(async (req) => {
     const companyId = profile.company_id;
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-    console.log("Ação de sessão:", action, "empresa:", companyId);
+    // Headers para chamadas ao servidor VPS
+    const serverHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (whatsappServerSecret) {
+      serverHeaders["x-server-token"] = whatsappServerSecret;
+    }
+
+    console.log(`[whatsapp-session] Ação: ${action}, empresa: ${companyId}`);
 
     switch (action) {
       case "status": {
@@ -155,24 +165,28 @@ Deno.serve(async (req) => {
         } else {
           await supabaseAdmin
             .from("whatsapp_sessions")
-            .update({ status: "connecting", qr_code: null })
+            .update({ 
+              status: "connecting", 
+              qr_code: null,
+              updated_at: new Date().toISOString()
+            })
             .eq("company_id", companyId);
         }
 
-        // IMMEDIATE RESPONSE: Return "CONNECTING" status right away
-        // The QR code will be fetched via separate /whatsapp-qr endpoint
-        
         // Notify WhatsApp server in background (non-blocking)
         const notifyServerInBackground = async () => {
           try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+            const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
-            console.log("Chamando servidor WhatsApp:", whatsappServerUrl + "/connect");
+            console.log(`[whatsapp-session] Chamando servidor: ${whatsappServerUrl}/connect`);
             const response = await fetch(whatsappServerUrl + "/connect", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ company_id: companyId }),
+              headers: serverHeaders,
+              body: JSON.stringify({ 
+                company_id: companyId,
+                force_reset: force_reset || false
+              }),
               signal: controller.signal,
             });
 
@@ -187,7 +201,8 @@ Deno.serve(async (req) => {
                 .update({ status: "error" })
                 .eq("company_id", companyId);
             } else {
-              console.log("Servidor WhatsApp respondeu com sucesso");
+              const data = await response.json();
+              console.log("Servidor WhatsApp respondeu:", data);
             }
           } catch (e) {
             console.error("Erro ao conectar ao servidor WhatsApp:", e);
@@ -217,7 +232,11 @@ Deno.serve(async (req) => {
         // Update database immediately
         await supabaseAdmin
           .from("whatsapp_sessions")
-          .update({ status: "disconnected", qr_code: null })
+          .update({ 
+            status: "disconnected", 
+            qr_code: null,
+            updated_at: new Date().toISOString()
+          })
           .eq("company_id", companyId);
 
         // Respond to user immediately
@@ -231,11 +250,11 @@ Deno.serve(async (req) => {
           const notifyDisconnect = async () => {
             try {
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 3000);
+              const timeoutId = setTimeout(() => controller.abort(), 5000);
 
               await fetch(whatsappServerUrl + "/disconnect", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: serverHeaders,
                 body: JSON.stringify({ company_id: companyId }),
                 signal: controller.signal,
               });
@@ -250,6 +269,107 @@ Deno.serve(async (req) => {
         }
 
         return response;
+      }
+
+      case "restart": {
+        // Reinicia sessão (mantém credenciais do WhatsApp)
+        if (!whatsappServerUrl) {
+          return new Response(
+            JSON.stringify({ error: "Servidor WhatsApp não configurado" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        // Update database to connecting
+        await supabaseAdmin
+          .from("whatsapp_sessions")
+          .update({ 
+            status: "connecting", 
+            qr_code: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq("company_id", companyId);
+
+        // Call restart endpoint in background
+        runInBackground((async () => {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+            console.log(`[whatsapp-session] Reiniciando: ${whatsappServerUrl}/restart/${companyId}`);
+            const response = await fetch(`${whatsappServerUrl}/restart/${companyId}`, {
+              method: "POST",
+              headers: serverHeaders,
+              signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+              console.error("Erro ao reiniciar:", await response.text());
+              await supabaseAdmin
+                .from("whatsapp_sessions")
+                .update({ status: "error" })
+                .eq("company_id", companyId);
+            }
+          } catch (e) {
+            console.error("Erro ao reiniciar sessão:", e);
+            await supabaseAdmin
+              .from("whatsapp_sessions")
+              .update({ status: "error" })
+              .eq("company_id", companyId);
+          }
+        })());
+
+        return new Response(
+          JSON.stringify({ success: true, status: "RESTARTING" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      case "reset": {
+        // Remove sessão completamente (permite conectar novo número)
+        if (!whatsappServerUrl) {
+          return new Response(
+            JSON.stringify({ error: "Servidor WhatsApp não configurado" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        // Update database - clear everything
+        await supabaseAdmin
+          .from("whatsapp_sessions")
+          .update({ 
+            status: "disconnected", 
+            qr_code: null,
+            phone_number: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq("company_id", companyId);
+
+        // Call delete endpoint in background
+        runInBackground((async () => {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+            console.log(`[whatsapp-session] Removendo: DELETE ${whatsappServerUrl}/session/${companyId}`);
+            await fetch(`${whatsappServerUrl}/session/${companyId}`, {
+              method: "DELETE",
+              headers: serverHeaders,
+              signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+          } catch (e) {
+            console.error("Erro ao remover sessão:", e);
+          }
+        })());
+
+        return new Response(
+          JSON.stringify({ success: true, status: "RESET", message: "Sessão removida. Você pode conectar um novo número." }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
 
       default:
