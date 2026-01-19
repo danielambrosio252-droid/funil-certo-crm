@@ -10,17 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { EmailEditor, EmailContent } from "./EmailEditor";
 import { 
   Mail, 
   Zap, 
@@ -129,6 +123,9 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
   const [name, setName] = useState("");
   const [subject, setSubject] = useState("");
   const [preheader, setPreheader] = useState("");
+  const [emailContent, setEmailContent] = useState<EmailContent | null>(null);
+
+  const totalSteps = 4;
 
   const handleNext = () => {
     if (step === 1 && !campaignType) {
@@ -139,6 +136,16 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
       toast.error("Selecione um template");
       return;
     }
+    if (step === 3) {
+      if (!name) {
+        toast.error("Digite o nome da campanha");
+        return;
+      }
+      if (!subject) {
+        toast.error("Digite o assunto do e-mail");
+        return;
+      }
+    }
     setStep(step + 1);
   };
 
@@ -147,12 +154,8 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
   };
 
   const handleCreate = () => {
-    if (!name) {
-      toast.error("Digite o nome da campanha");
-      return;
-    }
-    if (!subject) {
-      toast.error("Digite o assunto do e-mail");
+    if (!emailContent) {
+      toast.error("Configure o conteúdo do e-mail");
       return;
     }
 
@@ -162,30 +165,35 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
     });
     
     // Reset form
+    handleReset();
+    onOpenChange(false);
+  };
+
+  const handleReset = () => {
     setStep(1);
     setCampaignType("");
     setTemplate("");
     setName("");
     setSubject("");
     setPreheader("");
-    onOpenChange(false);
+    setEmailContent(null);
   };
 
   const handleClose = (open: boolean) => {
     if (!open) {
-      setStep(1);
-      setCampaignType("");
-      setTemplate("");
-      setName("");
-      setSubject("");
-      setPreheader("");
+      handleReset();
     }
     onOpenChange(open);
   };
 
+  const getDialogSize = () => {
+    if (step === 4) return "sm:max-w-[95vw] sm:max-h-[90vh]";
+    return "sm:max-w-[600px]";
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[600px]">
+      <DialogContent className={`${getDialogSize()} overflow-y-auto`}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Mail className="w-5 h-5 text-primary" />
@@ -195,12 +203,13 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
             {step === 1 && "Escolha o tipo de campanha que deseja criar"}
             {step === 2 && "Selecione um template para começar"}
             {step === 3 && "Configure os detalhes da campanha"}
+            {step === 4 && "Personalize o conteúdo do seu e-mail"}
           </DialogDescription>
         </DialogHeader>
 
         {/* Progress Steps */}
         <div className="flex items-center justify-center gap-2 py-2">
-          {[1, 2, 3].map((s) => (
+          {[1, 2, 3, 4].map((s) => (
             <div
               key={s}
               className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
@@ -298,6 +307,16 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
           </div>
         )}
 
+        {/* Step 4: Email Editor */}
+        {step === 4 && (
+          <EmailEditor
+            template={template}
+            subject={subject}
+            preheader={preheader}
+            onContentChange={setEmailContent}
+          />
+        )}
+
         {/* Actions */}
         <div className="flex justify-between pt-4">
           <Button
@@ -312,10 +331,10 @@ export function CreateCampaignDialog({ open, onOpenChange }: CreateCampaignDialo
             )}
           </Button>
           <Button
-            onClick={step === 3 ? handleCreate : handleNext}
+            onClick={step === totalSteps ? handleCreate : handleNext}
             className="gradient-primary text-primary-foreground"
           >
-            {step === 3 ? "Criar Campanha" : (
+            {step === totalSteps ? "Criar Campanha" : (
               <>
                 Próximo
                 <ArrowRight className="w-4 h-4 ml-2" />
