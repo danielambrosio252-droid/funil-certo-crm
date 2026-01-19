@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
-import { Plus, MoreHorizontal, Phone, MessageCircle, Mail, User, Loader2 } from "lucide-react";
+import { Plus, MoreHorizontal, Phone, MessageCircle, Mail, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -11,9 +11,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { useFunnelStages, useFunnelLeads, FunnelStage, FunnelLead } from "@/hooks/useFunnels";
+import { useFunnelStages, useFunnelLeads, FunnelLead } from "@/hooks/useFunnels";
 import { CreateStageDialog } from "./CreateStageDialog";
 import { CreateLeadDialog } from "./CreateLeadDialog";
+import { LeadDetailsDialog } from "./LeadDetailsDialog";
 
 const sourceColors: Record<string, string> = {
   "Meta Ads": "bg-info/10 text-info",
@@ -37,6 +38,13 @@ export function KanbanBoard({ funnelId }: KanbanBoardProps) {
   
   const [showNewStage, setShowNewStage] = useState(false);
   const [showNewLead, setShowNewLead] = useState<string | null>(null);
+  const [selectedLead, setSelectedLead] = useState<FunnelLead | null>(null);
+  const [selectedLeadStage, setSelectedLeadStage] = useState<string | undefined>();
+
+  const handleLeadClick = (lead: FunnelLead, stageName: string) => {
+    setSelectedLead(lead);
+    setSelectedLeadStage(stageName);
+  };
 
   // Agrupar leads por etapa
   const leadsByStage = useMemo(() => {
@@ -148,8 +156,9 @@ export function KanbanBoard({ funnelId }: KanbanBoardProps) {
                             ref={provided.innerRef}
                             {...provided.draggableProps}
                             {...provided.dragHandleProps}
+                            onClick={() => handleLeadClick(lead, stage.name)}
                             className={cn(
-                              "bg-card border border-border rounded-lg p-4 mb-2 cursor-grab active:cursor-grabbing shadow-sm hover:shadow-md transition-shadow",
+                              "bg-card border border-border rounded-lg p-4 mb-2 cursor-pointer shadow-sm hover:shadow-md transition-shadow",
                               snapshot.isDragging && "shadow-lg ring-2 ring-primary/20"
                             )}
                           >
@@ -290,6 +299,14 @@ export function KanbanBoard({ funnelId }: KanbanBoardProps) {
           stageIds={stageIds}
         />
       )}
+
+      <LeadDetailsDialog
+        open={!!selectedLead}
+        onOpenChange={(open) => !open && setSelectedLead(null)}
+        lead={selectedLead}
+        stageIds={stageIds}
+        stageName={selectedLeadStage}
+      />
     </>
   );
 }
