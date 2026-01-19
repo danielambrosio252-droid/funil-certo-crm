@@ -43,7 +43,7 @@ const plans = [
 ];
 
 export default function Settings() {
-  const { profile, company } = useAuth();
+  const { profile, company, refetchProfile } = useAuth();
   const { permission, settings, updateSettings, requestPermission, playNotificationSound } = useNotifications();
   const { 
     uploading, 
@@ -110,7 +110,10 @@ export default function Settings() {
 
   // Handler para salvar perfil
   const handleSaveProfile = async () => {
-    await saveProfile(formData);
+    const success = await saveProfile(formData);
+    if (success) {
+      await refetchProfile();
+    }
   };
 
   // Handler para salvar empresa
@@ -133,6 +136,7 @@ export default function Settings() {
         toast.error("Erro ao salvar dados da empresa");
       } else {
         toast.success("Dados da empresa salvos com sucesso!");
+        await refetchProfile();
       }
     } catch (error) {
       console.error("Erro:", error);
