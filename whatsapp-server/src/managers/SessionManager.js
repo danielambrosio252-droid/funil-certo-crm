@@ -1,10 +1,16 @@
 /**
  * =====================================================
- * GERENCIADOR DE SESSÕES WHATSAPP
+ * GERENCIADOR DE SESSÕES WHATSAPP - VERSÃO DEFINITIVA
  * =====================================================
  * 
  * Responsável por criar, gerenciar e manter sessões
  * WhatsApp Web usando a biblioteca Baileys.
+ * 
+ * MUDANÇAS ESTRUTURAIS:
+ * - Timeout automático para pendingConnections (30s)
+ * - Limpeza garantida em TODOS os cenários
+ * - Auto-cleanup após loggedOut
+ * - Status explícito e determinístico
  */
 
 const { 
@@ -22,6 +28,8 @@ const { normalizePhone, isLid, phoneToJid } = require('../utils/phoneNormalizer'
 
 const RECONNECT_TIMEOUT = parseInt(process.env.RECONNECT_TIMEOUT) || 5000;
 const MAX_RECONNECT_ATTEMPTS = parseInt(process.env.MAX_RECONNECT_ATTEMPTS) || 10;
+const QR_TIMEOUT_MS = 30000; // 30 segundos para gerar QR
+const PENDING_MAX_AGE_MS = 60000; // 60 segundos máximo para pendingConnections
 
 class SessionManager {
   constructor(sessionsDir, webhookService) {
@@ -31,37 +39,106 @@ class SessionManager {
     this.sessionMeta = new Map(); // Map<companyId, metadata>
     this.reconnectAttempts = new Map(); // Map<companyId, count>
 
-    // Cache em memória do QR por empresa (QR é efêmero no Baileys)
+    // Cache em memória do QR por empresa
     // Map<companyId, { qr: string; createdAt: Date }>
     this.qrStore = new Map();
     
-    // Track sessions that are currently being created (before socket is ready)
-    // Map<companyId, Date> - timestamp when connection was requested
+    // Track sessions que estão sendo criadas (com timestamp)
+    // Map<companyId, number> - timestamp em ms quando conexão foi requisitada
     this.pendingConnections = new Map();
+    
+    // Track de erros para cada empresa
+    // Map<companyId, { reason: string; timestamp: Date }>
+    this.errorStore = new Map();
+  }
+
+  /**
+   * Limpa TODOS os estados de uma empresa (reset completo)
+   */
+  _cleanupCompanyState(companyId) {
+    this.pendingConnections.delete(companyId);
+    this.qrStore.delete(companyId);
+    this.errorStore.delete(companyId);
+    logger.info(`[${companyId}] 🧹 Estado limpo (pending, qr, error)`);
+  }
+
+  /**
+   * Marca erro para uma empresa
+   */
+  _setError(companyId, reason) {
+    this.errorStore.set(companyId, { reason, timestamp: new Date() });
+    this._cleanupCompanyState(companyId);
+    this.errorStore.set(companyId, { reason, timestamp: new Date() }); // Re-set após cleanup
+    logger.warn(`[${companyId}] ❌ Erro registrado: ${reason}`);
   }
 
   /**
    * Cria uma nova sessão WhatsApp
+   * GARANTIAS:
+   * - Limpa estado anterior completamente
+   * - Timeout automático de 30s para gerar QR
+   * - Nunca fica em estado "pendente" eternamente
    */
   async createSession(companyId) {
-    // Mark as pending IMMEDIATELY - before any async work
-    // This ensures getSessionStatus returns "connecting" during initialization
-    this.pendingConnections.set(companyId, new Date());
+    logger.info(`[${companyId}] 🚀 Iniciando createSession...`);
     
-    // Sempre limpar QR anterior para evitar QR "velho" no polling
-    this.qrStore.delete(companyId);
+    // PASSO 1: Limpar TUDO antes de começar
+    this._cleanupCompanyState(companyId);
 
-    // Verificar se já existe sessão ativa
+    // Verificar se já existe sessão CONECTADA
     if (this.sessions.has(companyId)) {
       const existingSocket = this.sessions.get(companyId);
       if (existingSocket?.user) {
-        logger.info(`[${companyId}] Sessão já existe e está conectada`);
-        this.pendingConnections.delete(companyId);
-        return { status: 'already_connected' };
+        logger.info(`[${companyId}] ✅ Sessão já existe e está conectada`);
+        return { status: 'already_connected', phone_number: existingSocket.user.id?.split(':')[0] };
       }
-      // Se existe mas não está conectada, remover e recriar
+      // Existe mas não está conectada - remover
+      logger.info(`[${companyId}] 🗑️ Removendo sessão existente não conectada`);
+      try {
+        existingSocket?.end?.();
+      } catch (e) {
+        logger.warn(`[${companyId}] Erro ao encerrar socket existente:`, e.message);
+      }
       this.sessions.delete(companyId);
+      this.sessionMeta.delete(companyId);
     }
+
+    // PASSO 2: Marcar como pendente COM timestamp
+    const now = Date.now();
+    this.pendingConnections.set(companyId, now);
+    logger.info(`[${companyId}] ⏳ Marcado como pending: ${now}`);
+
+    // PASSO 3: Configurar TIMEOUT automático (30s)
+    // Se não gerar QR em 30s, limpa e marca como erro
+    const qrTimeoutId = setTimeout(() => {
+      const pendingTime = this.pendingConnections.get(companyId);
+      const hasQr = this.qrStore.has(companyId);
+      const socket = this.sessions.get(companyId);
+      const isConnected = !!socket?.user;
+      
+      // Só dispara timeout se ainda está pendente, sem QR e não conectado
+      if (pendingTime === now && !hasQr && !isConnected) {
+        logger.error(`[${companyId}] ⏰ TIMEOUT: QR não gerado em ${QR_TIMEOUT_MS/1000}s`);
+        this._setError(companyId, 'qr_timeout');
+        
+        // Notificar webhook
+        this.webhookService.send(companyId, 'error', {
+          reason: 'qr_timeout',
+          message: 'QR Code não foi gerado no tempo esperado'
+        }).catch(e => logger.error(`[${companyId}] Erro ao enviar webhook de timeout:`, e));
+        
+        // Limpar socket se existir
+        if (socket && !isConnected) {
+          try {
+            socket.end?.();
+          } catch (e) {
+            logger.warn(`[${companyId}] Erro ao encerrar socket no timeout:`, e.message);
+          }
+          this.sessions.delete(companyId);
+          this.sessionMeta.delete(companyId);
+        }
+      }
+    }, QR_TIMEOUT_MS);
 
     const sessionPath = path.join(this.sessionsDir, companyId);
     
@@ -102,16 +179,20 @@ class SessionManager {
         createdAt: new Date(),
         connected: false,
         phoneNumber: null,
-        reconnecting: false
+        reconnecting: false,
+        qrTimeoutId // Guardar para poder cancelar
       });
       this.reconnectAttempts.set(companyId, 0);
 
       // Configurar eventos
-      this._setupEventHandlers(companyId, socket, saveCreds);
+      this._setupEventHandlers(companyId, socket, saveCreds, qrTimeoutId);
 
       return { status: 'connecting' };
     } catch (error) {
-      logger.error(`[${companyId}] Erro ao criar sessão:`, error);
+      // SEMPRE limpar em caso de erro
+      clearTimeout(qrTimeoutId);
+      this._setError(companyId, 'create_session_error');
+      logger.error(`[${companyId}] 💥 Erro ao criar sessão:`, error);
       throw error;
     }
   }
@@ -119,12 +200,12 @@ class SessionManager {
   /**
    * Configura os handlers de eventos do socket
    */
-  _setupEventHandlers(companyId, socket, saveCreds) {
+  _setupEventHandlers(companyId, socket, saveCreds, qrTimeoutId) {
     // ========== EVENTO: connection.update ==========
     socket.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
-      // QR Code recebido
+      // QR Code recebido - SUCESSO parcial
       if (qr) {
         try {
           const qrImage = await QRCode.toDataURL(qr, {
@@ -133,12 +214,22 @@ class SessionManager {
             width: 256
           });
 
-          // ✅ Cache em memória por empresa (fonte de verdade para polling)
+          // ✅ Cancelar timeout - QR foi gerado com sucesso
+          if (qrTimeoutId) {
+            clearTimeout(qrTimeoutId);
+          }
+
+          // ✅ Cache em memória (fonte de verdade para polling)
           this.qrStore.set(companyId, { qr: qrImage, createdAt: new Date() });
+          
+          // ✅ Limpar erro anterior se havia
+          this.errorStore.delete(companyId);
+          
+          // ✅ Manter pendingConnections ATIVO (ainda aguardando scan)
 
-          logger.info(`[${companyId}] 📱 QR Code gerado`);
+          logger.info(`[${companyId}] 📱 QR Code gerado com sucesso`);
 
-          // Mantém o webhook (quando estiver OK ele atualiza o backend)
+          // Webhook para atualizar o backend
           await this.webhookService.send(companyId, 'qr_code', {
             qr_code: qrImage
           });
@@ -150,20 +241,25 @@ class SessionManager {
           }
         } catch (error) {
           logger.error(`[${companyId}] Erro ao gerar QR Code:`, error);
+          this._setError(companyId, 'qr_generation_error');
         }
       }
 
-      // Conexão aberta
+      // Conexão aberta - SUCESSO TOTAL
       if (connection === 'open') {
         const phoneNumber = socket.user?.id?.split(':')[0] || '';
 
-        // ✅ QR já não é mais necessário após conectar
-        this.qrStore.delete(companyId);
-        
-        // ✅ Clear pending connection flag
-        this.pendingConnections.delete(companyId);
+        // ✅ Cancelar timeout
+        if (qrTimeoutId) {
+          clearTimeout(qrTimeoutId);
+        }
 
-        logger.info(`[${companyId}] ✅ Conectado: ${phoneNumber}`);
+        // ✅ Limpar estados temporários
+        this.qrStore.delete(companyId);
+        this.pendingConnections.delete(companyId);
+        this.errorStore.delete(companyId);
+
+        logger.info(`[${companyId}] ✅ CONECTADO: ${phoneNumber}`);
 
         // Atualizar metadata
         const meta = this.sessionMeta.get(companyId);
@@ -189,8 +285,14 @@ class SessionManager {
           meta.connected = false;
         }
 
-        // ✅ Ao desconectar, QR anterior não é confiável
+        // ✅ Cancelar timeout
+        if (qrTimeoutId) {
+          clearTimeout(qrTimeoutId);
+        }
+
+        // ✅ Limpar QR e pending
         this.qrStore.delete(companyId);
+        this.pendingConnections.delete(companyId);
 
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const reason = DisconnectReason[statusCode] || statusCode;
@@ -219,10 +321,12 @@ class SessionManager {
             setTimeout(() => {
               this.createSession(companyId).catch(err => {
                 logger.error(`[${companyId}] Erro na reconexão:`, err);
+                this._setError(companyId, 'reconnect_failed');
               });
             }, RECONNECT_TIMEOUT);
           } else {
             logger.error(`[${companyId}] Máximo de tentativas de reconexão atingido`);
+            this._setError(companyId, 'max_reconnect_attempts');
 
             await this.webhookService.send(companyId, 'disconnected', {
               reason: 'max_reconnect_attempts'
@@ -231,8 +335,10 @@ class SessionManager {
             this.sessions.delete(companyId);
           }
         } else {
-          // Logout - limpar sessão completamente
-          logger.info(`[${companyId}] 🚪 Logout realizado`);
+          // ========== LOGOUT - LIMPAR TUDO ==========
+          logger.info(`[${companyId}] 🚪 LOGOUT: Limpando sessão completamente`);
+
+          this._setError(companyId, 'logged_out');
 
           await this.webhookService.send(companyId, 'disconnected', {
             reason: 'logged_out'
@@ -240,12 +346,16 @@ class SessionManager {
 
           this.sessions.delete(companyId);
           this.sessionMeta.delete(companyId);
+          this.reconnectAttempts.delete(companyId);
 
-          // ✅ garantir que não fique QR preso no cache
-          this.qrStore.delete(companyId);
-
-          // Opcional: remover arquivos de sessão após logout
-          // await this._removeSessionFiles(companyId);
+          // ✅ CRÍTICO: Remover arquivos de sessão após logout
+          // Isso permite que o usuário conecte um novo número
+          try {
+            await this._removeSessionFiles(companyId);
+            logger.info(`[${companyId}] 🗑️ Arquivos de sessão removidos após logout`);
+          } catch (e) {
+            logger.error(`[${companyId}] Erro ao remover arquivos após logout:`, e);
+          }
         }
       }
     });
@@ -280,8 +390,6 @@ class SessionManager {
     // ========== EVENTO: presence.update (digitando...) ==========
     socket.ev.on('presence.update', async ({ id, presences }) => {
       try {
-        // id = jid do chat (ex: 5583999999999@s.whatsapp.net)
-        // ✅ NORMALIZAÇÃO DE TELEFONE
         const normalizedChatPhone = normalizePhone(id);
         
         for (const [participantJid, presence] of Object.entries(presences)) {
@@ -289,10 +397,9 @@ class SessionManager {
           const isTyping = presence.lastKnownPresence === 'composing';
           const isRecording = presence.lastKnownPresence === 'recording';
           
-          // Enviar apenas quando está digitando ou gravando
           if ((isTyping || isRecording) && normalizedParticipantPhone) {
             await this.webhookService.send(companyId, 'presence_update', {
-              phone: normalizedParticipantPhone,  // ✅ Número normalizado
+              phone: normalizedParticipantPhone,
               chat_jid: id,
               presence: presence.lastKnownPresence,
             });
@@ -308,22 +415,13 @@ class SessionManager {
    * Processa mensagem recebida
    */
   async _processIncomingMessage(companyId, msg) {
-    // Ignorar mensagens enviadas por mim
     if (msg.key.fromMe) return;
-    
-    // Ignorar status/stories
     if (msg.key.remoteJid === 'status@broadcast') return;
-    
-    // Ignorar mensagens de grupo por enquanto
     if (msg.key.remoteJid?.endsWith('@g.us')) return;
 
     const rawJid = msg.key.remoteJid || '';
-    
-    // ✅ NORMALIZAÇÃO DE TELEFONE - REGRA DE OURO
-    // Converte qualquer formato (@lid, @s.whatsapp.net, etc) para E.164 puro
     const normalizedPhone = normalizePhone(rawJid);
     
-    // Se é um LID sem número real, ignorar (não podemos identificar o contato)
     if (!normalizedPhone && isLid(rawJid)) {
       logger.warn(`[${companyId}] ⚠️ Ignorando mensagem de LID sem número real: ${rawJid}`);
       return;
@@ -332,7 +430,6 @@ class SessionManager {
     const phone = normalizedPhone || rawJid.replace(/@.*$/, '');
     const senderName = msg.pushName || '';
     
-    // Extrair conteúdo da mensagem
     let content = '';
     let messageType = 'text';
     let mediaUrl = undefined;
@@ -366,12 +463,12 @@ class SessionManager {
       content = '[Mensagem não suportada]';
     }
 
-    logger.info(`[${companyId}] 📩 Mensagem de ${phone} (raw: ${rawJid}): ${content.substring(0, 50)}...`);
+    logger.info(`[${companyId}] 📩 Mensagem de ${phone}: ${content.substring(0, 50)}...`);
 
     await this.webhookService.send(companyId, 'message_received', {
       message_id: msg.key.id,
-      from: phone,  // ✅ Número normalizado E.164
-      raw_jid: rawJid,  // Mantemos o JID original para debug
+      from: phone,
+      raw_jid: rawJid,
       content,
       sender_name: senderName,
       message_type: messageType,
@@ -418,7 +515,6 @@ class SessionManager {
       throw new Error('WhatsApp não conectado');
     }
 
-    // Formatar número
     const jid = this._formatJid(phone);
 
     try {
@@ -427,13 +523,11 @@ class SessionManager {
       if (messageType === 'text' || !messageType) {
         result = await socket.sendMessage(jid, { text: content });
       } else {
-        // Por enquanto, só suportamos texto
         result = await socket.sendMessage(jid, { text: content });
       }
 
       logger.info(`[${companyId}] 📤 Mensagem enviada para ${phone}: ${result.key.id}`);
 
-      // Notificar webhook sobre mensagem enviada
       if (localMessageId) {
         await this.webhookService.send(companyId, 'message_sent', {
           local_id: localMessageId,
@@ -453,7 +547,6 @@ class SessionManager {
 
   /**
    * Formata número de telefone para JID do WhatsApp
-   * ✅ Usa a função centralizada de normalização
    */
   _formatJid(phone) {
     return phoneToJid(phone);
@@ -463,6 +556,9 @@ class SessionManager {
    * Desconecta uma sessão
    */
   async disconnectSession(companyId) {
+    // Limpar estados temporários
+    this._cleanupCompanyState(companyId);
+    
     const socket = this.sessions.get(companyId);
     
     if (socket) {
@@ -482,10 +578,25 @@ class SessionManager {
   }
 
   /**
-   * Reinicia uma sessão
+   * Reinicia uma sessão (mantém credenciais)
    */
   async restartSession(companyId) {
-    await this.disconnectSession(companyId);
+    logger.info(`[${companyId}] 🔄 Reiniciando sessão...`);
+    
+    // Limpar estados
+    this._cleanupCompanyState(companyId);
+    
+    const socket = this.sessions.get(companyId);
+    if (socket) {
+      try {
+        socket.end?.();
+      } catch (e) {
+        logger.warn(`[${companyId}] Erro ao encerrar socket:`, e.message);
+      }
+      this.sessions.delete(companyId);
+    }
+    
+    this.sessionMeta.delete(companyId);
     
     // Aguardar um pouco antes de reconectar
     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -495,14 +606,30 @@ class SessionManager {
 
   /**
    * Remove uma sessão completamente (incluindo arquivos)
+   * Permite conectar um novo número
    */
   async removeSession(companyId) {
-    await this.disconnectSession(companyId);
+    logger.info(`[${companyId}] 🗑️ Removendo sessão completamente...`);
     
+    // Limpar todos os estados
+    this._cleanupCompanyState(companyId);
+    
+    const socket = this.sessions.get(companyId);
+    if (socket) {
+      try {
+        socket.end?.();
+      } catch (e) {
+        logger.warn(`[${companyId}] Erro ao encerrar socket:`, e.message);
+      }
+    }
+    
+    this.sessions.delete(companyId);
     this.sessionMeta.delete(companyId);
     this.reconnectAttempts.delete(companyId);
     
     await this._removeSessionFiles(companyId);
+    
+    return { status: 'removed' };
   }
 
   /**
@@ -531,7 +658,6 @@ class SessionManager {
       const sessionPath = path.join(this.sessionsDir, companyId);
       
       if (fs.statSync(sessionPath).isDirectory()) {
-        // Verificar se tem arquivos de credenciais
         const credsFile = path.join(sessionPath, 'creds.json');
         
         if (fs.existsSync(credsFile)) {
@@ -554,6 +680,7 @@ class SessionManager {
     
     for (const companyId of companyIds) {
       try {
+        this._cleanupCompanyState(companyId);
         const socket = this.sessions.get(companyId);
         if (socket) {
           socket.end();
@@ -566,7 +693,7 @@ class SessionManager {
   }
 
   /**
-   * Retorna o último QR Code (base64/dataURL) cacheado para a empresa
+   * Retorna o último QR Code cacheado para a empresa
    */
   getQrCode(companyId) {
     const entry = this.qrStore.get(companyId);
@@ -589,34 +716,102 @@ class SessionManager {
   }
 
   /**
-   * Retorna status de uma sessão específica
+   * Retorna status DETERMINÍSTICO de uma sessão
+   * NUNCA retorna WAITING infinito - sempre retorna status claro
    */
   getSessionStatus(companyId) {
     const socket = this.sessions.get(companyId);
     const meta = this.sessionMeta.get(companyId) || {};
-    const isPending = this.pendingConnections.has(companyId);
+    const pendingTime = this.pendingConnections.get(companyId);
+    const error = this.errorStore.get(companyId);
+    const qr = this.qrStore.get(companyId);
     
-    // Check if pending connection is stale (older than 2 minutes)
-    if (isPending) {
-      const pendingTime = this.pendingConnections.get(companyId);
-      const ageMs = Date.now() - pendingTime.getTime();
-      if (ageMs > 120000) {
-        // Stale pending connection, clean it up
-        this.pendingConnections.delete(companyId);
+    // 1. CONNECTED - tem socket com user
+    if (socket?.user) {
+      return {
+        status: 'connected',
+        exists: true,
+        connecting: false,
+        connected: true,
+        phoneNumber: socket.user.id?.split(':')[0] || meta.phoneNumber || null,
+        reconnecting: false,
+        createdAt: meta.createdAt || null,
+        lastConnectedAt: meta.lastConnectedAt || null
+      };
+    }
+    
+    // 2. QR_READY - tem QR no cache
+    if (qr) {
+      return {
+        status: 'qr',
+        exists: true,
+        connecting: false,
+        connected: false,
+        hasQr: true,
+        phoneNumber: null,
+        reconnecting: false,
+        createdAt: meta.createdAt || null
+      };
+    }
+    
+    // 3. ERROR - teve erro registrado
+    if (error) {
+      // Limpar erro antigo (mais de 5 minutos)
+      const errorAge = Date.now() - error.timestamp.getTime();
+      if (errorAge > 300000) {
+        this.errorStore.delete(companyId);
+      } else {
+        return {
+          status: 'error',
+          exists: false,
+          connecting: false,
+          connected: false,
+          error_reason: error.reason,
+          phoneNumber: null,
+          reconnecting: false
+        };
       }
     }
     
-    // Session exists if: socket is in map, OR we have a pending connection
-    const sessionExists = this.sessions.has(companyId) || this.pendingConnections.has(companyId);
+    // 4. CONNECTING - tem pending recente (menos de 60s)
+    if (pendingTime) {
+      const pendingAge = Date.now() - pendingTime;
+      
+      if (pendingAge < PENDING_MAX_AGE_MS) {
+        return {
+          status: 'connecting',
+          exists: true,
+          connecting: true,
+          connected: false,
+          pending_age_ms: pendingAge,
+          phoneNumber: null,
+          reconnecting: meta.reconnecting || false,
+          createdAt: meta.createdAt || null
+        };
+      } else {
+        // Pending expirou - limpar e retornar erro
+        this.pendingConnections.delete(companyId);
+        this._setError(companyId, 'connection_stale');
+        return {
+          status: 'error',
+          exists: false,
+          connecting: false,
+          connected: false,
+          error_reason: 'connection_stale',
+          phoneNumber: null,
+          reconnecting: false
+        };
+      }
+    }
     
+    // 5. DISCONNECTED - nenhum estado
     return {
-      exists: sessionExists,
-      connecting: isPending && !socket?.user,
-      connected: !!socket?.user,
-      phoneNumber: socket?.user?.id?.split(':')[0] || meta.phoneNumber || null,
-      reconnecting: meta.reconnecting || false,
-      createdAt: meta.createdAt || null,
-      lastConnectedAt: meta.lastConnectedAt || null
+      status: 'disconnected',
+      exists: false,
+      connecting: false,
+      connected: false,
+      phoneNumber: null,
+      reconnecting: false
     };
   }
 
@@ -626,7 +821,15 @@ class SessionManager {
   getAllSessionsStatus() {
     const result = {};
     
-    for (const companyId of this.sessions.keys()) {
+    // Incluir todas as sessões conhecidas
+    const allCompanyIds = new Set([
+      ...this.sessions.keys(),
+      ...this.pendingConnections.keys(),
+      ...this.qrStore.keys(),
+      ...this.errorStore.keys()
+    ]);
+    
+    for (const companyId of allCompanyIds) {
       result[companyId] = this.getSessionStatus(companyId);
     }
     

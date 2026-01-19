@@ -41,20 +41,25 @@ export interface WhatsAppMessage {
   created_at: string;
 }
 
+export type QrStatus = "CONNECTING" | "QR" | "CONNECTED" | "ERROR" | "DISCONNECTED";
+
+export interface QrResponse {
+  status: QrStatus;
+  qr?: string;
+  phone_number?: string;
+  reason?: string;
+  pending_age_ms?: number;
+}
+
 export function useWhatsApp() {
   const { profile, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const [session, setSession] = useState<WhatsAppSession | null>(null);
   const [contacts, setContacts] = useState<WhatsAppContact[]>([]);
-  
-  // Non-blocking loading states
   const [initializing, setInitializing] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  
-  // Track if we've done initial fetch
   const hasFetched = useRef(false);
 
-  // Fetch session (fast, non-blocking)
   const fetchSession = useCallback(async () => {
     const companyId = profile?.company_id;
     if (!companyId) {
@@ -80,7 +85,6 @@ export function useWhatsApp() {
     }
   }, [profile?.company_id]);
 
-  // Fetch contacts
   const fetchContacts = useCallback(async () => {
     const companyId = profile?.company_id;
     if (!companyId) return;
@@ -103,85 +107,66 @@ export function useWhatsApp() {
     }
   }, [profile?.company_id]);
 
-  // Fetch messages for a contact
   const fetchMessages = useCallback(async (contactId: string): Promise<WhatsAppMessage[]> => {
     if (!profile?.company_id) return [];
 
     try {
-      console.log(`[useWhatsApp] Buscando mensagens para contactId: ${contactId}`);
-      
-      const { data, error, count } = await supabase
+      const { data, error } = await supabase
         .from("whatsapp_messages")
-        .select("*", { count: "exact" })
+        .select("*")
         .eq("contact_id", contactId)
         .order("sent_at", { ascending: true })
-        .limit(500); // Limite explícito para evitar problemas
+        .limit(500);
 
       if (error) {
-        console.error("[useWhatsApp] Erro ao buscar mensagens:", error);
+        console.error("Erro ao buscar mensagens:", error);
         return [];
-      }
-
-      console.log(`[useWhatsApp] Retornadas ${data?.length || 0} mensagens (total no banco: ${count})`);
-      
-      if (data && data.length > 0) {
-        // Log para debug - mostrar distribuição de mensagens
-        const fromMe = data.filter((m: any) => m.is_from_me === true).length;
-        const received = data.filter((m: any) => m.is_from_me === false).length;
-        console.log(`[useWhatsApp] Distribuição - Enviadas: ${fromMe}, Recebidas: ${received}`);
       }
 
       return (data || []) as WhatsAppMessage[];
     } catch (err) {
-      console.error("[useWhatsApp] Erro ao buscar mensagens:", err);
+      console.error("Erro ao buscar mensagens:", err);
       return [];
     }
   }, [profile?.company_id]);
 
-  // Fetch QR code from dedicated endpoint (for polling)
-  const fetchQrCode = useCallback(async (): Promise<{ status: string; qr?: string; phone_number?: string }> => {
+  // Fetch QR code - retorna status DETERMINÍSTICO
+  const fetchQrCode = useCallback(async (): Promise<QrResponse> => {
     try {
       const { data, error } = await supabase.functions.invoke("whatsapp-qr");
 
       if (error) {
         console.error("Erro ao buscar QR:", error);
-        return { status: "ERROR" };
+        return { status: "ERROR", reason: "invoke_error" };
       }
 
-      return data || { status: "ERROR" };
+      return data || { status: "ERROR", reason: "no_data" };
     } catch (err) {
       console.error("Erro ao buscar QR:", err);
-      return { status: "ERROR" };
+      return { status: "ERROR", reason: "exception" };
     }
   }, []);
 
-  // Connect WhatsApp (non-blocking, immediate return)
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (forceReset = false) => {
     try {
       const { data, error } = await supabase.functions.invoke("whatsapp-session", {
-        body: { action: "connect" },
+        body: { action: "connect", force_reset: forceReset },
       });
 
       if (error) {
         console.error("Erro ao conectar:", error);
         toast({
           title: "Erro",
-          description: "Não foi possível iniciar a conexão. Verifique se o servidor está configurado.",
+          description: "Não foi possível iniciar a conexão.",
           variant: "destructive",
         });
         return false;
       }
 
-      // Check if the response indicates success
       if (data?.success && data?.status === "CONNECTING") {
-        toast({
-          title: "Iniciando conexão",
-          description: "Aguarde o QR Code aparecer...",
-        });
         return true;
       }
 
-      // If there was an error from the server
       if (data?.error) {
         toast({
           title: "Erro",
@@ -196,14 +181,13 @@ export function useWhatsApp() {
       console.error("Erro ao conectar:", err);
       toast({
         title: "Erro",
-        description: "Servidor indisponível. Tente novamente.",
+        description: "Servidor indisponível.",
         variant: "destructive",
       });
       return false;
     }
   }, [toast]);
 
-  // Disconnect WhatsApp
   const disconnect = useCallback(async () => {
     try {
       const { error } = await supabase.functions.invoke("whatsapp-session", {
@@ -212,33 +196,56 @@ export function useWhatsApp() {
 
       if (error) {
         console.error("Erro ao desconectar:", error);
-        toast({
-          title: "Erro",
-          description: "Não foi possível desconectar.",
-          variant: "destructive",
-        });
         return false;
       }
-
-      toast({
-        title: "Desconectado",
-        description: "WhatsApp desconectado com sucesso.",
-      });
 
       fetchSession();
       return true;
     } catch (err) {
       console.error("Erro ao desconectar:", err);
-      toast({
-        title: "Erro",
-        description: "Não foi possível desconectar.",
-        variant: "destructive",
-      });
       return false;
     }
-  }, [fetchSession, toast]);
+  }, [fetchSession]);
 
-  // Send message
+  // NOVO: Reiniciar sessão (mantém credenciais)
+  const restart = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke("whatsapp-session", {
+        body: { action: "restart" },
+      });
+
+      if (error) {
+        console.error("Erro ao reiniciar:", error);
+        return false;
+      }
+
+      return data?.success || false;
+    } catch (err) {
+      console.error("Erro ao reiniciar:", err);
+      return false;
+    }
+  }, []);
+
+  // NOVO: Resetar sessão completamente (permite novo número)
+  const reset = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke("whatsapp-session", {
+        body: { action: "reset" },
+      });
+
+      if (error) {
+        console.error("Erro ao resetar:", error);
+        return false;
+      }
+
+      fetchSession();
+      return data?.success || false;
+    } catch (err) {
+      console.error("Erro ao resetar:", err);
+      return false;
+    }
+  }, [fetchSession]);
+
   const sendMessage = useCallback(async (contactId: string, content: string) => {
     try {
       const { data, error } = await supabase.functions.invoke("whatsapp-send", {
@@ -246,7 +253,6 @@ export function useWhatsApp() {
       });
 
       if (error) throw error;
-
       return data?.message_id || true;
     } catch (err) {
       console.error("Erro ao enviar mensagem:", err);
@@ -259,7 +265,6 @@ export function useWhatsApp() {
     }
   }, [toast]);
 
-  // Mark as read
   const markAsRead = useCallback(async (contactId: string) => {
     try {
       await supabase
@@ -271,7 +276,6 @@ export function useWhatsApp() {
     }
   }, []);
 
-  // Refetch all data (for manual refresh)
   const refetch = useCallback(async () => {
     setSyncing(true);
     try {
@@ -281,19 +285,13 @@ export function useWhatsApp() {
     }
   }, [fetchSession, fetchContacts]);
 
-  // Initial data load - FAST, non-blocking
   useEffect(() => {
-    // If auth is still loading, wait
     if (authLoading) return;
-
-    // If no company_id, stop initializing immediately
     if (!profile?.company_id) {
       setInitializing(false);
       hasFetched.current = true;
       return;
     }
-
-    // Only fetch once
     if (hasFetched.current) return;
     hasFetched.current = true;
 
@@ -301,67 +299,49 @@ export function useWhatsApp() {
       await Promise.all([fetchSession(), fetchContacts()]);
       setInitializing(false);
     };
-
     doFetch();
   }, [authLoading, profile?.company_id, fetchSession, fetchContacts]);
 
-  // Real-time subscriptions
   useEffect(() => {
     const companyId = profile?.company_id;
     if (!companyId) return;
 
-    // Subscription for sessions
     const sessionChannel = supabase
       .channel("whatsapp_sessions_changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "whatsapp_sessions",
-          filter: `company_id=eq.${companyId}`,
-        },
-        (payload) => {
-          console.log("Sessão atualizada:", payload);
-          if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
-            setSession(payload.new as WhatsAppSession);
-          } else if (payload.eventType === "DELETE") {
-            setSession(null);
-          }
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "whatsapp_sessions",
+        filter: `company_id=eq.${companyId}`,
+      }, (payload) => {
+        if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
+          setSession(payload.new as WhatsAppSession);
+        } else if (payload.eventType === "DELETE") {
+          setSession(null);
         }
-      )
+      })
       .subscribe();
 
-    // Subscription for contacts
     const contactsChannel = supabase
       .channel("whatsapp_contacts_changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "whatsapp_contacts",
-          filter: `company_id=eq.${companyId}`,
-        },
-        (payload) => {
-          console.log("Contato atualizado:", payload);
-          if (payload.eventType === "INSERT") {
-            setContacts((prev) => [payload.new as WhatsAppContact, ...prev]);
-          } else if (payload.eventType === "UPDATE") {
-            setContacts((prev) =>
-              prev.map((c) =>
-                c.id === (payload.new as WhatsAppContact).id
-                  ? (payload.new as WhatsAppContact)
-                  : c
-              )
-            );
-          } else if (payload.eventType === "DELETE") {
-            setContacts((prev) =>
-              prev.filter((c) => c.id !== (payload.old as WhatsAppContact).id)
-            );
-          }
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "whatsapp_contacts",
+        filter: `company_id=eq.${companyId}`,
+      }, (payload) => {
+        if (payload.eventType === "INSERT") {
+          setContacts((prev) => [payload.new as WhatsAppContact, ...prev]);
+        } else if (payload.eventType === "UPDATE") {
+          setContacts((prev) =>
+            prev.map((c) =>
+              c.id === (payload.new as WhatsAppContact).id ? (payload.new as WhatsAppContact) : c
+            )
+          );
+        } else if (payload.eventType === "DELETE") {
+          setContacts((prev) => prev.filter((c) => c.id !== (payload.old as WhatsAppContact).id));
         }
-      )
+      })
       .subscribe();
 
     return () => {
@@ -373,17 +353,16 @@ export function useWhatsApp() {
   return {
     session,
     contacts,
-    // Non-blocking loading states
-    initializing, // True only during first bootstrap
-    syncing, // True during manual refresh
-    // Legacy alias for compatibility (always false after auth loads)
+    initializing,
+    syncing,
     loading: authLoading || initializing,
-    // Actions
     connect,
     disconnect,
+    restart,
+    reset,
     sendMessage,
     fetchMessages,
-    fetchQrCode, // New: dedicated QR polling
+    fetchQrCode,
     markAsRead,
     refetch,
   };
