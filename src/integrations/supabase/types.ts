@@ -38,6 +38,164 @@ export type Database = {
         }
         Relationships: []
       }
+      funnel_leads: {
+        Row: {
+          company_id: string
+          created_at: string
+          email: string | null
+          id: string
+          last_contact_at: string | null
+          name: string
+          notes: string | null
+          phone: string | null
+          position: number | null
+          source: string | null
+          stage_id: string
+          tags: string[] | null
+          updated_at: string
+          value: number | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          email?: string | null
+          id?: string
+          last_contact_at?: string | null
+          name: string
+          notes?: string | null
+          phone?: string | null
+          position?: number | null
+          source?: string | null
+          stage_id: string
+          tags?: string[] | null
+          updated_at?: string
+          value?: number | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          email?: string | null
+          id?: string
+          last_contact_at?: string | null
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          position?: number | null
+          source?: string | null
+          stage_id?: string
+          tags?: string[] | null
+          updated_at?: string
+          value?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "funnel_leads_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "funnel_leads_stage_id_fkey"
+            columns: ["stage_id"]
+            isOneToOne: false
+            referencedRelation: "funnel_stages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      funnel_stages: {
+        Row: {
+          color: string | null
+          company_id: string
+          created_at: string
+          funnel_id: string
+          id: string
+          name: string
+          position: number | null
+          updated_at: string
+        }
+        Insert: {
+          color?: string | null
+          company_id: string
+          created_at?: string
+          funnel_id: string
+          id?: string
+          name: string
+          position?: number | null
+          updated_at?: string
+        }
+        Update: {
+          color?: string | null
+          company_id?: string
+          created_at?: string
+          funnel_id?: string
+          id?: string
+          name?: string
+          position?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "funnel_stages_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "funnel_stages_funnel_id_fkey"
+            columns: ["funnel_id"]
+            isOneToOne: false
+            referencedRelation: "funnels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      funnels: {
+        Row: {
+          color: string | null
+          company_id: string
+          created_at: string
+          description: string | null
+          id: string
+          is_default: boolean | null
+          name: string
+          position: number | null
+          updated_at: string
+        }
+        Insert: {
+          color?: string | null
+          company_id: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_default?: boolean | null
+          name: string
+          position?: number | null
+          updated_at?: string
+        }
+        Update: {
+          color?: string | null
+          company_id?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_default?: boolean | null
+          name?: string
+          position?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "funnels_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           company_id: string | null
