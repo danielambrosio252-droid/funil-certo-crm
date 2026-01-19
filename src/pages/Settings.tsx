@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
@@ -6,22 +7,25 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   User,
   Building,
-  Bell,
   Link,
-  Shield,
   CreditCard,
   Users,
-  Zap,
   Check,
   Webhook,
   MessageCircle,
+  Bell,
+  Loader2,
+  Upload,
 } from "lucide-react";
 import { WhatsAppSetup } from "@/components/whatsapp/WhatsAppSetup";
+import { useAuth } from "@/hooks/useAuth";
+import { useNotifications } from "@/hooks/useNotifications";
+import { useProfileSettings } from "@/hooks/useProfileSettings";
 
 const integrations = [
   { name: "Meta Ads", description: "Conecte sua conta do Facebook Business", connected: true, icon: "📊" },
@@ -37,6 +41,70 @@ const plans = [
 ];
 
 export default function Settings() {
+  const { profile, company } = useAuth();
+  const { permission, settings, updateSettings, requestPermission, playNotificationSound } = useNotifications();
+  const { 
+    uploading, 
+    saving, 
+    uploadAvatar, 
+    saveProfile, 
+    getProfileData, 
+    getAvatarUrl, 
+    getInitials 
+  } = useProfileSettings();
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [formData, setFormData] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+  });
+
+  // Carregar dados do perfil
+  useEffect(() => {
+    if (profile) {
+      const data = getProfileData();
+      setFormData(data);
+      setAvatarUrl(getAvatarUrl());
+    }
+  }, [profile, getProfileData, getAvatarUrl]);
+
+  // Handler para upload de arquivo
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const newUrl = await uploadAvatar(file);
+    if (newUrl) {
+      setAvatarUrl(newUrl);
+    }
+    
+    // Limpar input para permitir re-upload do mesmo arquivo
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  // Handler para salvar perfil
+  const handleSaveProfile = async () => {
+    await saveProfile(formData);
+  };
+
+  // Handler para testar notificação
+  const handleTestNotification = async () => {
+    if (permission !== "granted") {
+      await requestPermission();
+    } else {
+      playNotificationSound();
+      new Notification("🎯 Teste de Notificação", {
+        body: "As notificações estão funcionando!",
+        icon: "/favicon.ico",
+      });
+    }
+  };
+
   return (
     <MainLayout title="Configurações" subtitle="Gerencie sua conta e preferências">
       <Tabs defaultValue="profile" className="space-y-6">
@@ -78,53 +146,157 @@ export default function Settings() {
               <CardContent className="space-y-6">
                 <div className="flex items-center gap-6">
                   <Avatar className="w-20 h-20">
-                    <AvatarFallback className="text-xl bg-primary text-primary-foreground">JD</AvatarFallback>
+                    {avatarUrl && <AvatarImage src={avatarUrl} alt="Avatar" />}
+                    <AvatarFallback className="text-xl bg-primary text-primary-foreground">
+                      {getInitials()}
+                    </AvatarFallback>
                   </Avatar>
                   <div>
-                    <Button variant="outline">Alterar foto</Button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/gif"
+                      className="hidden"
+                      onChange={handleFileSelect}
+                    />
+                    <Button 
+                      variant="outline" 
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                    >
+                      {uploading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Enviando...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-4 h-4 mr-2" />
+                          Alterar foto
+                        </>
+                      )}
+                    </Button>
                     <p className="text-xs text-muted-foreground mt-2">JPG, PNG ou GIF. Max 2MB.</p>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Nome</Label>
-                    <Input defaultValue="João" />
+                    <Input 
+                      value={formData.firstName}
+                      onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>Sobrenome</Label>
-                    <Input defaultValue="Silva" />
+                    <Input 
+                      value={formData.lastName}
+                      onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>E-mail</Label>
-                    <Input defaultValue="joao@empresa.com" type="email" />
+                    <Input 
+                      value={formData.email}
+                      onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                      type="email" 
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>Telefone</Label>
-                    <Input defaultValue="(11) 99999-0000" />
+                    <Input 
+                      value={formData.phone}
+                      onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                    />
                   </div>
                 </div>
-                <Button className="gradient-primary text-primary-foreground">Salvar Alterações</Button>
+                <Button 
+                  className="gradient-primary text-primary-foreground"
+                  onClick={handleSaveProfile}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Salvando...
+                    </>
+                  ) : (
+                    "Salvar Alterações"
+                  )}
+                </Button>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Notificações</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <Bell className="w-5 h-5" />
+                  Notificações
+                </CardTitle>
                 <CardDescription>Configure como você quer receber alertas</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* Status da permissão */}
+                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                  <div>
+                    <p className="font-medium text-foreground">Status das Notificações</p>
+                    <p className="text-sm text-muted-foreground">
+                      {permission === "granted" 
+                        ? "Notificações ativadas no navegador" 
+                        : permission === "denied"
+                        ? "Notificações bloqueadas - habilite nas configurações do navegador"
+                        : "Clique para ativar notificações"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {permission === "granted" ? (
+                      <Badge className="bg-success/10 text-success border-success/20">
+                        <Check className="w-3 h-3 mr-1" />
+                        Ativado
+                      </Badge>
+                    ) : (
+                      <Button size="sm" onClick={requestPermission} variant="outline">
+                        Ativar
+                      </Button>
+                    )}
+                    <Button size="sm" variant="ghost" onClick={handleTestNotification}>
+                      Testar
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Configurações de notificação */}
                 {[
-                  { label: "Novos leads", description: "Notificar quando um novo lead entrar" },
-                  { label: "Mensagens WhatsApp", description: "Alertar sobre novas mensagens" },
-                  { label: "Relatórios semanais", description: "Resumo semanal por e-mail" },
-                  { label: "Atualizações do sistema", description: "Novidades e melhorias" },
+                  { 
+                    key: "newLeads" as const, 
+                    label: "Novos leads", 
+                    description: "Notificar quando um novo lead entrar (com som)" 
+                  },
+                  { 
+                    key: "whatsappMessages" as const, 
+                    label: "Mensagens WhatsApp", 
+                    description: "Alertar sobre novas mensagens" 
+                  },
+                  { 
+                    key: "weeklyReports" as const, 
+                    label: "Relatórios semanais", 
+                    description: "Resumo semanal por e-mail" 
+                  },
+                  { 
+                    key: "systemUpdates" as const, 
+                    label: "Atualizações do sistema", 
+                    description: "Novidades e melhorias" 
+                  },
                 ].map((item) => (
-                  <div key={item.label} className="flex items-center justify-between">
+                  <div key={item.key} className="flex items-center justify-between">
                     <div>
                       <p className="font-medium text-foreground">{item.label}</p>
                       <p className="text-sm text-muted-foreground">{item.description}</p>
                     </div>
-                    <Switch defaultChecked />
+                    <Switch 
+                      checked={settings[item.key]}
+                      onCheckedChange={(checked) => updateSettings(item.key, checked)}
+                    />
                   </div>
                 ))}
               </CardContent>
@@ -141,18 +313,18 @@ export default function Settings() {
                 <CardDescription>Informações da sua organização</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Nome da Empresa</Label>
-                    <Input defaultValue="Empresa XYZ Ltda" />
+                    <Input defaultValue={company?.name || ""} />
                   </div>
                   <div className="space-y-2">
                     <Label>CNPJ</Label>
-                    <Input defaultValue="12.345.678/0001-90" />
+                    <Input placeholder="12.345.678/0001-90" />
                   </div>
-                  <div className="space-y-2 col-span-2">
+                  <div className="space-y-2 col-span-1 sm:col-span-2">
                     <Label>Endereço</Label>
-                    <Input defaultValue="Rua das Empresas, 123 - São Paulo, SP" />
+                    <Input placeholder="Rua das Empresas, 123 - São Paulo, SP" />
                   </div>
                 </div>
                 <Button className="gradient-primary text-primary-foreground">Salvar</Button>
@@ -229,15 +401,13 @@ export default function Settings() {
               <CardContent>
                 <div className="space-y-4">
                   {[
-                    { name: "João Silva", email: "joao@empresa.com", role: "Admin" },
-                    { name: "Maria Santos", email: "maria@empresa.com", role: "Vendedor" },
-                    { name: "Carlos Oliveira", email: "carlos@empresa.com", role: "Vendedor" },
+                    { name: profile?.full_name || "Você", email: profile?.email || "", role: profile?.role === "owner" ? "Proprietário" : "Admin" },
                   ].map((member) => (
                     <div key={member.email} className="flex items-center justify-between py-3 border-b border-border last:border-0">
                       <div className="flex items-center gap-3">
                         <Avatar>
                           <AvatarFallback className="bg-primary/10 text-primary">
-                            {member.name.split(" ").map(n => n[0]).join("")}
+                            {member.name.split(" ").map(n => n[0]).join("").substring(0, 2)}
                           </AvatarFallback>
                         </Avatar>
                         <div>
