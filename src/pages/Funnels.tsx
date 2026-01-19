@@ -4,11 +4,12 @@ import { KanbanBoard } from "@/components/funnels/KanbanBoard";
 import { FunnelListView } from "@/components/funnels/FunnelListView";
 import { CreateFunnelDialog } from "@/components/funnels/CreateFunnelDialog";
 import { CreateLeadDialog } from "@/components/funnels/CreateLeadDialog";
+import { EditFunnelDialog } from "@/components/funnels/EditFunnelDialog";
 import { FunnelFilters, FunnelFiltersState } from "@/components/funnels/FunnelFilters";
 import { ExportLeads } from "@/components/funnels/ExportLeads";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Kanban, List, Download, Loader2, Trash2 } from "lucide-react";
+import { Plus, Kanban, List, Download, Loader2, Trash2, Pencil } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -16,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useFunnels, useFunnelStages, useFunnelLeads } from "@/hooks/useFunnels";
+import { useFunnels, useFunnelStages, useFunnelLeads, Funnel } from "@/hooks/useFunnels";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,6 +34,7 @@ export default function Funnels() {
   const [showCreateFunnel, setShowCreateFunnel] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showNewLeadFromHeader, setShowNewLeadFromHeader] = useState(false);
+  const [funnelToEdit, setFunnelToEdit] = useState<Funnel | null>(null);
   const [selectedFunnelId, setSelectedFunnelId] = useState<string | null>(null);
   const [funnelToDelete, setFunnelToDelete] = useState<string | null>(null);
   const [filters, setFilters] = useState<FunnelFiltersState>({
@@ -144,14 +146,24 @@ export default function Funnels() {
               </Select>
               
               {currentFunnel && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-muted-foreground hover:text-destructive"
-                  onClick={() => setFunnelToDelete(currentFunnel.id)}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
+                <>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => setFunnelToEdit(currentFunnel)}
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => setFunnelToDelete(currentFunnel.id)}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </>
               )}
             </div>
           ) : (
@@ -248,6 +260,13 @@ export default function Funnels() {
           stageIds={stageIds}
         />
       )}
+
+      {/* Edit Funnel Dialog */}
+      <EditFunnelDialog
+        open={!!funnelToEdit}
+        onOpenChange={(open) => !open && setFunnelToEdit(null)}
+        funnel={funnelToEdit}
+      />
     </MainLayout>
   );
 }
