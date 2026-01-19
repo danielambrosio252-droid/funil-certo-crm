@@ -161,7 +161,7 @@ class SessionManager {
           creds: state.creds,
           keys: makeCacheableSignalKeyStore(state.keys, logger)
         },
-        printQRInTerminal: true,
+        // printQRInTerminal removido (deprecated)
         browser: ['Escala Certo Pro', 'Chrome', '120.0.0.0'],
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
