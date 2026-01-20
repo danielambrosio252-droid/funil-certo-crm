@@ -277,7 +277,14 @@ export function useWhatsApp() {
 
   const sendMessage = useCallback(async (contactId: string, content: string) => {
     try {
-      const { data, error } = await supabase.functions.invoke("whatsapp-send", {
+      // Escolhe a edge function baseada no modo do WhatsApp
+      const functionName = whatsappMode === "cloud_api" 
+        ? "whatsapp-cloud-send" 
+        : "whatsapp-send";
+      
+      console.info(`Enviando mensagem via ${functionName} para contato: ${contactId}`);
+      
+      const { data, error } = await supabase.functions.invoke(functionName, {
         body: { contact_id: contactId, content },
       });
 
@@ -292,7 +299,7 @@ export function useWhatsApp() {
       });
       return false;
     }
-  }, [toast]);
+  }, [toast, whatsappMode]);
 
   const markAsRead = useCallback(async (contactId: string) => {
     try {
