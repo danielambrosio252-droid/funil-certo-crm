@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
@@ -69,8 +70,17 @@ export default function Leads() {
     bulkRemoveTags,
     bulkDelete,
   } = useAllLeads();
+  const [searchParams] = useSearchParams();
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Sync search query from URL params
+  useEffect(() => {
+    const urlSearch = searchParams.get("search");
+    if (urlSearch) {
+      setSearchQuery(urlSearch);
+    }
+  }, [searchParams]);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
