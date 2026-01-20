@@ -16,60 +16,6 @@ interface SendMessagePayload {
   media_caption?: string;
 }
 
-async function uploadMediaToMeta(
-  accessToken: string,
-  phoneNumberId: string,
-  mediaUrl: string,
-  mediaType: string
-): Promise<string | null> {
-  try {
-    // First, download the media from our storage
-    const mediaResponse = await fetch(mediaUrl);
-    if (!mediaResponse.ok) {
-      console.error("Failed to fetch media from storage:", mediaResponse.status);
-      return null;
-    }
-
-    const mediaBlob = await mediaResponse.blob();
-    
-    // Determine MIME type
-    let mimeType = mediaBlob.type;
-    if (!mimeType) {
-      if (mediaType === "image") mimeType = "image/jpeg";
-      else if (mediaType === "audio") mimeType = "audio/mpeg";
-      else if (mediaType === "document") mimeType = "application/pdf";
-      else if (mediaType === "video") mimeType = "video/mp4";
-    }
-
-    // Upload to Meta's media endpoint
-    const formData = new FormData();
-    formData.append("messaging_product", "whatsapp");
-    formData.append("file", mediaBlob, "media");
-    formData.append("type", mimeType);
-
-    const uploadUrl = `https://graph.facebook.com/v18.0/${phoneNumberId}/media`;
-    const uploadResponse = await fetch(uploadUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: formData,
-    });
-
-    if (!uploadResponse.ok) {
-      const errorData = await uploadResponse.json();
-      console.error("Meta media upload failed:", errorData);
-      return null;
-    }
-
-    const uploadResult = await uploadResponse.json();
-    return uploadResult.id;
-  } catch (error) {
-    console.error("Error uploading media to Meta:", error);
-    return null;
-  }
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -314,27 +260,11 @@ Deno.serve(async (req) => {
     if (messageType === "text") {
       metaPayload.text = { body: payload.content };
     } else {
-      // For media messages, we need to upload to Meta first or use a public URL
-      let mediaId: string | null = null;
-      
-      // If it's a Supabase storage URL, upload to Meta first
-      if (payload.media_url && payload.media_url.includes("supabase")) {
-        mediaId = await uploadMediaToMeta(
-          cloudAccessToken,
-          company.whatsapp_phone_number_id,
-          payload.media_url,
-          messageType
-        );
-      }
-
-      const mediaContent: Record<string, unknown> = {};
-      
-      if (mediaId) {
-        mediaContent.id = mediaId;
-      } else if (payload.media_url) {
-        // Use link if it's a public URL
-        mediaContent.link = payload.media_url;
-      }
+      // For media messages, use the public URL directly
+      // Meta accepts public HTTPS URLs for media
+      const mediaContent: Record<string, unknown> = {
+        link: payload.media_url,
+      };
 
       if (payload.media_caption && (messageType === "image" || messageType === "video" || messageType === "document")) {
         mediaContent.caption = payload.media_caption;
