@@ -24,39 +24,13 @@
  * - custom_fields: object (campos extras personalizados)
  * - OU qualquer campo extra será automaticamente salvo em custom_fields
  * 
+ * REENTRADA:
+ * - Se o lead já existir (mesmo email ou telefone), será marcado como reentrada
+ * - Leads de reentrada são automaticamente enviados para o funil "Reentrada" (se existir)
+ * 
  * HEADERS OBRIGATÓRIOS:
  * - X-Webhook-Secret: string (token de autenticação)
  * - Content-Type: application/json
- * 
- * EXEMPLO DE PAYLOAD COM CAMPOS PERSONALIZADOS:
- * {
- *   "name": "João Silva",
- *   "email": "joao@email.com",
- *   "phone": "11999999999",
- *   "value": 1500,
- *   "source": "Facebook Ads",
- *   "tags": ["interessado", "facebook"],
- *   "notes": "Interessado no produto X",
- *   "custom_fields": {
- *     "empresa": "Empresa ABC",
- *     "tipo_negocio": "E-commerce",
- *     "objetivo_principal": "Aumentar vendas",
- *     "investe_em_anuncios": "Sim",
- *     "investimento_mensal": "R$ 2.000",
- *     "instagram": "@empresaabc",
- *     "quando_comecar": "Imediatamente"
- *   }
- * }
- * 
- * OU envie os campos extras diretamente (serão salvos em custom_fields):
- * {
- *   "name": "João Silva",
- *   "email": "joao@email.com",
- *   "phone": "11999999999",
- *   "empresa": "Empresa ABC",
- *   "tipo_negocio": "E-commerce",
- *   "objetivo_principal": "Aumentar vendas"
- * }
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -78,7 +52,6 @@ interface LeadPayload {
   funnel_id?: string;
   stage_id?: string;
   custom_fields?: Record<string, unknown>;
-  // Allow any extra field to be captured automatically
   [key: string]: unknown;
 }
 
@@ -211,22 +184,79 @@ Deno.serve(async (req) => {
       stageId = firstStage.id;
     }
 
+    // =====================================================
+    // VERIFICAR REENTRADA
+    // =====================================================
+    let isReentry = false;
+    let finalFunnelId = funnelId;
+    let finalStageId = stageId;
+
+    if (payload.email || payload.phone) {
+      // Verificar se já existe um lead com o mesmo email ou telefone
+      let existingLeadQuery = supabase
+        .from("funnel_leads")
+        .select("id, email, phone")
+        .eq("company_id", companyId);
+      
+      if (payload.email && payload.phone) {
+        existingLeadQuery = existingLeadQuery.or(`email.eq.${payload.email},phone.eq.${payload.phone}`);
+      } else if (payload.email) {
+        existingLeadQuery = existingLeadQuery.eq("email", payload.email);
+      } else if (payload.phone) {
+        existingLeadQuery = existingLeadQuery.eq("phone", payload.phone);
+      }
+
+      const { data: existingLeads } = await existingLeadQuery.limit(1);
+      
+      if (existingLeads && existingLeads.length > 0) {
+        isReentry = true;
+        console.log(`[Lead Webhook] ⚡ REENTRADA detectada: ${payload.email || payload.phone}`);
+        
+        // Buscar funil de reentrada (nome contém "reentrada")
+        const { data: reentryFunnel } = await supabase
+          .from("funnels")
+          .select("id")
+          .eq("company_id", companyId)
+          .ilike("name", "%reentrada%")
+          .limit(1)
+          .single();
+        
+        if (reentryFunnel) {
+          finalFunnelId = reentryFunnel.id;
+          console.log(`[Lead Webhook] Funil de reentrada encontrado: ${finalFunnelId}`);
+          
+          // Buscar primeiro estágio do funil de reentrada
+          const { data: reentryStage } = await supabase
+            .from("funnel_stages")
+            .select("id")
+            .eq("funnel_id", finalFunnelId)
+            .order("position", { ascending: true })
+            .limit(1)
+            .single();
+          
+          if (reentryStage) {
+            finalStageId = reentryStage.id;
+          }
+        } else {
+          console.log(`[Lead Webhook] Funil de reentrada não encontrado. Usando funil padrão.`);
+        }
+      }
+    }
+
     // Calcular posição do lead no estágio
     const { count } = await supabase
       .from("funnel_leads")
       .select("*", { count: "exact", head: true })
-      .eq("stage_id", stageId);
+      .eq("stage_id", finalStageId);
 
     const position = (count || 0) + 1;
 
     // Extrair campos personalizados
-    // Campos padrão que não devem ir para custom_fields
     const standardFields = new Set([
       "name", "email", "phone", "value", "source", 
       "tags", "notes", "funnel_id", "stage_id", "custom_fields"
     ]);
     
-    // Combinar custom_fields explícitos com campos extras
     const customFields: Record<string, unknown> = {
       ...(payload.custom_fields || {}),
     };
@@ -238,20 +268,26 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Tags do lead (adiciona "reentrada" se for o caso)
+    const leadTags = isReentry 
+      ? [...(payload.tags || []), "reentrada"] 
+      : (payload.tags || []);
+
     // Criar o lead
     const { data: newLead, error: leadError } = await supabase
       .from("funnel_leads")
       .insert({
         company_id: companyId,
-        stage_id: stageId,
+        stage_id: finalStageId,
         name: payload.name.trim(),
         email: payload.email?.trim() || null,
         phone: payload.phone?.trim() || null,
         value: payload.value || 0,
         source: payload.source?.trim() || "Webhook",
-        tags: payload.tags || [],
+        tags: leadTags,
         notes: payload.notes?.trim() || null,
         position,
+        is_reentry: isReentry,
         custom_fields: Object.keys(customFields).length > 0 ? customFields : {},
       })
       .select()
@@ -268,16 +304,17 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log(`[Lead Webhook] Lead criado com sucesso: ${newLead.id}`);
+    console.log(`[Lead Webhook] ✅ Lead criado com sucesso: ${newLead.id} (Reentrada: ${isReentry})`);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: "Lead created successfully",
+        message: isReentry ? "Reentry lead created successfully" : "Lead created successfully",
         lead: {
           id: newLead.id,
           name: newLead.name,
           stage_id: newLead.stage_id,
+          is_reentry: isReentry,
           created_at: newLead.created_at,
         }
       }),

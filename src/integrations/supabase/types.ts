@@ -14,6 +14,65 @@ export type Database = {
   }
   public: {
     Tables: {
+      ad_metrics: {
+        Row: {
+          campaign_name: string | null
+          clicks: number | null
+          company_id: string
+          conversas: number | null
+          created_at: string
+          date: string
+          id: string
+          impressions: number | null
+          leads: number | null
+          link_clicks: number | null
+          platform: string
+          reach: number | null
+          spend: number | null
+          updated_at: string
+        }
+        Insert: {
+          campaign_name?: string | null
+          clicks?: number | null
+          company_id: string
+          conversas?: number | null
+          created_at?: string
+          date?: string
+          id?: string
+          impressions?: number | null
+          leads?: number | null
+          link_clicks?: number | null
+          platform?: string
+          reach?: number | null
+          spend?: number | null
+          updated_at?: string
+        }
+        Update: {
+          campaign_name?: string | null
+          clicks?: number | null
+          company_id?: string
+          conversas?: number | null
+          created_at?: string
+          date?: string
+          id?: string
+          impressions?: number | null
+          leads?: number | null
+          link_clicks?: number | null
+          platform?: string
+          reach?: number | null
+          spend?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ad_metrics_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       automation_logs: {
         Row: {
           automation_id: string
@@ -342,6 +401,7 @@ export type Database = {
           custom_fields: Json | null
           email: string | null
           id: string
+          is_reentry: boolean | null
           last_contact_at: string | null
           name: string
           notes: string | null
@@ -359,6 +419,7 @@ export type Database = {
           custom_fields?: Json | null
           email?: string | null
           id?: string
+          is_reentry?: boolean | null
           last_contact_at?: string | null
           name: string
           notes?: string | null
@@ -376,6 +437,7 @@ export type Database = {
           custom_fields?: Json | null
           email?: string | null
           id?: string
+          is_reentry?: boolean | null
           last_contact_at?: string | null
           name?: string
           notes?: string | null
