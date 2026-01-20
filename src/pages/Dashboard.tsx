@@ -3,7 +3,7 @@ import { MetricCard } from "@/components/dashboard/MetricCard";
 import { FunnelOverview } from "@/components/dashboard/FunnelOverview";
 import { RecentLeads } from "@/components/dashboard/RecentLeads";
 import { MetaAdsChart } from "@/components/dashboard/MetaAdsChart";
-import { AdsMetricsCard } from "@/components/dashboard/AdsMetricsCard";
+
 import { useDashboardMetrics } from "@/hooks/useDashboardMetrics";
 import { Users, MessageCircle, TrendingUp, DollarSign, RefreshCcw } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -90,10 +90,6 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Ads Metrics */}
-      <div className="mb-6">
-        <AdsMetricsCard metrics={metrics} />
-      </div>
 
       {/* Main Content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
