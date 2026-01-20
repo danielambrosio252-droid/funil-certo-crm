@@ -1,4 +1,4 @@
-import { Bell, Search, Plus, User, LogOut, Settings, CreditCard, Menu } from "lucide-react";
+import { Bell, Search, User, LogOut, Settings, CreditCard, MessageCircle, UserPlus } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/useAuth";
+import { useNotifications } from "@/hooks/useNotifications";
+import { formatDistanceToNow } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 interface HeaderProps {
   title: string;
@@ -21,6 +24,7 @@ interface HeaderProps {
 
 export function Header({ title, subtitle, onNewLead }: HeaderProps) {
   const { user, profile, company, signOut } = useAuth();
+  const { unreadCount, notifications, unreadWhatsApp, recentLeadsCount, markAllAsRead } = useNotifications();
   const navigate = useNavigate();
 
   const handleSignOut = async () => {
@@ -41,6 +45,14 @@ export function Header({ title, subtitle, onNewLead }: HeaderProps) {
       return user.email.substring(0, 2).toUpperCase();
     }
     return "U";
+  };
+
+  const handleNotificationClick = (notification: typeof notifications[0]) => {
+    if (notification.type === "new_lead") {
+      navigate("/leads");
+    } else if (notification.type === "whatsapp_message") {
+      navigate("/whatsapp");
+    }
   };
 
   return (
@@ -66,7 +78,6 @@ export function Header({ title, subtitle, onNewLead }: HeaderProps) {
             onChange={(e) => {
               const searchTerm = e.target.value.toLowerCase();
               if (searchTerm.length > 0) {
-                // Navigate to leads page with search query
                 navigate(`/leads?search=${encodeURIComponent(searchTerm)}`);
               }
             }}
@@ -83,12 +94,101 @@ export function Header({ title, subtitle, onNewLead }: HeaderProps) {
         </div>
 
         {/* Notifications */}
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="w-5 h-5 text-muted-foreground" />
-          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-destructive text-destructive-foreground text-xs rounded-full flex items-center justify-center">
-            3
-          </span>
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="relative">
+              <Bell className="w-5 h-5 text-muted-foreground" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-destructive text-destructive-foreground text-xs rounded-full flex items-center justify-center">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-80 max-h-96 overflow-y-auto">
+            <div className="flex items-center justify-between p-2">
+              <DropdownMenuLabel className="p-0">Notificações</DropdownMenuLabel>
+              {unreadCount > 0 && (
+                <Button variant="ghost" size="sm" className="text-xs h-auto py-1" onClick={markAllAsRead}>
+                  Marcar como lidas
+                </Button>
+              )}
+            </div>
+            <DropdownMenuSeparator />
+            
+            {unreadCount === 0 ? (
+              <div className="p-4 text-center text-muted-foreground text-sm">
+                Nenhuma notificação
+              </div>
+            ) : (
+              <>
+                {/* WhatsApp unread summary */}
+                {unreadWhatsApp > 0 && (
+                  <DropdownMenuItem 
+                    className="flex items-start gap-3 p-3 cursor-pointer"
+                    onClick={() => navigate("/whatsapp")}
+                  >
+                    <div className="w-8 h-8 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0">
+                      <MessageCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">WhatsApp</p>
+                      <p className="text-xs text-muted-foreground">
+                        {unreadWhatsApp} {unreadWhatsApp === 1 ? "mensagem não lida" : "mensagens não lidas"}
+                      </p>
+                    </div>
+                  </DropdownMenuItem>
+                )}
+
+                {/* New leads summary */}
+                {recentLeadsCount > 0 && (
+                  <DropdownMenuItem 
+                    className="flex items-start gap-3 p-3 cursor-pointer"
+                    onClick={() => navigate("/leads")}
+                  >
+                    <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+                      <UserPlus className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">Novos Leads</p>
+                      <p className="text-xs text-muted-foreground">
+                        {recentLeadsCount} {recentLeadsCount === 1 ? "novo lead" : "novos leads"} nas últimas horas
+                      </p>
+                    </div>
+                  </DropdownMenuItem>
+                )}
+
+                {/* Individual notifications */}
+                {notifications.slice(0, 5).map((notification) => (
+                  <DropdownMenuItem 
+                    key={notification.id}
+                    className="flex items-start gap-3 p-3 cursor-pointer"
+                    onClick={() => handleNotificationClick(notification)}
+                  >
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      notification.type === "new_lead" 
+                        ? "bg-blue-100 dark:bg-blue-900/30" 
+                        : "bg-green-100 dark:bg-green-900/30"
+                    }`}>
+                      {notification.type === "new_lead" ? (
+                        <UserPlus className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                      ) : (
+                        <MessageCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{notification.title}</p>
+                      <p className="text-xs text-muted-foreground truncate">{notification.message}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {formatDistanceToNow(notification.createdAt, { addSuffix: true, locale: ptBR })}
+                      </p>
+                    </div>
+                  </DropdownMenuItem>
+                ))}
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {/* User Menu */}
         <DropdownMenu>
