@@ -301,7 +301,7 @@ export function WhatsAppCloudSetup() {
               {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />}
               Salvar Configuração
             </Button>
-            <Button variant="outline" onClick={handleTest} disabled={testing || !hasToken}>
+            <Button variant="outline" onClick={handleTest} disabled={testing || !phoneNumberId}>
               {testing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Shield className="w-4 h-4 mr-2" />}
               Testar Conexão
             </Button>
