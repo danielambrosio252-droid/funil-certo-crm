@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const appSecret = Deno.env.get("WHATSAPP_CLOUD_APP_SECRET");
-  const verifyToken = Deno.env.get("WHATSAPP_CLOUD_VERIFY_TOKEN") || "lovable_verify_token";
+  const verifyToken = Deno.env.get("WHATSAPP_CLOUD_VERIFY_TOKEN") || "lovable_whatsapp_verify";
 
   // Handle webhook verification (GET request from Meta)
   if (req.method === "GET") {
