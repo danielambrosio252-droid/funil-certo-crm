@@ -10,6 +10,64 @@ interface SendMessagePayload {
   phone?: string;
   content?: string;
   action?: "send" | "test" | "check_token";
+  message_type?: "text" | "image" | "audio" | "document" | "video";
+  media_url?: string;
+  media_filename?: string;
+  media_caption?: string;
+}
+
+async function uploadMediaToMeta(
+  accessToken: string,
+  phoneNumberId: string,
+  mediaUrl: string,
+  mediaType: string
+): Promise<string | null> {
+  try {
+    // First, download the media from our storage
+    const mediaResponse = await fetch(mediaUrl);
+    if (!mediaResponse.ok) {
+      console.error("Failed to fetch media from storage:", mediaResponse.status);
+      return null;
+    }
+
+    const mediaBlob = await mediaResponse.blob();
+    
+    // Determine MIME type
+    let mimeType = mediaBlob.type;
+    if (!mimeType) {
+      if (mediaType === "image") mimeType = "image/jpeg";
+      else if (mediaType === "audio") mimeType = "audio/mpeg";
+      else if (mediaType === "document") mimeType = "application/pdf";
+      else if (mediaType === "video") mimeType = "video/mp4";
+    }
+
+    // Upload to Meta's media endpoint
+    const formData = new FormData();
+    formData.append("messaging_product", "whatsapp");
+    formData.append("file", mediaBlob, "media");
+    formData.append("type", mimeType);
+
+    const uploadUrl = `https://graph.facebook.com/v18.0/${phoneNumberId}/media`;
+    const uploadResponse = await fetch(uploadUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: formData,
+    });
+
+    if (!uploadResponse.ok) {
+      const errorData = await uploadResponse.json();
+      console.error("Meta media upload failed:", errorData);
+      return null;
+    }
+
+    const uploadResult = await uploadResponse.json();
+    return uploadResult.id;
+  } catch (error) {
+    console.error("Error uploading media to Meta:", error);
+    return null;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -67,6 +125,7 @@ Deno.serve(async (req) => {
     .single();
 
   const payload: SendMessagePayload = await req.json();
+  const messageType = payload.message_type || "text";
 
   // Check token action
   if (payload.action === "check_token") {
@@ -93,7 +152,6 @@ Deno.serve(async (req) => {
     }
 
     try {
-      // Test by fetching phone number info
       const testUrl = `https://graph.facebook.com/v18.0/${company.whatsapp_phone_number_id}`;
       const testResponse = await fetch(testUrl, {
         headers: { Authorization: `Bearer ${cloudAccessToken}` },
@@ -163,27 +221,46 @@ Deno.serve(async (req) => {
     recipientPhone = payload.phone.replace(/\D/g, "");
   }
 
-  if (!recipientPhone || !payload.content) {
+  // Validate required fields based on message type
+  if (!recipientPhone) {
     return new Response(
-      JSON.stringify({ error: "Missing phone or content" }),
+      JSON.stringify({ error: "Missing phone number" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  if (messageType === "text" && !payload.content) {
+    return new Response(
+      JSON.stringify({ error: "Missing content for text message" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  if (messageType !== "text" && !payload.media_url) {
+    return new Response(
+      JSON.stringify({ error: "Missing media_url for media message" }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 
   // Create pending message in DB
+  const messageContent = messageType === "text" 
+    ? payload.content 
+    : payload.media_caption || `[${messageType.toUpperCase()}]`;
+
   const messageInsert: Record<string, unknown> = {
     company_id: companyId,
-    content: payload.content,
+    content: messageContent,
     is_from_me: true,
     status: "pending",
-    message_type: "text",
+    message_type: messageType,
+    media_url: payload.media_url || null,
     sent_at: new Date().toISOString(),
   };
 
   if (contactId) {
     messageInsert.contact_id = contactId;
   } else {
-    // Find or create contact
     const { data: existingContact } = await supabase
       .from("whatsapp_contacts")
       .select("id")
@@ -228,12 +305,49 @@ Deno.serve(async (req) => {
   try {
     const sendUrl = `https://graph.facebook.com/v18.0/${company.whatsapp_phone_number_id}/messages`;
     
-    const metaPayload = {
+    let metaPayload: Record<string, unknown> = {
       messaging_product: "whatsapp",
       to: recipientPhone,
-      type: "text",
-      text: { body: payload.content },
+      type: messageType,
     };
+
+    if (messageType === "text") {
+      metaPayload.text = { body: payload.content };
+    } else {
+      // For media messages, we need to upload to Meta first or use a public URL
+      let mediaId: string | null = null;
+      
+      // If it's a Supabase storage URL, upload to Meta first
+      if (payload.media_url && payload.media_url.includes("supabase")) {
+        mediaId = await uploadMediaToMeta(
+          cloudAccessToken,
+          company.whatsapp_phone_number_id,
+          payload.media_url,
+          messageType
+        );
+      }
+
+      const mediaContent: Record<string, unknown> = {};
+      
+      if (mediaId) {
+        mediaContent.id = mediaId;
+      } else if (payload.media_url) {
+        // Use link if it's a public URL
+        mediaContent.link = payload.media_url;
+      }
+
+      if (payload.media_caption && (messageType === "image" || messageType === "video" || messageType === "document")) {
+        mediaContent.caption = payload.media_caption;
+      }
+
+      if (messageType === "document" && payload.media_filename) {
+        mediaContent.filename = payload.media_filename;
+      }
+
+      metaPayload[messageType] = mediaContent;
+    }
+
+    console.log("Sending to Meta:", JSON.stringify(metaPayload, null, 2));
 
     const metaResponse = await fetch(sendUrl, {
       method: "POST",
@@ -247,7 +361,8 @@ Deno.serve(async (req) => {
     const metaResult = await metaResponse.json();
 
     if (!metaResponse.ok) {
-      // Update message as failed
+      console.error("Meta API error:", metaResult);
+      
       await supabase
         .from("whatsapp_messages")
         .update({ status: "failed" })
@@ -262,7 +377,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Update message with Meta's message ID
     const metaMessageId = metaResult.messages?.[0]?.id;
     await supabase
       .from("whatsapp_messages")
@@ -272,7 +386,6 @@ Deno.serve(async (req) => {
       })
       .eq("id", messageData.id);
 
-    // Update contact's last_message_at
     if (messageInsert.contact_id) {
       await supabase
         .from("whatsapp_contacts")

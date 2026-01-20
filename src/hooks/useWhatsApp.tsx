@@ -275,17 +275,43 @@ export function useWhatsApp() {
     }
   }, [fetchSession]);
 
-  const sendMessage = useCallback(async (contactId: string, content: string) => {
+  const sendMessage = useCallback(async (
+    contactId: string, 
+    content: string,
+    options?: {
+      messageType?: "text" | "image" | "audio" | "document" | "video";
+      mediaUrl?: string;
+      mediaFilename?: string;
+      mediaCaption?: string;
+    }
+  ) => {
     try {
       // Escolhe a edge function baseada no modo do WhatsApp
       const functionName = whatsappMode === "cloud_api" 
         ? "whatsapp-cloud-send" 
         : "whatsapp-send";
       
-      console.info(`Enviando mensagem via ${functionName} para contato: ${contactId}`);
+      const messageType = options?.messageType || "text";
+      console.info(`Enviando mensagem ${messageType} via ${functionName} para contato: ${contactId}`);
+      
+      const payload: Record<string, unknown> = { 
+        contact_id: contactId, 
+        content,
+        message_type: messageType,
+      };
+
+      if (options?.mediaUrl) {
+        payload.media_url = options.mediaUrl;
+      }
+      if (options?.mediaFilename) {
+        payload.media_filename = options.mediaFilename;
+      }
+      if (options?.mediaCaption) {
+        payload.media_caption = options.mediaCaption;
+      }
       
       const { data, error } = await supabase.functions.invoke(functionName, {
-        body: { contact_id: contactId, content },
+        body: payload,
       });
 
       if (error) throw error;

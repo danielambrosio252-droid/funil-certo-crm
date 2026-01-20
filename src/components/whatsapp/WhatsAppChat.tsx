@@ -20,7 +20,6 @@ import {
   Clock,
   AlertCircle,
   Smile,
-  Paperclip,
   Mic,
   Phone,
   MoreVertical,
@@ -29,6 +28,11 @@ import {
   WifiOff,
   Plus,
   UserPlus,
+  Image,
+  FileText,
+  Video,
+  Play,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatLocalPhone, normalizePhone } from "@/lib/phoneNormalizer";
@@ -37,6 +41,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { MediaUploadButton } from "./MediaUploadButton";
 
 interface Contact {
   id: string;
@@ -640,18 +645,78 @@ export function WhatsAppChat() {
                     >
                       <div
                         className={cn(
-                          "max-w-[75%] rounded-2xl px-4 py-2.5 shadow-sm",
+                          "max-w-[75%] rounded-2xl shadow-sm overflow-hidden",
                           msg.is_from_me === true
                             ? "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-br-md"
                             : "bg-white text-foreground rounded-bl-md border border-slate-200",
-                          msg.status === "failed" && "ring-2 ring-red-300"
+                          msg.status === "failed" && "ring-2 ring-red-300",
+                          msg.message_type !== "text" && msg.media_url ? "p-1" : "px-4 py-2.5"
                         )}
                       >
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
+                        {/* Renderizar mídia se existir */}
+                        {msg.message_type === "image" && msg.media_url && (
+                          <div className="mb-1">
+                            <img 
+                              src={msg.media_url} 
+                              alt="Imagem" 
+                              className="rounded-xl max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                              onClick={() => window.open(msg.media_url!, "_blank")}
+                            />
+                          </div>
+                        )}
+                        {msg.message_type === "video" && msg.media_url && (
+                          <div className="mb-1 relative">
+                            <video 
+                              src={msg.media_url} 
+                              className="rounded-xl max-w-full max-h-64"
+                              controls
+                            />
+                          </div>
+                        )}
+                        {msg.message_type === "audio" && msg.media_url && (
+                          <div className="mb-1 px-2 py-1">
+                            <audio 
+                              src={msg.media_url} 
+                              className="w-full max-w-[250px]"
+                              controls
+                            />
+                          </div>
+                        )}
+                        {msg.message_type === "document" && msg.media_url && (
+                          <a 
+                            href={msg.media_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className={cn(
+                              "flex items-center gap-3 px-3 py-2 rounded-xl mb-1",
+                              msg.is_from_me ? "bg-white/10 hover:bg-white/20" : "bg-slate-50 hover:bg-slate-100"
+                            )}
+                          >
+                            <FileText className={cn("w-8 h-8", msg.is_from_me ? "text-white" : "text-purple-600")} />
+                            <div className="flex-1 min-w-0">
+                              <p className={cn("text-sm font-medium truncate", msg.is_from_me ? "text-white" : "text-foreground")}>
+                                Documento
+                              </p>
+                              <p className={cn("text-xs", msg.is_from_me ? "text-white/70" : "text-muted-foreground")}>
+                                Clique para abrir
+                              </p>
+                            </div>
+                            <Download className={cn("w-4 h-4", msg.is_from_me ? "text-white/70" : "text-muted-foreground")} />
+                          </a>
+                        )}
+                        
+                        {/* Conteúdo de texto */}
+                        {(msg.message_type === "text" || msg.content) && msg.content !== `[${msg.message_type?.toUpperCase()}]` && (
+                          <p className={cn("whitespace-pre-wrap text-sm leading-relaxed", msg.message_type !== "text" && msg.media_url && "px-3 pb-1")}>
+                            {msg.content}
+                          </p>
+                        )}
+                        
                         <div
                           className={cn(
                             "flex items-center gap-1 mt-1",
-                            msg.is_from_me === true ? "justify-end" : "justify-start"
+                            msg.is_from_me === true ? "justify-end" : "justify-start",
+                            msg.message_type !== "text" && msg.media_url && "px-3 pb-1"
                           )}
                         >
                           <span
@@ -725,9 +790,23 @@ export function WhatsAppChat() {
                 <Button variant="ghost" size="icon" className="rounded-full shrink-0">
                   <Smile className="w-5 h-5 text-muted-foreground" />
                 </Button>
-                <Button variant="ghost" size="icon" className="rounded-full shrink-0">
-                  <Paperclip className="w-5 h-5 text-muted-foreground" />
-                </Button>
+                <MediaUploadButton
+                  disabled={sending}
+                  onMediaSelected={async (media) => {
+                    if (!selectedContact) return;
+                    setSending(true);
+                    try {
+                      await sendMessage(selectedContact.id, media.caption || `[${media.type.toUpperCase()}]`, {
+                        messageType: media.type,
+                        mediaUrl: media.url,
+                        mediaFilename: media.filename,
+                        mediaCaption: media.caption,
+                      });
+                    } finally {
+                      setSending(false);
+                    }
+                  }}
+                />
                 <Input
                   placeholder="Digite uma mensagem..."
                   value={messageInput}
