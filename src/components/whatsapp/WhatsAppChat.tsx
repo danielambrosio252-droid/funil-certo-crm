@@ -43,6 +43,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { MediaUploadButton } from "./MediaUploadButton";
 import { AudioRecordButton } from "./AudioRecordButton";
+import { AudioPlayer } from "./AudioPlayer";
 
 interface Contact {
   id: string;
@@ -675,13 +676,10 @@ export function WhatsAppChat() {
                           </div>
                         )}
                         {msg.message_type === "audio" && msg.media_url && (
-                          <div className="mb-1 px-2 py-1">
-                            <audio 
-                              src={msg.media_url} 
-                              className="w-full max-w-[250px]"
-                              controls
-                            />
-                          </div>
+                          <AudioPlayer 
+                            src={msg.media_url} 
+                            isFromMe={msg.is_from_me === true}
+                          />
                         )}
                         {msg.message_type === "document" && msg.media_url && (
                           <a 
