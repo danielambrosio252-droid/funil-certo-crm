@@ -1,17 +1,69 @@
 import { motion } from "framer-motion";
-import { ArrowRight, Users } from "lucide-react";
+import { ArrowRight, Users, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
-const funnelStages = [
-  { name: "Novos Leads", count: 145, color: "bg-info" },
-  { name: "Qualificação", count: 89, color: "bg-warning" },
-  { name: "Proposta", count: 34, color: "bg-primary" },
-  { name: "Negociação", count: 18, color: "bg-purple-500" },
-  { name: "Fechamento", count: 12, color: "bg-success" },
-];
+const stageColors: Record<string, string> = {
+  0: "bg-info",
+  1: "bg-warning",
+  2: "bg-primary",
+  3: "bg-purple-500",
+  4: "bg-success",
+  5: "bg-pink-500",
+  6: "bg-orange-500",
+  7: "bg-teal-500",
+};
 
 export function FunnelOverview() {
-  const total = funnelStages.reduce((acc, stage) => acc + stage.count, 0);
+  const { profile } = useAuth();
+
+  const { data: stagesData, isLoading } = useQuery({
+    queryKey: ['funnel-overview', profile?.company_id],
+    queryFn: async () => {
+      if (!profile?.company_id) return [];
+
+      // Buscar o funil padrão ou o primeiro funil
+      const { data: funnels, error: funnelError } = await supabase
+        .from('funnels')
+        .select('id, name')
+        .eq('company_id', profile.company_id)
+        .order('is_default', { ascending: false })
+        .order('position', { ascending: true })
+        .limit(1);
+
+      if (funnelError || !funnels?.length) return [];
+
+      const funnelId = funnels[0].id;
+
+      // Buscar etapas do funil com contagem de leads
+      const { data: stages, error: stagesError } = await supabase
+        .from('funnel_stages')
+        .select(`
+          id,
+          name,
+          position,
+          color,
+          funnel_leads (count)
+        `)
+        .eq('funnel_id', funnelId)
+        .eq('company_id', profile.company_id)
+        .order('position', { ascending: true });
+
+      if (stagesError) throw stagesError;
+
+      return stages?.map((stage, index) => ({
+        name: stage.name,
+        count: (stage.funnel_leads as any)?.[0]?.count || 0,
+        color: stage.color || stageColors[index % 8] || 'bg-muted',
+      })) || [];
+    },
+    enabled: !!profile?.company_id,
+    refetchInterval: 30000,
+  });
+
+  const total = stagesData?.reduce((acc, stage) => acc + stage.count, 0) || 0;
 
   return (
     <motion.div
@@ -34,33 +86,43 @@ export function FunnelOverview() {
         </Link>
       </div>
 
-      <div className="space-y-4">
-        {funnelStages.map((stage, index) => {
-          const percentage = Math.round((stage.count / total) * 100);
-          return (
-            <div key={stage.name} className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className={`w-3 h-3 rounded-full ${stage.color}`} />
-                  <span className="text-sm font-medium text-foreground">{stage.name}</span>
+      {isLoading ? (
+        <div className="py-8 flex items-center justify-center">
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : stagesData && stagesData.length > 0 ? (
+        <div className="space-y-4">
+          {stagesData.map((stage, index) => {
+            const percentage = total > 0 ? Math.round((stage.count / total) * 100) : 0;
+            return (
+              <div key={stage.name} className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-3 h-3 rounded-full ${stage.color}`} />
+                    <span className="text-sm font-medium text-foreground">{stage.name}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-foreground">{stage.count}</span>
+                    <span className="text-xs text-muted-foreground">({percentage}%)</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-foreground">{stage.count}</span>
-                  <span className="text-xs text-muted-foreground">({percentage}%)</span>
+                <div className="w-full bg-muted rounded-full h-2">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${percentage}%` }}
+                    transition={{ delay: 0.2 + index * 0.1, duration: 0.5 }}
+                    className={`h-2 rounded-full ${stage.color}`}
+                  />
                 </div>
               </div>
-              <div className="w-full bg-muted rounded-full h-2">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${percentage}%` }}
-                  transition={{ delay: 0.2 + index * 0.1, duration: 0.5 }}
-                  className={`h-2 rounded-full ${stage.color}`}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="py-8 text-center text-muted-foreground">
+          Nenhum funil configurado
+        </div>
+      )}
 
       <div className="mt-6 pt-4 border-t border-border flex items-center justify-between">
         <div className="flex items-center gap-2 text-muted-foreground">
