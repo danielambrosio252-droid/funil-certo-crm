@@ -33,6 +33,7 @@ import {
   Video,
   Play,
   Download,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatLocalPhone, normalizePhone } from "@/lib/phoneNormalizer";
@@ -270,6 +271,36 @@ export function WhatsAppChat() {
     } finally {
       setSending(false);
       sendLockRef.current = false;
+    }
+  };
+
+  const handleResend = async (msg: Message) => {
+    if (!selectedContact || sending) return;
+    
+    setSending(true);
+    try {
+      // Delete the failed message first
+      await supabase
+        .from("whatsapp_messages")
+        .delete()
+        .eq("id", msg.id);
+      
+      // Resend based on message type
+      const messageId = await sendMessage(selectedContact.id, msg.content, {
+        messageType: msg.message_type as "text" | "image" | "video" | "audio" | "document",
+        mediaUrl: msg.media_url || undefined,
+      });
+
+      if (!messageId || typeof messageId !== "string") {
+        toast.error("Erro ao reenviar mensagem");
+      } else {
+        toast.success("Mensagem reenviada");
+      }
+    } catch (error) {
+      console.error("Error resending message:", error);
+      toast.error("Erro ao reenviar mensagem");
+    } finally {
+      setSending(false);
     }
   };
 
@@ -718,6 +749,17 @@ export function WhatsAppChat() {
                             msg.message_type !== "text" && msg.media_url && "px-3 pb-1"
                           )}
                         >
+                          {/* Resend button for failed messages */}
+                          {msg.status === "failed" && msg.is_from_me === true && (
+                            <button
+                              onClick={() => handleResend(msg)}
+                              disabled={sending}
+                              className="flex items-center gap-1 text-[10px] text-white/90 bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-full transition-colors mr-1"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              Reenviar
+                            </button>
+                          )}
                           <span
                             className={cn(
                               "text-[10px]",
