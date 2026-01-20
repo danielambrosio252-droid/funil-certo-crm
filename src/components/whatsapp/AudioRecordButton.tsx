@@ -1,29 +1,27 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Mic, Square, Loader2, X } from "lucide-react";
+import { Mic, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
-import { needsTranscoding, transcodeToOgg, TranscodeProgress } from "@/lib/audioTranscode";
 
 interface AudioRecordButtonProps {
   disabled?: boolean;
-  onAudioRecorded: (audio: {
-    url: string;
-    filename: string;
+  /**
+   * Called immediately when recording stops with raw audio blob.
+   * Parent component handles async processing for optimistic UI.
+   */
+  onRecordingComplete: (data: {
+    blob: Blob;
+    mimeType: string;
     duration: number;
-  }) => Promise<void>;
-  companyId: string;
+  }) => void;
 }
 
 export function AudioRecordButton({
   disabled,
-  onAudioRecorded,
-  companyId,
+  onRecordingComplete,
 }: AudioRecordButtonProps) {
   const [isRecording, setIsRecording] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingMessage, setProcessingMessage] = useState("");
   const [recordingDuration, setRecordingDuration] = useState(0);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -31,6 +29,7 @@ export function AudioRecordButton({
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(0);
+  const recordedMimeTypeRef = useRef<string>('audio/webm');
 
   // Cleanup on unmount
   useEffect(() => {
@@ -75,6 +74,7 @@ export function AudioRecordButton({
       }
       
       console.log('[AudioRecord] Recording with mime type:', mimeType);
+      recordedMimeTypeRef.current = mimeType;
       
       const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
@@ -99,39 +99,47 @@ export function AudioRecordButton({
     }
   }, []);
 
-  const stopRecording = useCallback(async (save: boolean = true) => {
+  const stopRecording = useCallback((save: boolean = true) => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
     
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      return new Promise<void>((resolve) => {
-        const recorder = mediaRecorderRef.current!;
+      const recorder = mediaRecorderRef.current;
+      const duration = recordingDuration;
+      
+      recorder.onstop = () => {
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
+        }
         
-        recorder.onstop = async () => {
-          if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-          }
-          
-          setIsRecording(false);
-          const duration = recordingDuration;
-          setRecordingDuration(0);
-          
-          if (save && audioChunksRef.current.length > 0 && duration >= 1) {
-            await processAndUploadAudio(duration);
-          } else if (save && duration < 1) {
-            toast.error("Gravação muito curta (mínimo 1 segundo)");
-          }
-          
-          audioChunksRef.current = [];
-          mediaRecorderRef.current = null;
-          resolve();
-        };
+        setIsRecording(false);
+        setRecordingDuration(0);
         
-        recorder.stop();
-      });
+        if (save && audioChunksRef.current.length > 0 && duration >= 1) {
+          // Create blob and call parent immediately (no blocking)
+          const mimeType = recordedMimeTypeRef.current;
+          const blob = new Blob(audioChunksRef.current, { type: mimeType });
+          
+          console.log('[AudioRecord] Recording complete, size:', blob.size, 'type:', mimeType);
+          
+          // Call parent synchronously - they handle async processing
+          onRecordingComplete({
+            blob,
+            mimeType,
+            duration,
+          });
+        } else if (save && duration < 1) {
+          toast.error("Gravação muito curta (mínimo 1 segundo)");
+        }
+        
+        audioChunksRef.current = [];
+        mediaRecorderRef.current = null;
+      };
+      
+      recorder.stop();
     } else {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -141,107 +149,11 @@ export function AudioRecordButton({
       setRecordingDuration(0);
       audioChunksRef.current = [];
     }
-  }, [recordingDuration]);
+  }, [recordingDuration, onRecordingComplete]);
 
   const cancelRecording = useCallback(() => {
     stopRecording(false);
   }, [stopRecording]);
-
-  const handleProgress = (progress: TranscodeProgress) => {
-    setProcessingMessage(progress.message);
-  };
-
-  const processAndUploadAudio = async (duration: number) => {
-    if (audioChunksRef.current.length === 0) return;
-    
-    setIsProcessing(true);
-    setProcessingMessage("Preparando áudio...");
-    
-    try {
-      const firstChunk = audioChunksRef.current[0];
-      const recordedMimeType = firstChunk.type || 'audio/webm';
-      
-      console.log('[AudioRecord] Recorded mime type:', recordedMimeType);
-      
-      let finalBlob: Blob;
-      let contentType: string;
-      let extension: string;
-      
-      // Check if transcoding is needed (WebM -> OGG)
-      if (needsTranscoding(recordedMimeType)) {
-        console.log('[AudioRecord] Transcoding required for:', recordedMimeType);
-        setProcessingMessage("Convertendo áudio...");
-        
-        // Create blob from recorded chunks
-        const rawBlob = new Blob(audioChunksRef.current, { type: recordedMimeType });
-        
-        // Transcode to OGG/Opus
-        const result = await transcodeToOgg(rawBlob, recordedMimeType, handleProgress);
-        
-        finalBlob = result.blob;
-        contentType = result.mimeType;
-        extension = result.extension;
-        
-        console.log('[AudioRecord] Transcoding complete:', contentType);
-      } else {
-        console.log('[AudioRecord] No transcoding needed for:', recordedMimeType);
-        
-        // Already in a WhatsApp-compatible format
-        if (recordedMimeType.includes('ogg')) {
-          extension = 'ogg';
-          contentType = 'audio/ogg';
-        } else if (recordedMimeType.includes('mp4') || recordedMimeType.includes('m4a')) {
-          extension = 'm4a';
-          contentType = 'audio/mp4';
-        } else {
-          extension = 'ogg';
-          contentType = 'audio/ogg';
-        }
-        
-        finalBlob = new Blob(audioChunksRef.current, { type: contentType });
-      }
-      
-      setProcessingMessage("Enviando...");
-      
-      console.log('[AudioRecord] Final blob - size:', finalBlob.size, 'type:', finalBlob.type);
-      
-      const timestamp = Date.now();
-      const randomId = Math.random().toString(36).substring(2, 7);
-      const filename = `${timestamp}-${randomId}.${extension}`;
-      const filePath = `${companyId}/audio/${filename}`;
-      
-      // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from("whatsapp-media")
-        .upload(filePath, finalBlob, {
-          contentType,
-          cacheControl: '3600',
-          upsert: false,
-        });
-      
-      if (uploadError) throw uploadError;
-      
-      const { data: { publicUrl } } = supabase.storage
-        .from("whatsapp-media")
-        .getPublicUrl(filePath);
-      
-      console.log('[AudioRecord] Uploaded to:', publicUrl);
-      
-      await onAudioRecorded({
-        url: publicUrl,
-        filename,
-        duration,
-      });
-      
-      toast.success("Áudio gravado!");
-    } catch (error) {
-      console.error("Error processing audio:", error);
-      toast.error("Erro ao processar áudio");
-    } finally {
-      setIsProcessing(false);
-      setProcessingMessage("");
-    }
-  };
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -271,17 +183,6 @@ export function AudioRecordButton({
         >
           <Square className="w-3 h-3 fill-current" />
         </Button>
-      </div>
-    );
-  }
-
-  if (isProcessing) {
-    return (
-      <div className="flex items-center gap-2 bg-emerald-50 rounded-full px-3 py-1 border border-emerald-200">
-        <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />
-        <span className="text-sm font-medium text-emerald-600">
-          {processingMessage || "Processando..."}
-        </span>
       </div>
     );
   }
