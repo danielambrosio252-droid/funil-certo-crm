@@ -63,18 +63,24 @@ export function Header({ title, subtitle, onNewLead }: HeaderProps) {
           <Input
             placeholder="Buscar leads, funis..."
             className="w-48 xl:w-64 pl-10 bg-background/50"
+            onChange={(e) => {
+              const searchTerm = e.target.value.toLowerCase();
+              if (searchTerm.length > 0) {
+                // Navigate to leads page with search query
+                navigate(`/leads?search=${encodeURIComponent(searchTerm)}`);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const target = e.target as HTMLInputElement;
+                const searchTerm = target.value.toLowerCase();
+                if (searchTerm.length > 0) {
+                  navigate(`/leads?search=${encodeURIComponent(searchTerm)}`);
+                }
+              }
+            }}
           />
         </div>
-
-        {/* Quick Add */}
-        <Button 
-          size="sm" 
-          className="gap-2 gradient-primary text-primary-foreground shadow-md hover:shadow-lg transition-shadow"
-          onClick={onNewLead}
-        >
-          <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">Novo Lead</span>
-        </Button>
 
         {/* Notifications */}
         <Button variant="ghost" size="icon" className="relative">
