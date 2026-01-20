@@ -42,6 +42,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { MediaUploadButton } from "./MediaUploadButton";
+import { AudioRecordButton } from "./AudioRecordButton";
 
 interface Contact {
   id: string;
@@ -825,9 +826,23 @@ export function WhatsAppChat() {
                     <Send className="w-5 h-5" />
                   </Button>
                 ) : (
-                  <Button variant="ghost" size="icon" className="rounded-full shrink-0">
-                    <Mic className="w-5 h-5 text-muted-foreground" />
-                  </Button>
+                  <AudioRecordButton
+                    disabled={sending}
+                    companyId={profile?.company_id || ""}
+                    onAudioRecorded={async (audio) => {
+                      if (!selectedContact) return;
+                      setSending(true);
+                      try {
+                        await sendMessage(selectedContact.id, "[AUDIO]", {
+                          messageType: "audio",
+                          mediaUrl: audio.url,
+                          mediaFilename: audio.filename,
+                        });
+                      } finally {
+                        setSending(false);
+                      }
+                    }}
+                  />
                 )}
               </div>
             </div>
