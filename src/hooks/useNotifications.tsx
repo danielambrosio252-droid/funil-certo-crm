@@ -1,13 +1,24 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 interface NotificationSettings {
   newLeads: boolean;
   whatsappMessages: boolean;
   weeklyReports: boolean;
   systemUpdates: boolean;
+}
+
+export interface AppNotification {
+  id: string;
+  type: "new_lead" | "whatsapp_message";
+  title: string;
+  message: string;
+  createdAt: Date;
+  read: boolean;
+  data?: Record<string, any>;
 }
 
 // Som de notificação usando Web Audio API
@@ -37,8 +48,25 @@ function playNotificationSound() {
   }
 }
 
+// Get last seen timestamp from localStorage
+function getLastSeenTimestamp(): Date {
+  const stored = localStorage.getItem("notifications_last_seen");
+  if (stored) {
+    return new Date(stored);
+  }
+  // Default to 24 hours ago if never seen
+  const date = new Date();
+  date.setHours(date.getHours() - 24);
+  return date;
+}
+
+function setLastSeenTimestamp(date: Date) {
+  localStorage.setItem("notifications_last_seen", date.toISOString());
+}
+
 export function useNotifications() {
   const { company, profile } = useAuth();
+  const queryClient = useQueryClient();
   const [permission, setPermission] = useState<NotificationPermission>("default");
   const [settings, setSettings] = useState<NotificationSettings>({
     newLeads: true,
@@ -46,7 +74,81 @@ export function useNotifications() {
     weeklyReports: true,
     systemUpdates: true,
   });
+  const [lastSeen, setLastSeen] = useState<Date>(getLastSeenTimestamp);
   const subscriptionRef = useRef<any>(null);
+
+  // Fetch recent leads (created after last seen)
+  const { data: recentLeads = [] } = useQuery({
+    queryKey: ["recent-leads-notifications", company?.id, lastSeen.toISOString()],
+    queryFn: async () => {
+      if (!company?.id) return [];
+      
+      const { data, error } = await supabase
+        .from("funnel_leads")
+        .select("id, name, source, created_at")
+        .eq("company_id", company.id)
+        .gte("created_at", lastSeen.toISOString())
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!company?.id,
+    refetchInterval: 30000, // Refetch every 30 seconds
+  });
+
+  // Fetch unread WhatsApp messages count
+  const { data: unreadWhatsApp = 0 } = useQuery({
+    queryKey: ["unread-whatsapp-count", company?.id],
+    queryFn: async () => {
+      if (!company?.id) return 0;
+      
+      const { data, error } = await supabase
+        .from("whatsapp_contacts")
+        .select("unread_count")
+        .eq("company_id", company.id)
+        .gt("unread_count", 0);
+
+      if (error) throw error;
+      return data?.reduce((sum, c) => sum + (c.unread_count || 0), 0) || 0;
+    },
+    enabled: !!company?.id,
+    refetchInterval: 30000,
+  });
+
+  // Build notifications list
+  const notifications: AppNotification[] = useMemo(() => {
+    const items: AppNotification[] = [];
+
+    // Add new leads as notifications
+    recentLeads.forEach((lead) => {
+      items.push({
+        id: `lead-${lead.id}`,
+        type: "new_lead",
+        title: "Novo Lead",
+        message: `${lead.name}${lead.source ? ` via ${lead.source}` : ""}`,
+        createdAt: new Date(lead.created_at),
+        read: false,
+        data: { leadId: lead.id },
+      });
+    });
+
+    return items.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }, [recentLeads]);
+
+  // Total unread count
+  const unreadCount = useMemo(() => {
+    return recentLeads.length + unreadWhatsApp;
+  }, [recentLeads.length, unreadWhatsApp]);
+
+  // Mark all as read
+  const markAllAsRead = useCallback(() => {
+    const now = new Date();
+    setLastSeen(now);
+    setLastSeenTimestamp(now);
+    queryClient.invalidateQueries({ queryKey: ["recent-leads-notifications"] });
+  }, [queryClient]);
 
   // Verificar permissão de notificação
   useEffect(() => {
@@ -155,6 +257,9 @@ export function useNotifications() {
         async (payload) => {
           const lead = payload.new as { name: string; stage_id: string };
           
+          // Invalidate queries to update count
+          queryClient.invalidateQueries({ queryKey: ["recent-leads-notifications"] });
+          
           // Buscar nome do funil
           const { data: stage } = await supabase
             .from('funnel_stages')
@@ -175,7 +280,7 @@ export function useNotifications() {
         supabase.removeChannel(subscriptionRef.current);
       }
     };
-  }, [company?.id, permission, settings.newLeads, notifyNewLead]);
+  }, [company?.id, permission, settings.newLeads, notifyNewLead, queryClient]);
 
   // Atualizar configurações
   const updateSettings = useCallback((key: keyof NotificationSettings, value: boolean) => {
@@ -190,6 +295,11 @@ export function useNotifications() {
   return {
     permission,
     settings,
+    notifications,
+    unreadCount,
+    unreadWhatsApp,
+    recentLeadsCount: recentLeads.length,
+    markAllAsRead,
     requestPermission,
     updateSettings,
     sendNotification,
