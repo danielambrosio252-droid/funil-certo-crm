@@ -34,6 +34,7 @@ import {
   Play,
   Download,
   RotateCcw,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatLocalPhone, normalizePhone } from "@/lib/phoneNormalizer";
@@ -45,6 +46,7 @@ import { toast } from "sonner";
 import { MediaUploadButton } from "./MediaUploadButton";
 import { AudioRecordButton } from "./AudioRecordButton";
 import { AudioPlayer } from "./AudioPlayer";
+import { processAndSendAudioAsync } from "@/lib/audioProcessor";
 
 interface Contact {
   id: string;
@@ -86,7 +88,12 @@ export function WhatsAppChat() {
   const [pendingMessage, setPendingMessage] = useState<{
     content: string;
     timestamp: string;
+    type?: "text" | "audio";
+    isProcessing?: boolean;
   } | null>(null);
+  
+  // Audio processing counter for UI feedback
+  const [audioProcessingCount, setAudioProcessingCount] = useState(0);
   
   // Estado para indicador de "digitando..."
   const [contactTyping, setContactTyping] = useState<{
@@ -164,10 +171,17 @@ export function WhatsAppChat() {
         (payload) => {
           const newMessage = payload.new as Message;
           
-          // Se a mensagem é nossa e bate com a pendente, limpar pendente
-          if (newMessage.is_from_me && pendingContentRef.current === newMessage.content) {
-            pendingContentRef.current = null;
-            setPendingMessage(null);
+          // Se a mensagem é nossa, limpar pendente (texto ou áudio)
+          if (newMessage.is_from_me) {
+            // Clear text pending message
+            if (pendingContentRef.current === newMessage.content) {
+              pendingContentRef.current = null;
+              setPendingMessage(null);
+            }
+            // Clear audio pending message
+            if (newMessage.message_type === "audio" && pendingMessage?.type === "audio") {
+              setPendingMessage(null);
+            }
           }
           
           // Play sound for incoming messages (not from me)
@@ -874,23 +888,43 @@ export function WhatsAppChat() {
                     <Send className="w-5 h-5" />
                   </Button>
                 ) : (
-                  <AudioRecordButton
-                    disabled={sending}
-                    companyId={profile?.company_id || ""}
-                    onAudioRecorded={async (audio) => {
-                      if (!selectedContact) return;
-                      setSending(true);
-                      try {
-                        await sendMessage(selectedContact.id, "[AUDIO]", {
-                          messageType: "audio",
-                          mediaUrl: audio.url,
-                          mediaFilename: audio.filename,
+                  <>
+                    <AudioRecordButton
+                      disabled={sending}
+                      onRecordingComplete={(data) => {
+                        if (!selectedContact || !profile?.company_id) return;
+                        
+                        // Show optimistic UI immediately
+                        const tempId = `temp-audio-${Date.now()}`;
+                        setPendingMessage({
+                          content: "[AUDIO]",
+                          timestamp: new Date().toISOString(),
+                          type: "audio",
+                          isProcessing: true,
                         });
-                      } finally {
-                        setSending(false);
-                      }
-                    }}
-                  />
+                        setAudioProcessingCount(prev => prev + 1);
+                        
+                        // Process in background (non-blocking)
+                        processAndSendAudioAsync({
+                          blob: data.blob,
+                          mimeType: data.mimeType,
+                          duration: data.duration,
+                          contactId: selectedContact.id,
+                          companyId: profile.company_id,
+                          tempMessageId: tempId,
+                        }).finally(() => {
+                          setAudioProcessingCount(prev => Math.max(0, prev - 1));
+                          // Pending message will be cleared by realtime subscription
+                        });
+                      }}
+                    />
+                    {audioProcessingCount > 0 && (
+                      <div className="flex items-center gap-1 text-xs text-emerald-600">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        <span>{audioProcessingCount > 1 ? `${audioProcessingCount} áudios` : 'Enviando'}</span>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
