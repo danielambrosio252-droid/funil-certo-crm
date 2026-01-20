@@ -404,7 +404,9 @@ Deno.serve(async (req) => {
         message_type: messageType,
         media_url: mediaUrl,
         is_from_me: false,
-        status: "received",
+        // IMPORTANT: must match whatsapp_messages_status_check constraint
+        // Allowed: pending | sent | delivered | read | failed
+        status: "delivered",
         sent_at: timestamp,
       });
 
