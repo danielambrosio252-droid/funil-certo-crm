@@ -22,7 +22,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   Search,
-  Filter,
   Download,
   Upload,
   Plus,
@@ -42,6 +41,7 @@ import { CreateLeadDialogGlobal } from "@/components/leads/CreateLeadDialogGloba
 import { BulkActionsBar } from "@/components/leads/BulkActionsBar";
 import { BulkEmailDialog } from "@/components/leads/BulkEmailDialog";
 import { LeadDetailsDialog } from "@/components/funnels/LeadDetailsDialog";
+import { LeadFilters, initialLeadFilters, type LeadFiltersState } from "@/components/leads/LeadFilters";
 import type { FunnelLead } from "@/hooks/useFunnels";
 
 const sourceColors: Record<string, string> = {
@@ -86,18 +86,57 @@ export default function Leads() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEmailDialog, setShowEmailDialog] = useState(false);
   const [selectedLead, setSelectedLead] = useState<FunnelLead | null>(null);
+  const [filters, setFilters] = useState<LeadFiltersState>(initialLeadFilters);
 
   const filteredLeads = useMemo(() => {
-    if (!searchQuery.trim()) return leads;
-    const query = searchQuery.toLowerCase();
-    return leads.filter(
-      (lead) =>
-        lead.name.toLowerCase().includes(query) ||
-        lead.email?.toLowerCase().includes(query) ||
-        lead.phone?.toLowerCase().includes(query) ||
-        lead.source?.toLowerCase().includes(query)
-    );
-  }, [leads, searchQuery]);
+    let result = leads;
+
+    // Text search
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(
+        (lead) =>
+          lead.name.toLowerCase().includes(query) ||
+          lead.email?.toLowerCase().includes(query) ||
+          lead.phone?.toLowerCase().includes(query) ||
+          lead.source?.toLowerCase().includes(query)
+      );
+    }
+
+    // Source filter
+    if (filters.sources.length > 0) {
+      result = result.filter((lead) => lead.source && filters.sources.includes(lead.source));
+    }
+
+    // Stage filter
+    if (filters.stages.length > 0) {
+      result = result.filter((lead) => filters.stages.includes(lead.stage_id));
+    }
+
+    // Value filter
+    if (filters.minValue) {
+      const min = parseFloat(filters.minValue);
+      result = result.filter((lead) => (lead.value || 0) >= min);
+    }
+    if (filters.maxValue) {
+      const max = parseFloat(filters.maxValue);
+      result = result.filter((lead) => (lead.value || 0) <= max);
+    }
+
+    // Date filter
+    if (filters.dateFrom) {
+      const from = new Date(filters.dateFrom);
+      from.setHours(0, 0, 0, 0);
+      result = result.filter((lead) => new Date(lead.created_at) >= from);
+    }
+    if (filters.dateTo) {
+      const to = new Date(filters.dateTo);
+      to.setHours(23, 59, 59, 999);
+      result = result.filter((lead) => new Date(lead.created_at) <= to);
+    }
+
+    return result;
+  }, [leads, searchQuery, filters]);
 
   const selectedLeadsData = useMemo(() => {
     return leads.filter((lead) => selectedLeadIds.includes(lead.id));
@@ -187,9 +226,11 @@ export default function Leads() {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <Button variant="outline" size="icon">
-            <Filter className="w-4 h-4" />
-          </Button>
+          <LeadFilters
+            stages={stages}
+            filters={filters}
+            onFiltersChange={setFilters}
+          />
         </div>
 
         {/* Stats */}
