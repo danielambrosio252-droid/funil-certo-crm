@@ -289,6 +289,7 @@ Deno.serve(async (req) => {
     });
 
     const metaResult = await metaResponse.json();
+    console.log("Meta API Response:", JSON.stringify(metaResult, null, 2), "Status:", metaResponse.status);
 
     if (!metaResponse.ok) {
       console.error("Meta API error:", metaResult);
