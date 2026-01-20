@@ -4,6 +4,7 @@ import { Mic, Square, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { needsTranscoding, transcodeToOgg, TranscodeProgress } from "@/lib/audioTranscode";
 
 interface AudioRecordButtonProps {
   disabled?: boolean;
@@ -21,7 +22,8 @@ export function AudioRecordButton({
   companyId,
 }: AudioRecordButtonProps) {
   const [isRecording, setIsRecording] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingMessage, setProcessingMessage] = useState("");
   const [recordingDuration, setRecordingDuration] = useState(0);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -50,9 +52,7 @@ export function AudioRecordButton({
       streamRef.current = stream;
       audioChunksRef.current = [];
       
-      // WhatsApp Cloud API accepts: audio/aac, audio/mp4, audio/mpeg, audio/amr, audio/ogg (opus only)
-      // Priority: OGG/Opus (best compatibility) > WebM/Opus > MP4
-      // Note: WebM will be converted to OGG on upload for WhatsApp compatibility
+      // Priority: OGG/Opus (native, best) > WebM/Opus (will be converted) > MP4
       const supportedFormats = [
         'audio/ogg;codecs=opus',
         'audio/webm;codecs=opus', 
@@ -74,7 +74,7 @@ export function AudioRecordButton({
         return;
       }
       
-      console.log('[AudioRecord] Using mime type:', mimeType);
+      console.log('[AudioRecord] Recording with mime type:', mimeType);
       
       const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
@@ -85,11 +85,10 @@ export function AudioRecordButton({
         }
       };
       
-      mediaRecorder.start(100); // Collect data every 100ms
+      mediaRecorder.start(100);
       setIsRecording(true);
       startTimeRef.current = Date.now();
       
-      // Start timer
       timerRef.current = setInterval(() => {
         setRecordingDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
       }, 1000);
@@ -101,19 +100,16 @@ export function AudioRecordButton({
   }, []);
 
   const stopRecording = useCallback(async (save: boolean = true) => {
-    // Clear timer
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
     
-    // Stop media recorder
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       return new Promise<void>((resolve) => {
         const recorder = mediaRecorderRef.current!;
         
         recorder.onstop = async () => {
-          // Stop all tracks
           if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop());
             streamRef.current = null;
@@ -124,7 +120,7 @@ export function AudioRecordButton({
           setRecordingDuration(0);
           
           if (save && audioChunksRef.current.length > 0 && duration >= 1) {
-            await uploadAudio(duration);
+            await processAndUploadAudio(duration);
           } else if (save && duration < 1) {
             toast.error("Gravação muito curta (mínimo 1 segundo)");
           }
@@ -137,7 +133,6 @@ export function AudioRecordButton({
         recorder.stop();
       });
     } else {
-      // Cleanup without recording
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
@@ -152,67 +147,73 @@ export function AudioRecordButton({
     stopRecording(false);
   }, [stopRecording]);
 
-  const uploadAudio = async (duration: number) => {
+  const handleProgress = (progress: TranscodeProgress) => {
+    setProcessingMessage(progress.message);
+  };
+
+  const processAndUploadAudio = async (duration: number) => {
     if (audioChunksRef.current.length === 0) return;
     
-    setIsUploading(true);
+    setIsProcessing(true);
+    setProcessingMessage("Preparando áudio...");
     
     try {
-      // Determine format from the recorded chunks
       const firstChunk = audioChunksRef.current[0];
-      const recordedMimeType = firstChunk.type || 'audio/ogg';
+      const recordedMimeType = firstChunk.type || 'audio/webm';
       
       console.log('[AudioRecord] Recorded mime type:', recordedMimeType);
       
-      // WhatsApp Cloud API supported audio formats:
-      // audio/aac, audio/mp4, audio/mpeg, audio/amr, audio/ogg (opus only)
-      // 
-      // Browser recording formats and their handling:
-      // - audio/ogg;codecs=opus -> Keep as OGG (WhatsApp accepts)
-      // - audio/webm;codecs=opus -> Upload as OGG (same codec, just container change)
-      // - audio/mp4 -> Keep as MP4/M4A (WhatsApp accepts audio/mp4)
-      
-      let extension: string;
+      let finalBlob: Blob;
       let contentType: string;
+      let extension: string;
       
-      if (recordedMimeType.includes('ogg')) {
-        // Native OGG - perfect for WhatsApp
-        extension = 'ogg';
-        contentType = 'audio/ogg';
-      } else if (recordedMimeType.includes('webm')) {
-        // WebM with Opus codec - WhatsApp doesn't accept webm
-        // But the Opus codec inside is the same as OGG/Opus
-        // We need to keep it as webm but tell WhatsApp it's ogg
-        // Actually, better: upload with correct type and let Meta handle it
-        // For now, use AAC/MP4 fallback approach
-        extension = 'ogg'; 
-        contentType = 'audio/ogg'; // Try OGG header even for webm content
-      } else if (recordedMimeType.includes('mp4') || recordedMimeType.includes('m4a')) {
-        // MP4/AAC - WhatsApp accepts this
-        extension = 'm4a';
-        contentType = 'audio/mp4';
+      // Check if transcoding is needed (WebM -> OGG)
+      if (needsTranscoding(recordedMimeType)) {
+        console.log('[AudioRecord] Transcoding required for:', recordedMimeType);
+        setProcessingMessage("Convertendo áudio...");
+        
+        // Create blob from recorded chunks
+        const rawBlob = new Blob(audioChunksRef.current, { type: recordedMimeType });
+        
+        // Transcode to OGG/Opus
+        const result = await transcodeToOgg(rawBlob, recordedMimeType, handleProgress);
+        
+        finalBlob = result.blob;
+        contentType = result.mimeType;
+        extension = result.extension;
+        
+        console.log('[AudioRecord] Transcoding complete:', contentType);
       } else {
-        // Fallback to OGG
-        extension = 'ogg';
-        contentType = 'audio/ogg';
+        console.log('[AudioRecord] No transcoding needed for:', recordedMimeType);
+        
+        // Already in a WhatsApp-compatible format
+        if (recordedMimeType.includes('ogg')) {
+          extension = 'ogg';
+          contentType = 'audio/ogg';
+        } else if (recordedMimeType.includes('mp4') || recordedMimeType.includes('m4a')) {
+          extension = 'm4a';
+          contentType = 'audio/mp4';
+        } else {
+          extension = 'ogg';
+          contentType = 'audio/ogg';
+        }
+        
+        finalBlob = new Blob(audioChunksRef.current, { type: contentType });
       }
       
-      console.log('[AudioRecord] Upload content type:', contentType, 'extension:', extension);
+      setProcessingMessage("Enviando...");
       
-      // Create blob with the correct content type
-      const audioBlob = new Blob(audioChunksRef.current, { type: contentType });
-      
-      console.log('[AudioRecord] Blob size:', audioBlob.size, 'type:', audioBlob.type);
+      console.log('[AudioRecord] Final blob - size:', finalBlob.size, 'type:', finalBlob.type);
       
       const timestamp = Date.now();
       const randomId = Math.random().toString(36).substring(2, 7);
       const filename = `${timestamp}-${randomId}.${extension}`;
       const filePath = `${companyId}/audio/${filename}`;
       
-      // Upload to Supabase Storage with explicit content type
+      // Upload to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from("whatsapp-media")
-        .upload(filePath, audioBlob, {
+        .upload(filePath, finalBlob, {
           contentType,
           cacheControl: '3600',
           upsert: false,
@@ -220,7 +221,6 @@ export function AudioRecordButton({
       
       if (uploadError) throw uploadError;
       
-      // Get public URL
       const { data: { publicUrl } } = supabase.storage
         .from("whatsapp-media")
         .getPublicUrl(filePath);
@@ -235,10 +235,11 @@ export function AudioRecordButton({
       
       toast.success("Áudio gravado!");
     } catch (error) {
-      console.error("Error uploading audio:", error);
-      toast.error("Erro ao enviar áudio");
+      console.error("Error processing audio:", error);
+      toast.error("Erro ao processar áudio");
     } finally {
-      setIsUploading(false);
+      setIsProcessing(false);
+      setProcessingMessage("");
     }
   };
 
@@ -274,11 +275,14 @@ export function AudioRecordButton({
     );
   }
 
-  if (isUploading) {
+  if (isProcessing) {
     return (
-      <Button variant="ghost" size="icon" className="rounded-full shrink-0" disabled>
-        <Loader2 className="w-5 h-5 text-emerald-500 animate-spin" />
-      </Button>
+      <div className="flex items-center gap-2 bg-emerald-50 rounded-full px-3 py-1 border border-emerald-200">
+        <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />
+        <span className="text-sm font-medium text-emerald-600">
+          {processingMessage || "Processando..."}
+        </span>
+      </div>
     );
   }
 
