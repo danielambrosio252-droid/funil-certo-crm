@@ -1,10 +1,9 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
@@ -21,71 +20,60 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Plus,
   Search,
   Filter,
   Download,
   Upload,
+  Plus,
   MoreHorizontal,
   Phone,
-  MessageCircle,
   Mail,
-  Eye,
-  Pencil,
+  MessageCircle,
   Trash2,
+  Eye,
+  Users,
+  Loader2,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-
-interface Lead {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  source: string;
-  stage: string;
-  tags: string[];
-  value?: number;
-  createdAt: string;
-  lastContact?: string;
-}
-
-const leads: Lead[] = [
-  { id: "1", name: "Maria Santos", email: "maria@email.com", phone: "(11) 99999-0001", source: "Meta Ads", stage: "Qualificação", tags: ["Interessado", "Urgente"], value: 2500, createdAt: "2024-01-15", lastContact: "Hoje" },
-  { id: "2", name: "Carlos Oliveira", email: "carlos@empresa.com", phone: "(21) 98888-0002", source: "WhatsApp", stage: "Proposta", tags: ["B2B", "VIP"], value: 15000, createdAt: "2024-01-14", lastContact: "Ontem" },
-  { id: "3", name: "Ana Paula", email: "ana.paula@gmail.com", phone: "(31) 97777-0003", source: "Formulário", stage: "Novo Lead", tags: ["Orçamento"], createdAt: "2024-01-14" },
-  { id: "4", name: "Roberto Almeida", email: "roberto@corp.com", phone: "(41) 96666-0004", source: "Meta Ads", stage: "Negociação", tags: ["Premium"], value: 8500, createdAt: "2024-01-13", lastContact: "3 dias" },
-  { id: "5", name: "Fernanda Dias", email: "fernanda@startup.io", phone: "(51) 95555-0005", source: "LinkedIn", stage: "Fechamento", tags: ["Fechando"], value: 22000, createdAt: "2024-01-12", lastContact: "Hoje" },
-  { id: "6", name: "Pedro Lima", email: "pedro@tech.com", phone: "(61) 94444-0006", source: "Indicação", stage: "Qualificação", tags: ["Retorno"], value: 4800, createdAt: "2024-01-11" },
-  { id: "7", name: "Julia Costa", email: "julia@design.com", phone: "(71) 93333-0007", source: "Meta Ads", stage: "Novo Lead", tags: [], createdAt: "2024-01-10" },
-  { id: "8", name: "Lucas Mendes", email: "lucas@agency.com", phone: "(81) 92222-0008", source: "WhatsApp", stage: "Proposta", tags: ["Interessado"], value: 6200, createdAt: "2024-01-09", lastContact: "5 dias" },
-];
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { useAllLeads } from "@/hooks/useAllLeads";
+import { ImportLeadsDialog } from "@/components/leads/ImportLeadsDialog";
+import { ExportLeadsDialog } from "@/components/leads/ExportLeadsDialog";
+import { CreateLeadDialogGlobal } from "@/components/leads/CreateLeadDialogGlobal";
+import { LeadDetailsDialog } from "@/components/funnels/LeadDetailsDialog";
+import type { FunnelLead } from "@/hooks/useFunnels";
 
 const sourceColors: Record<string, string> = {
-  "Meta Ads": "bg-info/10 text-info border-info/20",
-  "WhatsApp": "bg-success/10 text-success border-success/20",
-  "Formulário": "bg-warning/10 text-warning border-warning/20",
-  "Indicação": "bg-purple-500/10 text-purple-500 border-purple-500/20",
-  "LinkedIn": "bg-blue-600/10 text-blue-600 border-blue-600/20",
-};
-
-const stageColors: Record<string, string> = {
-  "Novo Lead": "bg-info text-info-foreground",
-  "Qualificação": "bg-warning text-warning-foreground",
-  "Proposta": "bg-primary text-primary-foreground",
-  "Negociação": "bg-purple-500 text-white",
-  "Fechamento": "bg-success text-success-foreground",
+  "Meta Ads": "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+  "WhatsApp": "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+  "Formulário": "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
+  "Indicação": "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
+  "LinkedIn": "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+  "Google Ads": "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+  "Orgânico": "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+  "Outro": "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
 };
 
 export default function Leads() {
+  const { leads, stages, loadingLeads, loadingStages, createLead, importLeads, deleteLead, getStageById } = useAllLeads();
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [selectedLead, setSelectedLead] = useState<FunnelLead | null>(null);
 
-  const filteredLeads = leads.filter(
-    (lead) =>
-      lead.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      lead.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      lead.phone.includes(searchQuery)
-  );
+  const filteredLeads = useMemo(() => {
+    if (!searchQuery.trim()) return leads;
+    const query = searchQuery.toLowerCase();
+    return leads.filter(
+      (lead) =>
+        lead.name.toLowerCase().includes(query) ||
+        lead.email?.toLowerCase().includes(query) ||
+        lead.phone?.toLowerCase().includes(query) ||
+        lead.source?.toLowerCase().includes(query)
+    );
+  }, [leads, searchQuery]);
 
   const toggleSelectAll = () => {
     if (selectedLeads.length === filteredLeads.length) {
@@ -101,183 +89,303 @@ export default function Leads() {
     );
   };
 
+  const handleDeleteSelected = async () => {
+    for (const id of selectedLeads) {
+      await deleteLead.mutateAsync(id);
+    }
+    setSelectedLeads([]);
+  };
+
+  const formatLastContact = (date: string | null) => {
+    if (!date) return "-";
+    const diff = Date.now() - new Date(date).getTime();
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    if (days === 0) return "Hoje";
+    if (days === 1) return "Ontem";
+    return `${days} dias`;
+  };
+
+  const totalValue = useMemo(() => {
+    return filteredLeads.reduce((sum, lead) => sum + (lead.value || 0), 0);
+  }, [filteredLeads]);
+
+  const stageIds = useMemo(() => stages.map(s => s.id), [stages]);
+
+  const isLoading = loadingLeads || loadingStages;
+
   return (
-    <MainLayout title="Leads" subtitle="Gerencie todos os seus contatos">
-      {/* Toolbar */}
-      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3 w-full lg:w-auto">
-          <div className="relative flex-1 lg:w-80">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+    <MainLayout title="Leads" subtitle="Gerencie todos os seus leads em um só lugar">
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowImportDialog(true)}>
+              <Upload className="w-4 h-4 mr-2" />
+              Importar
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowExportDialog(true)}>
+              <Download className="w-4 h-4 mr-2" />
+              Exportar
+            </Button>
+            <Button size="sm" onClick={() => setShowCreateDialog(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Novo Lead
+            </Button>
+          </div>
+        </div>
+
+        {/* Toolbar */}
+        <div className="flex flex-col md:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
             <Input
               placeholder="Buscar por nome, email, telefone..."
+              className="pl-10"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
             />
           </div>
-          <Button variant="outline" className="gap-2">
+          <Button variant="outline" size="icon">
             <Filter className="w-4 h-4" />
-            Filtros
           </Button>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button variant="outline" className="gap-2">
-            <Upload className="w-4 h-4" />
-            Importar
-          </Button>
-          <Button variant="outline" className="gap-2">
-            <Download className="w-4 h-4" />
-            Exportar
-          </Button>
-          <Button className="gap-2 gradient-primary text-primary-foreground">
-            <Plus className="w-4 h-4" />
-            Novo Lead
-          </Button>
-        </div>
-      </div>
-
-      {/* Selected Actions */}
-      {selectedLeads.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-center gap-4 p-4 mb-4 bg-primary/5 border border-primary/20 rounded-lg"
-        >
-          <span className="text-sm font-medium text-foreground">
-            {selectedLeads.length} lead(s) selecionado(s)
-          </span>
+        {/* Stats */}
+        <div className="flex items-center gap-4 text-sm text-muted-foreground">
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm">Mover para etapa</Button>
-            <Button variant="outline" size="sm">Adicionar tag</Button>
-            <Button variant="outline" size="sm" className="text-destructive">Excluir</Button>
+            <Users className="w-4 h-4" />
+            <span>{filteredLeads.length} leads</span>
           </div>
-        </motion.div>
-      )}
-
-      {/* Table */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/50">
-              <TableHead className="w-12">
-                <Checkbox
-                  checked={selectedLeads.length === filteredLeads.length && filteredLeads.length > 0}
-                  onCheckedChange={toggleSelectAll}
-                />
-              </TableHead>
-              <TableHead>Lead</TableHead>
-              <TableHead>Telefone</TableHead>
-              <TableHead>Origem</TableHead>
-              <TableHead>Etapa</TableHead>
-              <TableHead>Valor</TableHead>
-              <TableHead>Último Contato</TableHead>
-              <TableHead className="w-20">Ações</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredLeads.map((lead, index) => (
-              <motion.tr
-                key={lead.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.05 }}
-                className={cn(
-                  "hover:bg-muted/30 transition-colors",
-                  selectedLeads.includes(lead.id) && "bg-primary/5"
-                )}
-              >
-                <TableCell>
-                  <Checkbox
-                    checked={selectedLeads.includes(lead.id)}
-                    onCheckedChange={() => toggleSelect(lead.id)}
-                  />
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-3">
-                    <Avatar className="w-9 h-9">
-                      <AvatarFallback className="bg-primary/10 text-primary text-xs font-medium">
-                        {lead.name.split(" ").map((n) => n[0]).join("")}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="font-medium text-foreground">{lead.name}</p>
-                      <p className="text-sm text-muted-foreground">{lead.email}</p>
-                    </div>
-                  </div>
-                </TableCell>
-                <TableCell className="text-muted-foreground">{lead.phone}</TableCell>
-                <TableCell>
-                  <Badge variant="outline" className={sourceColors[lead.source]}>
-                    {lead.source}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <Badge className={stageColors[lead.stage]}>{lead.stage}</Badge>
-                </TableCell>
-                <TableCell className="font-medium">
-                  {lead.value ? `R$ ${lead.value.toLocaleString("pt-BR")}` : "-"}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {lead.lastContact || "-"}
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="icon" className="w-8 h-8">
-                      <MessageCircle className="w-4 h-4" />
-                    </Button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="w-8 h-8">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem>
-                          <Eye className="w-4 h-4 mr-2" /> Ver detalhes
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Pencil className="w-4 h-4 mr-2" /> Editar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Phone className="w-4 h-4 mr-2" /> Ligar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Mail className="w-4 h-4 mr-2" /> Enviar e-mail
-                        </DropdownMenuItem>
-                        <DropdownMenuItem className="text-destructive">
-                          <Trash2 className="w-4 h-4 mr-2" /> Excluir
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </TableCell>
-              </motion.tr>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* Pagination */}
-      <div className="flex items-center justify-between mt-4">
-        <p className="text-sm text-muted-foreground">
-          Mostrando {filteredLeads.length} de {leads.length} leads
-        </p>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled>
-            Anterior
-          </Button>
-          <Button variant="outline" size="sm" className="bg-primary text-primary-foreground">
-            1
-          </Button>
-          <Button variant="outline" size="sm">
-            2
-          </Button>
-          <Button variant="outline" size="sm">
-            Próximo
-          </Button>
+          <div>
+            Valor total: <span className="font-medium text-foreground">
+              {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(totalValue)}
+            </span>
+          </div>
         </div>
+
+        {/* Selected Actions */}
+        {selectedLeads.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-center gap-4 p-3 bg-primary/10 rounded-lg border border-primary/20"
+          >
+            <span className="text-sm font-medium">
+              {selectedLeads.length} selecionado(s)
+            </span>
+            <div className="flex-1" />
+            <Button variant="outline" size="sm" onClick={() => setSelectedLeads([])}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" size="sm" onClick={handleDeleteSelected}>
+              <Trash2 className="w-4 h-4 mr-2" />
+              Excluir
+            </Button>
+          </motion.div>
+        )}
+
+        {/* Table */}
+        <div className="border rounded-lg overflow-hidden">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : filteredLeads.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <Users className="w-12 h-12 mb-4 opacity-50" />
+              <p className="text-lg font-medium">Nenhum lead encontrado</p>
+              <p className="text-sm">Comece adicionando seu primeiro lead</p>
+              <Button className="mt-4" onClick={() => setShowCreateDialog(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                Novo Lead
+              </Button>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12">
+                    <Checkbox
+                      checked={selectedLeads.length === filteredLeads.length && filteredLeads.length > 0}
+                      onCheckedChange={toggleSelectAll}
+                    />
+                  </TableHead>
+                  <TableHead>Lead</TableHead>
+                  <TableHead>Telefone</TableHead>
+                  <TableHead>Origem</TableHead>
+                  <TableHead>Etapa</TableHead>
+                  <TableHead>Valor</TableHead>
+                  <TableHead>Último contato</TableHead>
+                  <TableHead className="w-12"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredLeads.map((lead) => {
+                  const stage = getStageById(lead.stage_id);
+                  return (
+                    <motion.tr
+                      key={lead.id}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="group cursor-pointer hover:bg-muted/50"
+                      onClick={() => setSelectedLead(lead)}
+                    >
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedLeads.includes(lead.id)}
+                          onCheckedChange={() => toggleSelect(lead.id)}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium">{lead.name}</p>
+                          <p className="text-sm text-muted-foreground">{lead.email || "-"}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {lead.phone || "-"}
+                      </TableCell>
+                      <TableCell>
+                        {lead.source && (
+                          <Badge
+                            variant="secondary"
+                            className={sourceColors[lead.source] || sourceColors["Outro"]}
+                          >
+                            {lead.source}
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {stage && (
+                          <Badge
+                            variant="outline"
+                            style={{ 
+                              borderColor: stage.color,
+                              color: stage.color 
+                            }}
+                          >
+                            {stage.name}
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {lead.value ? (
+                          <span className="font-medium">
+                            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(lead.value)}
+                          </span>
+                        ) : "-"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatLastContact(lead.last_contact_at)}
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="opacity-0 group-hover:opacity-100"
+                            >
+                              <MoreHorizontal className="w-4 h-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => setSelectedLead(lead)}>
+                              <Eye className="w-4 h-4 mr-2" />
+                              Ver detalhes
+                            </DropdownMenuItem>
+                            {lead.phone && (
+                              <DropdownMenuItem asChild>
+                                <a href={`tel:${lead.phone}`}>
+                                  <Phone className="w-4 h-4 mr-2" />
+                                  Ligar
+                                </a>
+                              </DropdownMenuItem>
+                            )}
+                            {lead.phone && (
+                              <DropdownMenuItem asChild>
+                                <a 
+                                  href={`https://wa.me/${lead.phone.replace(/\D/g, "")}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  <MessageCircle className="w-4 h-4 mr-2" />
+                                  WhatsApp
+                                </a>
+                              </DropdownMenuItem>
+                            )}
+                            {lead.email && (
+                              <DropdownMenuItem asChild>
+                                <a href={`mailto:${lead.email}`}>
+                                  <Mail className="w-4 h-4 mr-2" />
+                                  E-mail
+                                </a>
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem 
+                              className="text-destructive"
+                              onClick={() => deleteLead.mutate(lead.id)}
+                            >
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Excluir
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </motion.tr>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </div>
+
+        {/* Pagination info */}
+        {filteredLeads.length > 0 && (
+          <div className="text-sm text-muted-foreground text-center">
+            Mostrando {filteredLeads.length} de {leads.length} leads
+          </div>
+        )}
       </div>
+
+      {/* Dialogs */}
+      <ImportLeadsDialog
+        open={showImportDialog}
+        onOpenChange={setShowImportDialog}
+        stages={stages}
+        onImport={async (leadsToImport) => {
+          await importLeads.mutateAsync(leadsToImport);
+        }}
+        isImporting={importLeads.isPending}
+      />
+
+      <ExportLeadsDialog
+        open={showExportDialog}
+        onOpenChange={setShowExportDialog}
+        leads={filteredLeads}
+        stages={stages}
+      />
+
+      <CreateLeadDialogGlobal
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+        stages={stages}
+        onCreate={async (lead) => {
+          await createLead.mutateAsync(lead);
+        }}
+        isCreating={createLead.isPending}
+      />
+
+      {selectedLead && (
+        <LeadDetailsDialog
+          open={!!selectedLead}
+          onOpenChange={(open) => !open && setSelectedLead(null)}
+          lead={selectedLead}
+          stageIds={stageIds}
+          stageName={getStageById(selectedLead.stage_id)?.name || ""}
+          funnelId={null}
+        />
+      )}
     </MainLayout>
   );
 }
