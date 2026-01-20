@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,10 +47,119 @@ function normalizePhone(phone: string): string {
   return normalized;
 }
 
+// Get media URL from Meta
+async function getMediaUrl(mediaId: string, accessToken: string): Promise<string | null> {
+  try {
+    const response = await fetch(`https://graph.facebook.com/v18.0/${mediaId}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      console.error("Failed to get media info:", await response.text());
+      return null;
+    }
+
+    const data = await response.json();
+    return data.url || null;
+  } catch (error) {
+    console.error("Error getting media URL:", error);
+    return null;
+  }
+}
+
+// Download media from Meta and upload to our storage
+async function downloadAndStoreMedia(
+  mediaId: string,
+  accessToken: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  messageType: string,
+  companyId: string
+): Promise<string | null> {
+  try {
+    // First, get the media URL from Meta
+    const mediaUrl = await getMediaUrl(mediaId, accessToken);
+    if (!mediaUrl) {
+      console.error("Could not get media URL for:", mediaId);
+      return null;
+    }
+
+    // Download the media
+    const mediaResponse = await fetch(mediaUrl, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!mediaResponse.ok) {
+      console.error("Failed to download media:", mediaResponse.status);
+      return null;
+    }
+
+    // Get content type
+    const contentType = mediaResponse.headers.get("content-type") || "application/octet-stream";
+    
+    // Determine file extension
+    let extension = "bin";
+    if (contentType.includes("image/jpeg") || contentType.includes("image/jpg")) extension = "jpg";
+    else if (contentType.includes("image/png")) extension = "png";
+    else if (contentType.includes("image/webp")) extension = "webp";
+    else if (contentType.includes("image/gif")) extension = "gif";
+    else if (contentType.includes("audio/ogg")) extension = "ogg";
+    else if (contentType.includes("audio/mpeg")) extension = "mp3";
+    else if (contentType.includes("audio/mp4")) extension = "m4a";
+    else if (contentType.includes("audio/amr")) extension = "amr";
+    else if (contentType.includes("audio/aac")) extension = "aac";
+    else if (contentType.includes("video/mp4")) extension = "mp4";
+    else if (contentType.includes("video/3gpp")) extension = "3gp";
+    else if (contentType.includes("application/pdf")) extension = "pdf";
+    else if (contentType.includes("application/msword")) extension = "doc";
+    else if (contentType.includes("application/vnd.openxmlformats-officedocument.wordprocessingml")) extension = "docx";
+    else if (contentType.includes("application/vnd.ms-excel")) extension = "xls";
+    else if (contentType.includes("application/vnd.openxmlformats-officedocument.spreadsheetml")) extension = "xlsx";
+
+    const blob = await mediaResponse.blob();
+    const arrayBuffer = await blob.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+    
+    // Generate unique filename
+    const timestamp = Date.now();
+    const randomId = Math.random().toString(36).substring(7);
+    const fileName = `${companyId}/${messageType}s/${timestamp}-${randomId}.${extension}`;
+
+    // Upload to Supabase storage
+    const { data, error } = await supabase.storage
+      .from("whatsapp-media")
+      .upload(fileName, uint8Array, {
+        contentType,
+        upsert: false,
+      });
+
+    if (error) {
+      console.error("Failed to upload media to storage:", error);
+      return null;
+    }
+
+    // Get public URL
+    const { data: publicUrlData } = supabase.storage
+      .from("whatsapp-media")
+      .getPublicUrl(data.path);
+
+    console.log("Media stored successfully:", publicUrlData.publicUrl);
+    return publicUrlData.publicUrl;
+  } catch (error) {
+    console.error("Error downloading and storing media:", error);
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const appSecret = Deno.env.get("WHATSAPP_CLOUD_APP_SECRET");
+  const accessToken = Deno.env.get("WHATSAPP_CLOUD_ACCESS_TOKEN");
   const verifyToken = Deno.env.get("WHATSAPP_CLOUD_VERIFY_TOKEN") || "lovable_whatsapp_verify";
 
   // Handle webhook verification (GET request from Meta)
@@ -186,7 +295,7 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Extract message content
+      // Extract message content and process media
       let content = "";
       let messageType = "text";
       let mediaUrl: string | null = null;
@@ -196,19 +305,73 @@ Deno.serve(async (req) => {
       } else if (message.type === "image") {
         content = message.image?.caption || "[Imagem]";
         messageType = "image";
-        // Note: Media URL requires separate API call to download
+        
+        // Download and store the image
+        if (accessToken && message.image?.id) {
+          mediaUrl = await downloadAndStoreMedia(
+            message.image.id,
+            accessToken,
+            supabase,
+            "image",
+            companyId
+          );
+        }
       } else if (message.type === "audio") {
         content = "[Áudio]";
         messageType = "audio";
+        
+        // Download and store the audio
+        if (accessToken && message.audio?.id) {
+          mediaUrl = await downloadAndStoreMedia(
+            message.audio.id,
+            accessToken,
+            supabase,
+            "audio",
+            companyId
+          );
+        }
       } else if (message.type === "video") {
         content = message.video?.caption || "[Vídeo]";
         messageType = "video";
+        
+        // Download and store the video
+        if (accessToken && message.video?.id) {
+          mediaUrl = await downloadAndStoreMedia(
+            message.video.id,
+            accessToken,
+            supabase,
+            "video",
+            companyId
+          );
+        }
       } else if (message.type === "document") {
         content = message.document?.filename || "[Documento]";
         messageType = "document";
+        
+        // Download and store the document
+        if (accessToken && message.document?.id) {
+          mediaUrl = await downloadAndStoreMedia(
+            message.document.id,
+            accessToken,
+            supabase,
+            "document",
+            companyId
+          );
+        }
       } else if (message.type === "sticker") {
         content = "[Sticker]";
         messageType = "sticker";
+        
+        // Download and store the sticker
+        if (accessToken && message.sticker?.id) {
+          mediaUrl = await downloadAndStoreMedia(
+            message.sticker.id,
+            accessToken,
+            supabase,
+            "sticker",
+            companyId
+          );
+        }
       } else if (message.type === "location") {
         content = `[Localização: ${message.location?.latitude}, ${message.location?.longitude}]`;
         messageType = "location";
@@ -233,7 +396,7 @@ Deno.serve(async (req) => {
       }
 
       // Save message
-      await supabase.from("whatsapp_messages").insert({
+      const { error: insertError } = await supabase.from("whatsapp_messages").insert({
         company_id: companyId,
         contact_id: contact.id,
         message_id: messageId,
@@ -245,7 +408,11 @@ Deno.serve(async (req) => {
         sent_at: timestamp,
       });
 
-      console.log("Message saved:", messageId);
+      if (insertError) {
+        console.error("Error saving message:", insertError);
+      } else {
+        console.log("Message saved:", messageId, "| Type:", messageType, "| Media:", mediaUrl ? "Yes" : "No");
+      }
     }
 
     // Process status updates
