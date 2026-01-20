@@ -135,8 +135,25 @@ export default function Leads() {
       result = result.filter((lead) => new Date(lead.created_at) <= to);
     }
 
+    // Tags filter
+    if (filters.tags.length > 0) {
+      result = result.filter((lead) => {
+        const leadTags = lead.tags || [];
+        return filters.tags.some((tag) => leadTags.includes(tag));
+      });
+    }
+
     return result;
   }, [leads, searchQuery, filters]);
+
+  // Extract all unique tags from leads
+  const availableTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    leads.forEach((lead) => {
+      (lead.tags || []).forEach((tag) => tagSet.add(tag));
+    });
+    return Array.from(tagSet).sort();
+  }, [leads]);
 
   const selectedLeadsData = useMemo(() => {
     return leads.filter((lead) => selectedLeadIds.includes(lead.id));
@@ -230,6 +247,7 @@ export default function Leads() {
             stages={stages}
             filters={filters}
             onFiltersChange={setFilters}
+            availableTags={availableTags}
           />
         </div>
 

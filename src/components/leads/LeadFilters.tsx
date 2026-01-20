@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Calendar } from "@/components/ui/calendar";
-import { Filter, X, CalendarIcon } from "lucide-react";
+import { Filter, X, CalendarIcon, Tag } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { FunnelStage } from "@/hooks/useFunnels";
@@ -33,6 +33,7 @@ export interface LeadFiltersState {
   maxValue: string;
   dateFrom: Date | undefined;
   dateTo: Date | undefined;
+  tags: string[];
 }
 
 export const initialLeadFilters: LeadFiltersState = {
@@ -42,26 +43,44 @@ export const initialLeadFilters: LeadFiltersState = {
   maxValue: "",
   dateFrom: undefined,
   dateTo: undefined,
+  tags: [],
 };
 
 interface LeadFiltersProps {
   stages: FunnelStage[];
   filters: LeadFiltersState;
   onFiltersChange: (filters: LeadFiltersState) => void;
+  availableTags?: string[];
 }
 
-export function LeadFilters({ stages, filters, onFiltersChange }: LeadFiltersProps) {
+export function LeadFilters({ stages, filters, onFiltersChange, availableTags = [] }: LeadFiltersProps) {
   const [open, setOpen] = useState(false);
   const [dateFromOpen, setDateFromOpen] = useState(false);
   const [dateToOpen, setDateToOpen] = useState(false);
+  const [tagInput, setTagInput] = useState("");
 
   const activeFiltersCount =
     filters.sources.length +
     filters.stages.length +
+    filters.tags.length +
     (filters.minValue ? 1 : 0) +
     (filters.maxValue ? 1 : 0) +
     (filters.dateFrom ? 1 : 0) +
     (filters.dateTo ? 1 : 0);
+
+  const handleTagToggle = (tag: string) => {
+    const newTags = filters.tags.includes(tag)
+      ? filters.tags.filter((t) => t !== tag)
+      : [...filters.tags, tag];
+    onFiltersChange({ ...filters, tags: newTags });
+  };
+
+  const handleAddTag = () => {
+    if (tagInput.trim() && !filters.tags.includes(tagInput.trim())) {
+      onFiltersChange({ ...filters, tags: [...filters.tags, tagInput.trim()] });
+      setTagInput("");
+    }
+  };
 
   const handleSourceToggle = (source: string) => {
     const newSources = filters.sources.includes(source)
@@ -233,6 +252,52 @@ export function LeadFilters({ stages, filters, onFiltersChange }: LeadFiltersPro
                 <X className="w-3 h-3 mr-1" />
                 Limpar datas
               </Button>
+            )}
+          </div>
+
+          {/* Tags */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2">
+              <Tag className="w-3 h-3" />
+              Tags
+            </Label>
+            {availableTags.length > 0 && (
+              <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                {availableTags.map((tag) => (
+                  <Badge
+                    key={tag}
+                    variant={filters.tags.includes(tag) ? "default" : "outline"}
+                    className="cursor-pointer text-xs"
+                    onClick={() => handleTagToggle(tag)}
+                  >
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Input
+                placeholder="Buscar ou adicionar tag"
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddTag())}
+                className="text-sm"
+              />
+              <Button variant="secondary" size="sm" onClick={handleAddTag}>
+                +
+              </Button>
+            </div>
+            {filters.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {filters.tags.map((tag) => (
+                  <Badge key={tag} variant="secondary" className="gap-1 text-xs">
+                    {tag}
+                    <button onClick={() => handleTagToggle(tag)}>
+                      <X className="w-3 h-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
             )}
           </div>
         </div>
