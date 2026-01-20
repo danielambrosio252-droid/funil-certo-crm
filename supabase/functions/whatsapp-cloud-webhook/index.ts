@@ -1,0 +1,281 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-hub-signature-256",
+};
+
+// Verify Meta webhook signature
+async function verifySignature(payload: string, signature: string, appSecret: string): Promise<boolean> {
+  if (!signature || !appSecret) return false;
+
+  const expectedSignature = signature.replace("sha256=", "");
+  
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(appSecret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  const signatureBuffer = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
+  const computedSignature = Array.from(new Uint8Array(signatureBuffer))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  return computedSignature === expectedSignature;
+}
+
+// Normalize phone number
+function normalizePhone(phone: string): string {
+  let normalized = phone.replace(/\D/g, "");
+  
+  // Add Brazil country code if missing
+  if (normalized.length >= 10 && normalized.length <= 11) {
+    normalized = "55" + normalized;
+  }
+  
+  // Add 9 for Brazilian mobile numbers
+  if (normalized.startsWith("55") && normalized.length === 12) {
+    const ddd = normalized.substring(2, 4);
+    const num = normalized.substring(4);
+    normalized = "55" + ddd + "9" + num;
+  }
+  
+  return normalized;
+}
+
+Deno.serve(async (req) => {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const appSecret = Deno.env.get("WHATSAPP_CLOUD_APP_SECRET");
+  const verifyToken = Deno.env.get("WHATSAPP_CLOUD_VERIFY_TOKEN") || "lovable_verify_token";
+
+  // Handle webhook verification (GET request from Meta)
+  if (req.method === "GET") {
+    const url = new URL(req.url);
+    const mode = url.searchParams.get("hub.mode");
+    const token = url.searchParams.get("hub.verify_token");
+    const challenge = url.searchParams.get("hub.challenge");
+
+    if (mode === "subscribe" && token === verifyToken) {
+      console.log("Webhook verified successfully");
+      return new Response(challenge, { status: 200 });
+    }
+
+    return new Response("Verification failed", { status: 403 });
+  }
+
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  if (req.method !== "POST") {
+    return new Response("Method not allowed", { status: 405 });
+  }
+
+  const body = await req.text();
+  
+  // Verify signature if app secret is configured
+  if (appSecret) {
+    const signature = req.headers.get("x-hub-signature-256") || "";
+    const isValid = await verifySignature(body, signature, appSecret);
+    
+    if (!isValid) {
+      console.error("Invalid webhook signature");
+      return new Response("Invalid signature", { status: 401 });
+    }
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+  try {
+    const payload = JSON.parse(body);
+    console.log("Webhook payload:", JSON.stringify(payload, null, 2));
+
+    // Meta webhook structure
+    const entry = payload.entry?.[0];
+    if (!entry) {
+      return new Response(JSON.stringify({ received: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const changes = entry.changes?.[0];
+    if (!changes || changes.field !== "messages") {
+      return new Response(JSON.stringify({ received: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const value = changes.value;
+    const phoneNumberId = value.metadata?.phone_number_id;
+
+    if (!phoneNumberId) {
+      console.error("No phone_number_id in webhook");
+      return new Response(JSON.stringify({ error: "Missing phone_number_id" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Find company by phone_number_id
+    const { data: company } = await supabase
+      .from("companies")
+      .select("id")
+      .eq("whatsapp_phone_number_id", phoneNumberId)
+      .single();
+
+    if (!company) {
+      console.error("Company not found for phone_number_id:", phoneNumberId);
+      return new Response(JSON.stringify({ error: "Company not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const companyId = company.id;
+
+    // Process incoming messages
+    const messages = value.messages || [];
+    for (const message of messages) {
+      const senderPhone = message.from;
+      const normalizedPhone = normalizePhone(senderPhone);
+      const messageId = message.id;
+      const timestamp = new Date(parseInt(message.timestamp) * 1000).toISOString();
+
+      // Get or create contact
+      let { data: contact } = await supabase
+        .from("whatsapp_contacts")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("normalized_phone", normalizedPhone)
+        .maybeSingle();
+
+      if (!contact) {
+        // Get contact name from webhook if available
+        const contactInfo = value.contacts?.[0];
+        const contactName = contactInfo?.profile?.name || senderPhone;
+
+        const { data: newContact } = await supabase
+          .from("whatsapp_contacts")
+          .insert({
+            company_id: companyId,
+            phone: senderPhone,
+            normalized_phone: normalizedPhone,
+            name: contactName,
+            last_message_at: timestamp,
+          })
+          .select("id")
+          .single();
+
+        contact = newContact;
+      } else {
+        // Update last_message_at and increment unread
+        await supabase.rpc("increment_unread_count", { contact_uuid: contact.id });
+        await supabase
+          .from("whatsapp_contacts")
+          .update({ last_message_at: timestamp })
+          .eq("id", contact.id);
+      }
+
+      if (!contact) {
+        console.error("Failed to get/create contact");
+        continue;
+      }
+
+      // Extract message content
+      let content = "";
+      let messageType = "text";
+      let mediaUrl: string | null = null;
+
+      if (message.type === "text") {
+        content = message.text?.body || "";
+      } else if (message.type === "image") {
+        content = message.image?.caption || "[Imagem]";
+        messageType = "image";
+        // Note: Media URL requires separate API call to download
+      } else if (message.type === "audio") {
+        content = "[Áudio]";
+        messageType = "audio";
+      } else if (message.type === "video") {
+        content = message.video?.caption || "[Vídeo]";
+        messageType = "video";
+      } else if (message.type === "document") {
+        content = message.document?.filename || "[Documento]";
+        messageType = "document";
+      } else if (message.type === "sticker") {
+        content = "[Sticker]";
+        messageType = "sticker";
+      } else if (message.type === "location") {
+        content = `[Localização: ${message.location?.latitude}, ${message.location?.longitude}]`;
+        messageType = "location";
+      } else if (message.type === "contacts") {
+        content = "[Contato compartilhado]";
+        messageType = "contacts";
+      } else {
+        content = `[${message.type}]`;
+        messageType = message.type;
+      }
+
+      // Check for duplicate message
+      const { data: existingMessage } = await supabase
+        .from("whatsapp_messages")
+        .select("id")
+        .eq("message_id", messageId)
+        .maybeSingle();
+
+      if (existingMessage) {
+        console.log("Duplicate message, skipping:", messageId);
+        continue;
+      }
+
+      // Save message
+      await supabase.from("whatsapp_messages").insert({
+        company_id: companyId,
+        contact_id: contact.id,
+        message_id: messageId,
+        content,
+        message_type: messageType,
+        media_url: mediaUrl,
+        is_from_me: false,
+        status: "received",
+        sent_at: timestamp,
+      });
+
+      console.log("Message saved:", messageId);
+    }
+
+    // Process status updates
+    const statuses = value.statuses || [];
+    for (const status of statuses) {
+      const messageId = status.id;
+      const newStatus = status.status; // sent, delivered, read, failed
+
+      // Map Meta status to our status
+      let mappedStatus = newStatus;
+      if (newStatus === "delivered") mappedStatus = "delivered";
+      else if (newStatus === "read") mappedStatus = "read";
+      else if (newStatus === "failed") mappedStatus = "failed";
+
+      await supabase
+        .from("whatsapp_messages")
+        .update({ status: mappedStatus })
+        .eq("message_id", messageId);
+
+      console.log("Status updated:", messageId, "->", mappedStatus);
+    }
+
+    return new Response(JSON.stringify({ received: true }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    console.error("Webhook error:", err);
+    return new Response(JSON.stringify({ error: "Internal server error" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
