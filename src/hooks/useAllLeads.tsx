@@ -174,6 +174,112 @@ export function useAllLeads() {
     },
   });
 
+  // Bulk move leads to stage
+  const bulkMoveToStage = useMutation({
+    mutationFn: async ({ leadIds, stageId }: { leadIds: string[]; stageId: string }) => {
+      const { error } = await supabase
+        .from("funnel_leads")
+        .update({ stage_id: stageId })
+        .in("id", leadIds);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["all-leads"] });
+      queryClient.invalidateQueries({ queryKey: ["funnel-leads"] });
+      toast.success("Leads movidos com sucesso!");
+    },
+    onError: (error) => {
+      toast.error("Erro ao mover leads: " + error.message);
+    },
+  });
+
+  // Bulk add tags
+  const bulkAddTags = useMutation({
+    mutationFn: async ({ leadIds, tags }: { leadIds: string[]; tags: string[] }) => {
+      // Get current leads to merge tags
+      const { data: currentLeads, error: fetchError } = await supabase
+        .from("funnel_leads")
+        .select("id, tags")
+        .in("id", leadIds);
+      
+      if (fetchError) throw fetchError;
+
+      // Update each lead with merged tags
+      const updates = currentLeads.map((lead) => {
+        const existingTags = lead.tags || [];
+        const newTags = [...new Set([...existingTags, ...tags])];
+        return supabase
+          .from("funnel_leads")
+          .update({ tags: newTags })
+          .eq("id", lead.id);
+      });
+
+      await Promise.all(updates);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["all-leads"] });
+      queryClient.invalidateQueries({ queryKey: ["funnel-leads"] });
+      toast.success("Tags adicionadas com sucesso!");
+    },
+    onError: (error) => {
+      toast.error("Erro ao adicionar tags: " + error.message);
+    },
+  });
+
+  // Bulk remove tags
+  const bulkRemoveTags = useMutation({
+    mutationFn: async ({ leadIds, tags }: { leadIds: string[]; tags: string[] }) => {
+      // Get current leads to filter tags
+      const { data: currentLeads, error: fetchError } = await supabase
+        .from("funnel_leads")
+        .select("id, tags")
+        .in("id", leadIds);
+      
+      if (fetchError) throw fetchError;
+
+      // Update each lead with filtered tags
+      const updates = currentLeads.map((lead) => {
+        const existingTags = lead.tags || [];
+        const newTags = existingTags.filter((t) => !tags.includes(t));
+        return supabase
+          .from("funnel_leads")
+          .update({ tags: newTags })
+          .eq("id", lead.id);
+      });
+
+      await Promise.all(updates);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["all-leads"] });
+      queryClient.invalidateQueries({ queryKey: ["funnel-leads"] });
+      toast.success("Tags removidas com sucesso!");
+    },
+    onError: (error) => {
+      toast.error("Erro ao remover tags: " + error.message);
+    },
+  });
+
+  // Bulk delete leads
+  const bulkDelete = useMutation({
+    mutationFn: async (leadIds: string[]) => {
+      const { error } = await supabase
+        .from("funnel_leads")
+        .delete()
+        .in("id", leadIds);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["all-leads"] });
+      queryClient.invalidateQueries({ queryKey: ["funnel-leads"] });
+      toast.success("Leads excluídos com sucesso!");
+    },
+    onError: (error) => {
+      toast.error("Erro ao excluir leads: " + error.message);
+    },
+  });
+
   return {
     leads,
     stages,
@@ -184,6 +290,10 @@ export function useAllLeads() {
     importLeads,
     deleteLead,
     updateLead,
+    bulkMoveToStage,
+    bulkAddTags,
+    bulkRemoveTags,
+    bulkDelete,
     refetchLeads,
   };
 }
