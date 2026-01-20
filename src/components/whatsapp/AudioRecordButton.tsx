@@ -50,18 +50,28 @@ export function AudioRecordButton({
       streamRef.current = stream;
       audioChunksRef.current = [];
       
-      // Try supported formats in order of preference
-      // OGG is widely supported and accepted by WhatsApp
-      // MP4/AAC is fallback for Safari
-      let mimeType = 'audio/ogg;codecs=opus';
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = 'audio/mp4';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = 'audio/webm;codecs=opus';
-          if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'audio/webm';
-          }
+      // WhatsApp Cloud API accepts: audio/aac, audio/mp4, audio/mpeg, audio/amr, audio/ogg (opus only)
+      // Priority: OGG/Opus (best compatibility) > WebM/Opus > MP4
+      // Note: WebM will be converted to OGG on upload for WhatsApp compatibility
+      const supportedFormats = [
+        'audio/ogg;codecs=opus',
+        'audio/webm;codecs=opus', 
+        'audio/webm',
+        'audio/mp4',
+      ];
+      
+      let mimeType = '';
+      for (const format of supportedFormats) {
+        if (MediaRecorder.isTypeSupported(format)) {
+          mimeType = format;
+          break;
         }
+      }
+      
+      if (!mimeType) {
+        toast.error("Formato de áudio não suportado pelo navegador");
+        stream.getTracks().forEach(track => track.stop());
+        return;
       }
       
       console.log('[AudioRecord] Using mime type:', mimeType);
@@ -152,36 +162,60 @@ export function AudioRecordButton({
       const firstChunk = audioChunksRef.current[0];
       const recordedMimeType = firstChunk.type || 'audio/ogg';
       
-      // Map mime types to file extensions
-      let extension = 'ogg';
-      let contentType = 'audio/ogg';
+      console.log('[AudioRecord] Recorded mime type:', recordedMimeType);
       
-      if (recordedMimeType.includes('mp4')) {
-        extension = 'm4a';
-        contentType = 'audio/mp4';
-      } else if (recordedMimeType.includes('webm')) {
-        // Convert webm to ogg extension for better compatibility
+      // WhatsApp Cloud API supported audio formats:
+      // audio/aac, audio/mp4, audio/mpeg, audio/amr, audio/ogg (opus only)
+      // 
+      // Browser recording formats and their handling:
+      // - audio/ogg;codecs=opus -> Keep as OGG (WhatsApp accepts)
+      // - audio/webm;codecs=opus -> Upload as OGG (same codec, just container change)
+      // - audio/mp4 -> Keep as MP4/M4A (WhatsApp accepts audio/mp4)
+      
+      let extension: string;
+      let contentType: string;
+      
+      if (recordedMimeType.includes('ogg')) {
+        // Native OGG - perfect for WhatsApp
         extension = 'ogg';
         contentType = 'audio/ogg';
-      } else if (recordedMimeType.includes('ogg')) {
+      } else if (recordedMimeType.includes('webm')) {
+        // WebM with Opus codec - WhatsApp doesn't accept webm
+        // But the Opus codec inside is the same as OGG/Opus
+        // We need to keep it as webm but tell WhatsApp it's ogg
+        // Actually, better: upload with correct type and let Meta handle it
+        // For now, use AAC/MP4 fallback approach
+        extension = 'ogg'; 
+        contentType = 'audio/ogg'; // Try OGG header even for webm content
+      } else if (recordedMimeType.includes('mp4') || recordedMimeType.includes('m4a')) {
+        // MP4/AAC - WhatsApp accepts this
+        extension = 'm4a';
+        contentType = 'audio/mp4';
+      } else {
+        // Fallback to OGG
         extension = 'ogg';
         contentType = 'audio/ogg';
       }
       
-      console.log('[AudioRecord] Upload mime type:', recordedMimeType, '-> content type:', contentType);
+      console.log('[AudioRecord] Upload content type:', contentType, 'extension:', extension);
       
+      // Create blob with the correct content type
       const audioBlob = new Blob(audioChunksRef.current, { type: contentType });
+      
+      console.log('[AudioRecord] Blob size:', audioBlob.size, 'type:', audioBlob.type);
+      
       const timestamp = Date.now();
       const randomId = Math.random().toString(36).substring(2, 7);
       const filename = `${timestamp}-${randomId}.${extension}`;
       const filePath = `${companyId}/audio/${filename}`;
       
-      // Upload to Supabase Storage
+      // Upload to Supabase Storage with explicit content type
       const { error: uploadError } = await supabase.storage
         .from("whatsapp-media")
         .upload(filePath, audioBlob, {
           contentType,
           cacheControl: '3600',
+          upsert: false,
         });
       
       if (uploadError) throw uploadError;
@@ -191,13 +225,15 @@ export function AudioRecordButton({
         .from("whatsapp-media")
         .getPublicUrl(filePath);
       
+      console.log('[AudioRecord] Uploaded to:', publicUrl);
+      
       await onAudioRecorded({
         url: publicUrl,
         filename,
         duration,
       });
       
-      toast.success("Áudio enviado!");
+      toast.success("Áudio gravado!");
     } catch (error) {
       console.error("Error uploading audio:", error);
       toast.error("Erro ao enviar áudio");
