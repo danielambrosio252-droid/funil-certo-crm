@@ -423,8 +423,22 @@ export function WhatsAppChat() {
   };
 
 
-  // Not connected state - ALWAYS show this immediately, don't wait for loading
-  // This ensures users can always take action
+  // Show loading state while checking connection status
+  // This prevents showing "Disconnected" before cloudApiConfigured is loaded
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-200px)] bg-card border border-border rounded-xl p-8">
+        <div className="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center mb-6">
+          <div className="w-8 h-8 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+        <h3 className="text-lg font-medium text-foreground">
+          Carregando WhatsApp...
+        </h3>
+      </div>
+    );
+  }
+
+  // Not connected state - only show after loading completes
   if (!isConnected) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-200px)] bg-card border border-border rounded-xl p-8">
@@ -438,18 +452,12 @@ export function WhatsAppChat() {
           Conecte seu WhatsApp para começar a receber e enviar mensagens aos seus clientes.
         </p>
         <Button 
-          onClick={() => navigate("/settings")}
+          onClick={() => navigate("/whatsapp")}
           className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white"
         >
           <Wifi className="w-4 h-4 mr-2" />
           Conectar WhatsApp
         </Button>
-        {loading && (
-          <p className="text-xs text-muted-foreground mt-4 flex items-center gap-2">
-            <span className="w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-            Sincronizando...
-          </p>
-        )}
       </div>
     );
   }
