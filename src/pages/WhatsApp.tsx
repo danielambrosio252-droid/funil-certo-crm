@@ -9,10 +9,16 @@ import { Badge } from "@/components/ui/badge";
 
 export default function WhatsApp() {
   const [activeTab, setActiveTab] = useState("chat");
-  const { session, contacts } = useWhatsApp();
+  const { contacts, isConnected, whatsappMode } = useWhatsApp();
   
   const totalUnread = contacts.reduce((acc, c) => acc + (c.unread_count || 0), 0);
-  const isConnected = session?.status === "connected";
+
+  const getConnectionLabel = () => {
+    if (isConnected) {
+      return whatsappMode === "cloud_api" ? "API Oficial" : "Conectado";
+    }
+    return "Desconectado";
+  };
 
   return (
     <MainLayout title="WhatsApp" subtitle="Central de atendimento">
@@ -38,7 +44,7 @@ export default function WhatsApp() {
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
             <span className={`text-sm font-medium ${isConnected ? 'text-emerald-600' : 'text-muted-foreground'}`}>
-              {isConnected ? 'Conectado' : 'Desconectado'}
+              {getConnectionLabel()}
             </span>
           </div>
         </div>

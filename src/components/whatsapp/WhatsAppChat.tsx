@@ -61,7 +61,7 @@ interface Message {
 export function WhatsAppChat() {
   const { profile } = useAuth();
   const navigate = useNavigate();
-  const { contacts, session, sendMessage, fetchMessages, markAsRead, loading, refetch } = useWhatsApp();
+  const { contacts, isConnected, sendMessage, fetchMessages, markAsRead, loading, refetch } = useWhatsApp();
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState("");
@@ -384,7 +384,6 @@ export function WhatsAppChat() {
     }
   };
 
-  const isConnected = session?.status === "connected";
 
   // Not connected state - ALWAYS show this immediately, don't wait for loading
   // This ensures users can always take action
