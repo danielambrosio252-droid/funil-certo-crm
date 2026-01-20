@@ -34,12 +34,12 @@ import {
   Users,
   Loader2,
 } from "lucide-react";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import { useAllLeads } from "@/hooks/useAllLeads";
 import { ImportLeadsDialog } from "@/components/leads/ImportLeadsDialog";
 import { ExportLeadsDialog } from "@/components/leads/ExportLeadsDialog";
 import { CreateLeadDialogGlobal } from "@/components/leads/CreateLeadDialogGlobal";
+import { BulkActionsBar } from "@/components/leads/BulkActionsBar";
+import { BulkEmailDialog } from "@/components/leads/BulkEmailDialog";
 import { LeadDetailsDialog } from "@/components/funnels/LeadDetailsDialog";
 import type { FunnelLead } from "@/hooks/useFunnels";
 
@@ -55,12 +55,26 @@ const sourceColors: Record<string, string> = {
 };
 
 export default function Leads() {
-  const { leads, stages, loadingLeads, loadingStages, createLead, importLeads, deleteLead, getStageById } = useAllLeads();
-  const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
+  const { 
+    leads, 
+    stages, 
+    loadingLeads, 
+    loadingStages, 
+    createLead, 
+    importLeads, 
+    deleteLead, 
+    getStageById,
+    bulkMoveToStage,
+    bulkAddTags,
+    bulkRemoveTags,
+    bulkDelete,
+  } = useAllLeads();
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showEmailDialog, setShowEmailDialog] = useState(false);
   const [selectedLead, setSelectedLead] = useState<FunnelLead | null>(null);
 
   const filteredLeads = useMemo(() => {
@@ -75,25 +89,42 @@ export default function Leads() {
     );
   }, [leads, searchQuery]);
 
+  const selectedLeadsData = useMemo(() => {
+    return leads.filter((lead) => selectedLeadIds.includes(lead.id));
+  }, [leads, selectedLeadIds]);
+
   const toggleSelectAll = () => {
-    if (selectedLeads.length === filteredLeads.length) {
-      setSelectedLeads([]);
+    if (selectedLeadIds.length === filteredLeads.length) {
+      setSelectedLeadIds([]);
     } else {
-      setSelectedLeads(filteredLeads.map((l) => l.id));
+      setSelectedLeadIds(filteredLeads.map((l) => l.id));
     }
   };
 
   const toggleSelect = (id: string) => {
-    setSelectedLeads((prev) =>
+    setSelectedLeadIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
     );
   };
 
-  const handleDeleteSelected = async () => {
-    for (const id of selectedLeads) {
-      await deleteLead.mutateAsync(id);
-    }
-    setSelectedLeads([]);
+  const handleBulkMoveToStage = async (stageId: string) => {
+    await bulkMoveToStage.mutateAsync({ leadIds: selectedLeadIds, stageId });
+    setSelectedLeadIds([]);
+  };
+
+  const handleBulkAddTags = async (tags: string[]) => {
+    await bulkAddTags.mutateAsync({ leadIds: selectedLeadIds, tags });
+    setSelectedLeadIds([]);
+  };
+
+  const handleBulkRemoveTags = async (tags: string[]) => {
+    await bulkRemoveTags.mutateAsync({ leadIds: selectedLeadIds, tags });
+    setSelectedLeadIds([]);
+  };
+
+  const handleBulkDelete = async () => {
+    await bulkDelete.mutateAsync(selectedLeadIds);
+    setSelectedLeadIds([]);
   };
 
   const formatLastContact = (date: string | null) => {
@@ -112,6 +143,7 @@ export default function Leads() {
   const stageIds = useMemo(() => stages.map(s => s.id), [stages]);
 
   const isLoading = loadingLeads || loadingStages;
+  const isProcessing = bulkMoveToStage.isPending || bulkAddTags.isPending || bulkRemoveTags.isPending || bulkDelete.isPending;
 
   return (
     <MainLayout title="Leads" subtitle="Gerencie todos os seus leads em um só lugar">
@@ -163,25 +195,20 @@ export default function Leads() {
           </div>
         </div>
 
-        {/* Selected Actions */}
-        {selectedLeads.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex items-center gap-4 p-3 bg-primary/10 rounded-lg border border-primary/20"
-          >
-            <span className="text-sm font-medium">
-              {selectedLeads.length} selecionado(s)
-            </span>
-            <div className="flex-1" />
-            <Button variant="outline" size="sm" onClick={() => setSelectedLeads([])}>
-              Cancelar
-            </Button>
-            <Button variant="destructive" size="sm" onClick={handleDeleteSelected}>
-              <Trash2 className="w-4 h-4 mr-2" />
-              Excluir
-            </Button>
-          </motion.div>
+        {/* Bulk Actions Bar */}
+        {selectedLeadIds.length > 0 && (
+          <BulkActionsBar
+            selectedCount={selectedLeadIds.length}
+            selectedLeads={selectedLeadsData}
+            stages={stages}
+            onCancel={() => setSelectedLeadIds([])}
+            onMoveToStage={handleBulkMoveToStage}
+            onAddTags={handleBulkAddTags}
+            onRemoveTags={handleBulkRemoveTags}
+            onDelete={handleBulkDelete}
+            onSendEmail={() => setShowEmailDialog(true)}
+            isProcessing={isProcessing}
+          />
         )}
 
         {/* Table */}
@@ -206,7 +233,7 @@ export default function Leads() {
                 <TableRow>
                   <TableHead className="w-12">
                     <Checkbox
-                      checked={selectedLeads.length === filteredLeads.length && filteredLeads.length > 0}
+                      checked={selectedLeadIds.length === filteredLeads.length && filteredLeads.length > 0}
                       onCheckedChange={toggleSelectAll}
                     />
                   </TableHead>
@@ -232,7 +259,7 @@ export default function Leads() {
                     >
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <Checkbox
-                          checked={selectedLeads.includes(lead.id)}
+                          checked={selectedLeadIds.includes(lead.id)}
                           onCheckedChange={() => toggleSelect(lead.id)}
                         />
                       </TableCell>
@@ -386,6 +413,12 @@ export default function Leads() {
           funnelId={null}
         />
       )}
+
+      <BulkEmailDialog
+        open={showEmailDialog}
+        onOpenChange={setShowEmailDialog}
+        leads={selectedLeadsData}
+      />
     </MainLayout>
   );
 }
