@@ -259,9 +259,73 @@ Deno.serve(async (req) => {
 
     if (messageType === "text") {
       metaPayload.text = { body: payload.content };
+    } else if (messageType === "audio" && payload.media_url) {
+      // AUDIO: Requires upload to Meta's /media endpoint first, then send with media_id
+      console.log("[AUDIO] Iniciando processamento de áudio...");
+      console.log("[AUDIO] URL do arquivo:", payload.media_url);
+      
+      // Step 1: Download audio from Supabase Storage
+      console.log("[AUDIO] Baixando arquivo do storage...");
+      const audioResponse = await fetch(payload.media_url);
+      
+      if (!audioResponse.ok) {
+        console.error("[AUDIO] Falha ao baixar arquivo:", audioResponse.status);
+        throw new Error("Failed to download audio file from storage");
+      }
+      
+      const audioBuffer = await audioResponse.arrayBuffer();
+      console.log("[AUDIO] Arquivo baixado, tamanho:", audioBuffer.byteLength, "bytes");
+      
+      // Step 2: Upload to Meta's /media endpoint
+      console.log("[AUDIO] Fazendo upload para Meta /media...");
+      const mediaUploadUrl = `https://graph.facebook.com/v18.0/${company.whatsapp_phone_number_id}/media`;
+      
+      // Create FormData for multipart upload
+      const formData = new FormData();
+      const audioBlob = new Blob([audioBuffer], { type: "audio/ogg" });
+      formData.append("file", audioBlob, "audio.ogg");
+      formData.append("type", "audio/ogg");
+      formData.append("messaging_product", "whatsapp");
+      
+      const uploadResponse = await fetch(mediaUploadUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${cloudAccessToken}`,
+        },
+        body: formData,
+      });
+      
+      const uploadResult = await uploadResponse.json();
+      console.log("[AUDIO] Resposta do upload:", JSON.stringify(uploadResult), "Status:", uploadResponse.status);
+      
+      if (!uploadResponse.ok || !uploadResult.id) {
+        console.error("[AUDIO] Falha no upload para Meta:", uploadResult);
+        
+        await supabase
+          .from("whatsapp_messages")
+          .update({ status: "failed" })
+          .eq("id", messageData.id);
+        
+        return new Response(
+          JSON.stringify({ 
+            error: uploadResult.error?.message || "Failed to upload audio to WhatsApp",
+            details: uploadResult,
+            message_id: messageData.id 
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
+      const mediaId = uploadResult.id;
+      console.log("[AUDIO] Upload concluído com sucesso, media_id:", mediaId);
+      
+      // Step 3: Build message payload with media_id (not link!)
+      metaPayload.audio = { id: mediaId };
+      console.log("[AUDIO] Payload preparado para envio com media_id");
+      
     } else {
-      // For media messages, use the public URL directly
-      // Meta accepts public HTTPS URLs for media
+      // For other media messages (image, video, document), use the public URL directly
+      // Meta accepts public HTTPS URLs for these types
       const mediaContent: Record<string, unknown> = {
         link: payload.media_url,
       };
@@ -309,6 +373,11 @@ Deno.serve(async (req) => {
     }
 
     const metaMessageId = metaResult.messages?.[0]?.id;
+    
+    if (messageType === "audio") {
+      console.log("[AUDIO] Mensagem enviada com sucesso! meta_message_id:", metaMessageId);
+    }
+    
     await supabase
       .from("whatsapp_messages")
       .update({ 
@@ -334,6 +403,10 @@ Deno.serve(async (req) => {
     );
   } catch (err) {
     console.error("Error sending to Meta API:", err);
+    
+    if (messageType === "audio") {
+      console.error("[AUDIO] Erro crítico no processamento de áudio:", err);
+    }
 
     await supabase
       .from("whatsapp_messages")
