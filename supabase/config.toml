@@ -1,1 +1,22 @@
 project_id = "ysiszrxwbargoyqrrehr"
+
+[functions.whatsapp-cloud-webhook]
+verify_jwt = false
+
+[functions.whatsapp-cloud-send]
+verify_jwt = false
+
+[functions.lead-webhook]
+verify_jwt = false
+
+[functions.whatsapp-webhook]
+verify_jwt = false
+
+[functions.whatsapp-send]
+verify_jwt = false
+
+[functions.whatsapp-qr]
+verify_jwt = false
+
+[functions.whatsapp-session]
+verify_jwt = false
