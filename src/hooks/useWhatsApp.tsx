@@ -58,7 +58,36 @@ export function useWhatsApp() {
   const [contacts, setContacts] = useState<WhatsAppContact[]>([]);
   const [initializing, setInitializing] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [whatsappMode, setWhatsappMode] = useState<string | null>(null);
+  const [cloudApiConfigured, setCloudApiConfigured] = useState(false);
   const hasFetched = useRef(false);
+
+  const fetchCompanyConfig = useCallback(async () => {
+    const companyId = profile?.company_id;
+    if (!companyId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("companies")
+        .select("whatsapp_mode, whatsapp_phone_number_id, whatsapp_waba_id")
+        .eq("id", companyId)
+        .single();
+
+      if (error) {
+        console.error("Erro ao buscar config da empresa:", error);
+        return;
+      }
+
+      setWhatsappMode(data?.whatsapp_mode || null);
+      setCloudApiConfigured(
+        data?.whatsapp_mode === "cloud_api" &&
+        !!data?.whatsapp_phone_number_id &&
+        !!data?.whatsapp_waba_id
+      );
+    } catch (err) {
+      console.error("Erro ao buscar config da empresa:", err);
+    }
+  }, [profile?.company_id]);
 
   const fetchSession = useCallback(async () => {
     const companyId = profile?.company_id;
@@ -279,11 +308,11 @@ export function useWhatsApp() {
   const refetch = useCallback(async () => {
     setSyncing(true);
     try {
-      await Promise.all([fetchSession(), fetchContacts()]);
+      await Promise.all([fetchSession(), fetchContacts(), fetchCompanyConfig()]);
     } finally {
       setSyncing(false);
     }
-  }, [fetchSession, fetchContacts]);
+  }, [fetchSession, fetchContacts, fetchCompanyConfig]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -296,11 +325,11 @@ export function useWhatsApp() {
     hasFetched.current = true;
 
     const doFetch = async () => {
-      await Promise.all([fetchSession(), fetchContacts()]);
+      await Promise.all([fetchSession(), fetchContacts(), fetchCompanyConfig()]);
       setInitializing(false);
     };
     doFetch();
-  }, [authLoading, profile?.company_id, fetchSession, fetchContacts]);
+  }, [authLoading, profile?.company_id, fetchSession, fetchContacts, fetchCompanyConfig]);
 
   useEffect(() => {
     const companyId = profile?.company_id;
@@ -350,12 +379,18 @@ export function useWhatsApp() {
     };
   }, [profile?.company_id]);
 
+  // Determina se está conectado (Cloud API configurado OU sessão Baileys conectada)
+  const isConnected = cloudApiConfigured || session?.status === "connected";
+
   return {
     session,
     contacts,
     initializing,
     syncing,
     loading: authLoading || initializing,
+    isConnected,
+    whatsappMode,
+    cloudApiConfigured,
     connect,
     disconnect,
     restart,
