@@ -11,24 +11,26 @@ export interface Variable {
   icon?: React.ReactNode;
 }
 
-// Default variables available for leads/contacts
+// Default variables available for leads/contacts - descriptive and clear
 export const DEFAULT_VARIABLES: Variable[] = [
-  { key: "nome", label: "Nome do Lead/Contato", description: "Nome completo do contato", icon: <User className="w-4 h-4" /> },
-  { key: "primeiro_nome", label: "Primeiro Nome", description: "Apenas o primeiro nome", icon: <User className="w-4 h-4" /> },
-  { key: "telefone", label: "Telefone", description: "Número de telefone", icon: <Phone className="w-4 h-4" /> },
-  { key: "email", label: "E-mail", description: "Endereço de e-mail", icon: <Mail className="w-4 h-4" /> },
-  { key: "empresa", label: "Empresa", description: "Nome da empresa", icon: <Building className="w-4 h-4" /> },
-  { key: "tags", label: "Tags", description: "Tags do lead", icon: <Tag className="w-4 h-4" /> },
-  { key: "data_criacao", label: "Data de Criação", description: "Data de entrada do lead", icon: <Calendar className="w-4 h-4" /> },
-  { key: "ultima_mensagem", label: "Última Mensagem", description: "Texto da última mensagem", icon: <MessageSquare className="w-4 h-4" /> },
+  { key: "nome_lead", label: "Nome do Lead", description: "Puxa o nome completo do lead cadastrado no funil", icon: <User className="w-4 h-4" /> },
+  { key: "nome_contato", label: "Nome do Contato", description: "Puxa o nome do contato do WhatsApp", icon: <User className="w-4 h-4" /> },
+  { key: "primeiro_nome", label: "Primeiro Nome", description: "Puxa apenas o primeiro nome do contato", icon: <User className="w-4 h-4" /> },
+  { key: "telefone", label: "Telefone do Contato", description: "Puxa o número de telefone do contato", icon: <Phone className="w-4 h-4" /> },
+  { key: "email", label: "E-mail do Lead", description: "Puxa o e-mail cadastrado do lead", icon: <Mail className="w-4 h-4" /> },
+  { key: "nome_empresa", label: "Nome da Empresa", description: "Puxa o nome da sua empresa", icon: <Building className="w-4 h-4" /> },
+  { key: "tags", label: "Tags do Lead", description: "Puxa as tags/etiquetas do lead", icon: <Tag className="w-4 h-4" /> },
+  { key: "data_entrada", label: "Data de Entrada", description: "Puxa a data que o lead entrou no funil", icon: <Calendar className="w-4 h-4" /> },
+  { key: "ultima_mensagem", label: "Última Mensagem", description: "Puxa o texto da última mensagem recebida", icon: <MessageSquare className="w-4 h-4" /> },
 ];
 
-// Template specific variables ({{1}}, {{2}}, etc.)
+// Template specific variables for Meta API ({{1}}, {{2}}, etc.)
+// Meta API requires numbered placeholders like {{1}}, {{2}} for templates
 export const TEMPLATE_VARIABLES: Variable[] = [
-  { key: "1", label: "Variável {{1}}", description: "Primeira variável do template", icon: <Hash className="w-4 h-4" /> },
-  { key: "2", label: "Variável {{2}}", description: "Segunda variável do template", icon: <Hash className="w-4 h-4" /> },
-  { key: "3", label: "Variável {{3}}", description: "Terceira variável do template", icon: <Hash className="w-4 h-4" /> },
-  { key: "4", label: "Variável {{4}}", description: "Quarta variável do template", icon: <Hash className="w-4 h-4" /> },
+  { key: "1", label: "Nome (posição 1)", description: "Substitui por: nome do contato", icon: <User className="w-4 h-4" /> },
+  { key: "2", label: "Telefone (posição 2)", description: "Substitui por: telefone do contato", icon: <Phone className="w-4 h-4" /> },
+  { key: "3", label: "E-mail (posição 3)", description: "Substitui por: e-mail do lead", icon: <Mail className="w-4 h-4" /> },
+  { key: "4", label: "Personalizado (posição 4)", description: "Texto personalizado que você definir", icon: <Hash className="w-4 h-4" /> },
 ];
 
 interface VariablePickerProps {
