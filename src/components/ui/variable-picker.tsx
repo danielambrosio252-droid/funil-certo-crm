@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Textarea } from "./textarea";
 import { Input } from "./input";
 import { cn } from "@/lib/utils";
-import { User, Phone, Mail, Tag, Calendar, Hash, MessageSquare, Building } from "lucide-react";
+import { User, Phone, Mail, Tag, Calendar, Hash, MessageSquare, Building, DollarSign, GitBranch, Megaphone, FileText, Clock } from "lucide-react";
 
 export interface Variable {
   key: string;
@@ -13,15 +13,35 @@ export interface Variable {
 
 // Default variables available for leads/contacts - descriptive and clear
 export const DEFAULT_VARIABLES: Variable[] = [
+  // Dados do Contato/Lead
   { key: "nome_lead", label: "Nome do Lead", description: "Puxa o nome completo do lead cadastrado no funil", icon: <User className="w-4 h-4" /> },
   { key: "nome_contato", label: "Nome do Contato", description: "Puxa o nome do contato do WhatsApp", icon: <User className="w-4 h-4" /> },
   { key: "primeiro_nome", label: "Primeiro Nome", description: "Puxa apenas o primeiro nome do contato", icon: <User className="w-4 h-4" /> },
   { key: "telefone", label: "Telefone do Contato", description: "Puxa o número de telefone do contato", icon: <Phone className="w-4 h-4" /> },
   { key: "email", label: "E-mail do Lead", description: "Puxa o e-mail cadastrado do lead", icon: <Mail className="w-4 h-4" /> },
-  { key: "nome_empresa", label: "Nome da Empresa", description: "Puxa o nome da sua empresa", icon: <Building className="w-4 h-4" /> },
+  
+  // Dados do Funil
+  { key: "valor_lead", label: "Valor do Lead", description: "Puxa o valor monetário do lead (ex: R$ 1.500,00)", icon: <DollarSign className="w-4 h-4" /> },
+  { key: "estagio_atual", label: "Estágio Atual", description: "Puxa o nome do estágio atual do lead no funil", icon: <GitBranch className="w-4 h-4" /> },
+  { key: "nome_funil", label: "Nome do Funil", description: "Puxa o nome do funil onde o lead está", icon: <GitBranch className="w-4 h-4" /> },
+  { key: "fonte_origem", label: "Fonte de Origem", description: "Puxa a origem do lead (ex: Facebook, Google, Indicação)", icon: <Megaphone className="w-4 h-4" /> },
+  
+  // Dados Adicionais
   { key: "tags", label: "Tags do Lead", description: "Puxa as tags/etiquetas do lead", icon: <Tag className="w-4 h-4" /> },
+  { key: "notas", label: "Notas do Lead", description: "Puxa as observações/notas do lead", icon: <FileText className="w-4 h-4" /> },
   { key: "data_entrada", label: "Data de Entrada", description: "Puxa a data que o lead entrou no funil", icon: <Calendar className="w-4 h-4" /> },
+  { key: "ultimo_contato", label: "Último Contato", description: "Puxa a data do último contato com o lead", icon: <Clock className="w-4 h-4" /> },
+  
+  // Dados da Empresa
+  { key: "nome_empresa", label: "Nome da Empresa", description: "Puxa o nome da sua empresa", icon: <Building className="w-4 h-4" /> },
+  
+  // Mensagens
   { key: "ultima_mensagem", label: "Última Mensagem", description: "Puxa o texto da última mensagem recebida", icon: <MessageSquare className="w-4 h-4" /> },
+  
+  // Campos Customizados
+  { key: "campo_custom_1", label: "Campo Personalizado 1", description: "Puxa o valor do campo customizado 1 do lead", icon: <Hash className="w-4 h-4" /> },
+  { key: "campo_custom_2", label: "Campo Personalizado 2", description: "Puxa o valor do campo customizado 2 do lead", icon: <Hash className="w-4 h-4" /> },
+  { key: "campo_custom_3", label: "Campo Personalizado 3", description: "Puxa o valor do campo customizado 3 do lead", icon: <Hash className="w-4 h-4" /> },
 ];
 
 // Template specific variables for Meta API ({{1}}, {{2}}, etc.)
