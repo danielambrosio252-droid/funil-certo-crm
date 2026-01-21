@@ -6,13 +6,20 @@
 
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 
-const ctx = self;
+type WorkerSelf = {
+  postMessage: (message: unknown, transfer?: Transferable[]) => void;
+  onmessage: ((this: unknown, ev: MessageEvent<any>) => any) | null;
+};
+
+// In Vite TS builds, `self` may be typed as Window (postMessage requires targetOrigin).
+// Force worker-appropriate typing.
+const ctx = self as unknown as WorkerSelf;
 
 let ffmpeg = null;
 let loading = null;
 
-function post(msg, transfer) {
-  ctx.postMessage(msg, transfer ? { transfer } : undefined);
+function post(msg: unknown, transfer?: Transferable[]) {
+  ctx.postMessage(msg, transfer);
 }
 
 async function ensureLoaded() {
