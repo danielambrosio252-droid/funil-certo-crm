@@ -113,13 +113,13 @@ export function CreateFlowDialog({ open, onOpenChange, onSuccess }: CreateFlowDi
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col p-0">
-        <DialogHeader className="px-6 pt-6 pb-2">
-          <DialogTitle>Criar Novo Fluxo</DialogTitle>
+      <DialogContent className="max-w-md max-h-[85vh] flex flex-col p-0">
+        <DialogHeader className="px-5 pt-5 pb-3">
+          <DialogTitle className="text-lg">Criar Novo Fluxo</DialogTitle>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 px-6">
-          <div className="space-y-5 py-4">
+        <ScrollArea className="flex-1 px-5">
+          <div className="space-y-4 py-3">
             {/* Basic Info */}
             <div className="space-y-3">
               <div className="space-y-2">
@@ -302,7 +302,7 @@ export function CreateFlowDialog({ open, onOpenChange, onSuccess }: CreateFlowDi
           </div>
         </ScrollArea>
 
-        <DialogFooter className="px-6 py-4 border-t">
+        <DialogFooter className="px-5 py-3 border-t">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
