@@ -414,6 +414,65 @@ Deno.serve(async (req) => {
         console.error("Error saving message:", insertError);
       } else {
         console.log("Message saved:", messageId, "| Type:", messageType, "| Media:", mediaUrl ? "Yes" : "No");
+        
+        // ===== TRIGGER: DISPARAR FLUXOS DE AUTOMAÇÃO (KEYWORD) =====
+        if (messageType === "text" && content) {
+          try {
+            const flowExecutorUrl = `${supabaseUrl}/functions/v1/flow-executor`;
+            
+            await fetch(flowExecutorUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${supabaseServiceKey}`,
+              },
+              body: JSON.stringify({
+                trigger_type: "keyword",
+                company_id: companyId,
+                contact_id: contact.id,
+                message_content: content,
+              }),
+            });
+            
+            console.log(`[Webhook] 🚀 Trigger keyword disparado`);
+          } catch (flowError) {
+            console.error("[Webhook] Erro ao disparar fluxo:", flowError);
+          }
+        }
+        
+        // ===== VERIFICAR SE HÁ FLUXO AGUARDANDO RESPOSTA =====
+        try {
+          const { data: waitingExecution } = await supabase
+            .from("whatsapp_flow_executions")
+            .select("id")
+            .eq("company_id", companyId)
+            .eq("contact_id", contact.id)
+            .eq("status", "waiting")
+            .is("next_action_at", null)
+            .maybeSingle();
+          
+          if (waitingExecution) {
+            // Retomar execução
+            const flowExecutorUrl = `${supabaseUrl}/functions/v1/flow-executor`;
+            
+            await fetch(flowExecutorUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${supabaseServiceKey}`,
+              },
+              body: JSON.stringify({
+                trigger_type: "continue_execution",
+                company_id: companyId,
+                execution_id: waitingExecution.id,
+              }),
+            });
+            
+            console.log(`[Webhook] 🔄 Execução retomada: ${waitingExecution.id}`);
+          }
+        } catch (execError) {
+          console.error("[Webhook] Erro ao retomar execução:", execError);
+        }
       }
     }
 
