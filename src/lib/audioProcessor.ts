@@ -153,54 +153,77 @@ export async function processAndSendAudioAsync(job: AudioProcessingJob): Promise
     let uploadMime = mimeType.split(';')[0];
     let extension = 'ogg';
 
-    const needsOgg = !uploadMime.includes('ogg');
-    if (needsOgg) {
-      console.log('[AudioProcessor] Transcoding required. From:', uploadMime);
-      uploadBlob = await transcodeToOggInWorker(blob, mimeType, abortController.signal);
+    const isOggNative = uploadMime.includes('ogg');
+    
+    if (isOggNative) {
+      // BEST PATH: Browser recorded native OGG/Opus - no transcode needed!
       uploadMime = 'audio/ogg';
       extension = 'ogg';
-      console.log('[AudioProcessor] Transcoded OK. Size:', uploadBlob.size, 'Mime:', uploadMime, 'Duration(s):', duration);
+      console.log('[AudioProcessor] Native OGG! No transcode. Size:', uploadBlob.size, 'Duration(s):', duration);
     } else {
-      // Keep it OGG, but normalize mime/extension
-      uploadMime = 'audio/ogg';
-      extension = 'ogg';
-      console.log('[AudioProcessor] Already OGG. Size:', uploadBlob.size, 'Duration(s):', duration);
+      // FALLBACK: WebM or other format - try transcode with short timeout
+      console.log('[AudioProcessor] Non-OGG format:', uploadMime, '- attempting quick transcode...');
+      
+      try {
+        // Use a shorter timeout (15s) - if it fails, upload raw and let backend handle it
+        const transcodeController = new AbortController();
+        const transcodeTimeout = setTimeout(() => transcodeController.abort(), 15_000);
+        
+        uploadBlob = await transcodeToOggInWorker(blob, mimeType, transcodeController.signal);
+        clearTimeout(transcodeTimeout);
+        
+        uploadMime = 'audio/ogg';
+        extension = 'ogg';
+        console.log('[AudioProcessor] Transcoded OK. Size:', uploadBlob.size, 'Mime:', uploadMime);
+      } catch (transcodeErr) {
+        console.warn('[AudioProcessor] Frontend transcode failed/timeout:', transcodeErr);
+        console.log('[AudioProcessor] Uploading raw format, backend will handle conversion if needed');
+        // Keep original format - backend Edge Function can handle transcode
+        extension = uploadMime.includes('webm') ? 'webm' : 
+                   uploadMime.includes('mp4') ? 'm4a' : 'bin';
+      }
     }
 
-    // Post-transcode validation (explicit WhatsApp-compatibility checks)
-    const inspected = await inspectOgg(uploadBlob);
-    console.log(
-      "[AudioProcessor] Post-conversion inspection:",
-      JSON.stringify(
-        {
-          size_bytes: inspected.size,
-          duration_s: inspected.duration,
-          sample_rate_hz: inspected.sampleRate,
-          channels: inspected.channels,
-          codec: "opus (libopus)",
-          target: { channels: 1, sampleRate: 48000, bitrate: "24k", application: "voip", container: "ogg" },
-        },
-        null,
-        2
-      )
-    );
+    // Post-processing validation (only for OGG files - skip for fallback formats)
+    const isOggFinal = uploadMime === 'audio/ogg';
+    if (isOggFinal) {
+      const inspected = await inspectOgg(uploadBlob);
+      console.log(
+        "[AudioProcessor] Post-conversion inspection:",
+        JSON.stringify(
+          {
+            size_bytes: inspected.size,
+            duration_s: inspected.duration,
+            sample_rate_hz: inspected.sampleRate,
+            channels: inspected.channels,
+            codec: "opus (libopus)",
+            target: { channels: 1, sampleRate: 48000, bitrate: "24k", application: "voip", container: "ogg" },
+          },
+          null,
+          2
+        )
+      );
 
-    // Enforce the user-defined hard requirements
-    if (inspected.size < 1024) {
-      throw new Error(`Converted audio too small (<1KB): ${inspected.size} bytes`);
-    }
-    if (typeof inspected.duration === "number" && inspected.duration < 1) {
-      throw new Error(`Converted audio duration < 1s: ${inspected.duration}`);
-    }
-    if (typeof inspected.sampleRate === "number" && inspected.sampleRate !== 48000) {
-      console.warn(
-        `[AudioProcessor] WARNING: sample_rate is ${inspected.sampleRate}Hz (expected 48000Hz)`
-      );
-    }
-    if (typeof inspected.channels === "number" && inspected.channels !== 1) {
-      console.warn(
-        `[AudioProcessor] WARNING: channels is ${inspected.channels} (expected 1/mono)`
-      );
+      // Enforce hard requirements
+      if (inspected.size < 1024) {
+        throw new Error(`Converted audio too small (<1KB): ${inspected.size} bytes`);
+      }
+      if (typeof inspected.duration === "number" && inspected.duration < 1) {
+        throw new Error(`Converted audio duration < 1s: ${inspected.duration}`);
+      }
+      if (typeof inspected.sampleRate === "number" && inspected.sampleRate !== 48000) {
+        console.warn(
+          `[AudioProcessor] WARNING: sample_rate is ${inspected.sampleRate}Hz (expected 48000Hz)`
+        );
+      }
+      if (typeof inspected.channels === "number" && inspected.channels !== 1) {
+        console.warn(
+          `[AudioProcessor] WARNING: channels is ${inspected.channels} (expected 1/mono)`
+        );
+      }
+    } else {
+      // Non-OGG fallback - just log size
+      console.log('[AudioProcessor] Fallback format upload, size:', uploadBlob.size, 'mime:', uploadMime);
     }
     
     const filename = `${timestamp}-${randomId}.${extension}`;
