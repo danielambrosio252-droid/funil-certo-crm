@@ -5,11 +5,15 @@ import { WhatsAppSetup } from "@/components/whatsapp/WhatsAppSetup";
 import { WhatsAppChat } from "@/components/whatsapp/WhatsAppChat";
 import { MessageSquare, Settings } from "lucide-react";
 import { useWhatsApp } from "@/hooks/useWhatsApp";
+import { useFFmpegPreload } from "@/hooks/useFFmpegPreload";
 import { Badge } from "@/components/ui/badge";
 
 export default function WhatsApp() {
   const [activeTab, setActiveTab] = useState("chat");
   const { contacts, isConnected, whatsappMode } = useWhatsApp();
+  
+  // Pre-load FFmpeg in background for faster audio recording
+  useFFmpegPreload();
   
   const totalUnread = contacts.reduce((acc, c) => acc + (c.unread_count || 0), 0);
 

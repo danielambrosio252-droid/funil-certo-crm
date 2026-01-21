@@ -44,32 +44,41 @@ async function ensureLoaded() {
 
   ffmpeg = new FFmpeg();
   loading = (async () => {
-    const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
-    post({ type: "progress", message: "[FFMPEG] loading" });
+    // Use jsDelivr CDN which is faster and more reliable than unpkg
+    const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
+    post({ type: "progress", message: "[FFMPEG] loading from jsDelivr CDN..." });
 
     try {
-      // Using Blob URLs avoids cross-origin worker quirks and gives clearer failures.
+      // Increase timeouts significantly for slow connections
+      // Core JS is ~500KB, WASM is ~30MB
+      post({ type: "progress", message: "[FFMPEG] downloading ffmpeg-core.js..." });
       const coreURL = await withTimeout(
         toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-        25_000,
+        60_000, // 60s for core.js
         "ffmpeg coreURL download"
       );
+      
+      post({ type: "progress", message: "[FFMPEG] downloading ffmpeg-core.wasm (30MB)..." });
       const wasmURL = await withTimeout(
         toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-        25_000,
+        120_000, // 120s for WASM (30MB file)
         "ffmpeg wasmURL download"
       );
 
+      post({ type: "progress", message: "[FFMPEG] initializing WebAssembly..." });
       await withTimeout(
         ffmpeg.load({ coreURL, wasmURL }),
-        45_000,
+        90_000, // 90s for initialization
         "ffmpeg.load"
       );
 
-      post({ type: "progress", message: "[FFMPEG] loaded" });
+      post({ type: "progress", message: "[FFMPEG] ready!" });
     } catch (e: any) {
       const msg = e?.message || String(e);
       post({ type: "error", error: `[FFMPEG] load failed: ${msg}` });
+      // Reset state to allow retry
+      ffmpeg = null;
+      loading = null;
       throw e;
     }
   })();
