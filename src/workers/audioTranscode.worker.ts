@@ -44,35 +44,43 @@ async function ensureLoaded() {
 
   ffmpeg = new FFmpeg();
   loading = (async () => {
-    // Use jsDelivr CDN which is faster and more reliable than unpkg
-    const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
-    post({ type: "progress", message: "[FFMPEG] loading from jsDelivr CDN..." });
-
     try {
-      // Increase timeouts significantly for slow connections
-      // Core JS is ~500KB, WASM is ~30MB
-      post({ type: "progress", message: "[FFMPEG] downloading ffmpeg-core.js..." });
+      // Prefer local bundled core (avoids CDN blockers / corporate proxies)
+      post({ type: "progress", message: "[FFMPEG] loading bundled core..." });
+
+      try {
+        const coreURL = new URL(
+          "@ffmpeg/core/dist/esm/ffmpeg-core.js",
+          import.meta.url
+        ).toString();
+        const wasmURL = new URL(
+          "@ffmpeg/core/dist/esm/ffmpeg-core.wasm",
+          import.meta.url
+        ).toString();
+
+        await withTimeout(ffmpeg.load({ coreURL, wasmURL }), 90_000, "ffmpeg.load (bundled)");
+        post({ type: "progress", message: "[FFMPEG] ready! (bundled)" });
+        return;
+      } catch (e) {
+        post({ type: "progress", message: "[FFMPEG] bundled load failed; falling back to CDN..." });
+      }
+
+      // Fallback: CDN via Blob URLs
+      const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
+      post({ type: "progress", message: "[FFMPEG] downloading from CDN..." });
+
       const coreURL = await withTimeout(
         toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-        60_000, // 60s for core.js
+        60_000,
         "ffmpeg coreURL download"
       );
-      
-      post({ type: "progress", message: "[FFMPEG] downloading ffmpeg-core.wasm (30MB)..." });
       const wasmURL = await withTimeout(
         toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-        120_000, // 120s for WASM (30MB file)
+        180_000,
         "ffmpeg wasmURL download"
       );
-
-      post({ type: "progress", message: "[FFMPEG] initializing WebAssembly..." });
-      await withTimeout(
-        ffmpeg.load({ coreURL, wasmURL }),
-        90_000, // 90s for initialization
-        "ffmpeg.load"
-      );
-
-      post({ type: "progress", message: "[FFMPEG] ready!" });
+      await withTimeout(ffmpeg.load({ coreURL, wasmURL }), 90_000, "ffmpeg.load (cdn)");
+      post({ type: "progress", message: "[FFMPEG] ready! (cdn)" });
     } catch (e: any) {
       const msg = e?.message || String(e);
       post({ type: "error", error: `[FFMPEG] load failed: ${msg}` });
