@@ -152,20 +152,41 @@ function BaseNode({
 function getConfigPreview(type: string, config: Record<string, unknown>): string {
   switch (type) {
     case "message":
-      return config.message ? String(config.message).slice(0, 30) + "..." : "Clique para configurar";
+      if (config.use_template && config.template_name) {
+        return `Template: ${config.template_name}`;
+      }
+      return config.message ? String(config.message).slice(0, 25) + "..." : "Clique para configurar";
     case "template":
       return config.template_name ? String(config.template_name) : "Selecionar template";
     case "media":
-      return config.media_type ? String(config.media_type) : "Selecionar mídia";
+      if (config.media_url) {
+        const typeLabel = { image: "Imagem", video: "Vídeo", audio: "Áudio", document: "Documento" }[config.media_type as string] || "Mídia";
+        return `${typeLabel} configurada`;
+      }
+      return "Clique para configurar";
     case "delay":
       if (config.delay_value && config.delay_unit) {
-        return `${config.delay_value} ${config.delay_unit}`;
+        const unitLabel = { seconds: "seg", minutes: "min", hours: "h", days: "dias" }[config.delay_unit as string] || "";
+        const smartLabel = config.smart_delay ? " (inteligente)" : "";
+        return `${config.delay_value} ${unitLabel}${smartLabel}`;
       }
       return "Definir tempo";
     case "wait_response":
-      return config.timeout ? `Timeout: ${config.timeout}h` : "Sem timeout";
+      if (config.has_timeout && config.timeout) {
+        const unitLabel = { minutes: "min", hours: "h", days: "dias" }[config.timeout_unit as string] || "h";
+        return `Timeout: ${config.timeout} ${unitLabel}`;
+      }
+      return config.keywords ? `Keywords: ${String(config.keywords).slice(0, 15)}...` : "Aguardar qualquer resposta";
     case "condition":
-      return config.field ? `Se ${config.field} ${config.operator}...` : "Definir condição";
+      if (config.field && config.operator) {
+        const fieldLabel = { last_message: "Msg", contact_name: "Nome", tag: "Tag", stage: "Etapa" }[config.field as string] || config.field;
+        return `Se ${fieldLabel} ${config.operator}`;
+      }
+      return "Definir condição";
+    case "end":
+      if (config.add_tag) return `Tag: ${config.tag_name || "..."}`;
+      if (config.move_stage) return "Mover etapa";
+      return "Encerrar fluxo";
     default:
       return "";
   }
