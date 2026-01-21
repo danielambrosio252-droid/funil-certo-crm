@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useWhatsAppFlows, TriggerType, FlowTriggerConfig, FlowScheduleConfig } from "@/hooks/useWhatsAppFlows";
 import { useFunnels, useFunnelStages } from "@/hooks/useFunnels";
 import { UserPlus, MessageSquare, Calendar, GitBranch } from "lucide-react";
@@ -113,194 +113,196 @@ export function CreateFlowDialog({ open, onOpenChange, onSuccess }: CreateFlowDi
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
+      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col p-0">
+        <DialogHeader className="px-6 pt-6 pb-2">
           <DialogTitle>Criar Novo Fluxo</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
-          {/* Basic Info */}
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Nome do Fluxo *</Label>
-              <Input
-                placeholder="Ex: Boas-vindas Novos Leads"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Descrição</Label>
-              <Textarea
-                placeholder="Descreva o objetivo deste fluxo..."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={2}
-              />
-            </div>
-          </div>
-
-          {/* Trigger Type */}
-          <div className="space-y-3">
-            <Label>Gatilho (Quando o fluxo inicia)</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {triggerTypes.map((trigger) => {
-                const Icon = trigger.icon;
-                const isSelected = triggerType === trigger.value;
-                return (
-                  <button
-                    key={trigger.value}
-                    type="button"
-                    onClick={() => {
-                      setTriggerType(trigger.value as TriggerType);
-                      setTriggerConfig({});
-                    }}
-                    className={`p-3 rounded-lg border-2 text-left transition-all ${
-                      isSelected
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <Icon className="w-4 h-4 text-primary" />
-                      <span className="text-sm font-medium">{trigger.label}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{trigger.description}</p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Trigger Config */}
-          {triggerType === "new_lead" && (
-            <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
+        <ScrollArea className="flex-1 px-6">
+          <div className="space-y-5 py-4">
+            {/* Basic Info */}
+            <div className="space-y-3">
               <div className="space-y-2">
-                <Label>Funil (opcional)</Label>
-                <Select
-                  value={triggerConfig.funnel_id || "all"}
-                  onValueChange={(value) => updateTriggerConfig("funnel_id", value === "all" ? undefined : value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Todos os funis" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos os funis</SelectItem>
-                    {funnels.map((funnel) => (
-                      <SelectItem key={funnel.id} value={funnel.id}>
-                        {funnel.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          )}
-
-          {triggerType === "keyword" && (
-            <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
-              <div className="space-y-2">
-                <Label>Palavras-chave</Label>
+                <Label>Nome do Fluxo *</Label>
                 <Input
-                  placeholder="oi, olá, quero saber mais"
-                  value={(triggerConfig.keywords || []).join(", ")}
-                  onChange={(e) => updateTriggerConfig("keywords", e.target.value.split(",").map((k) => k.trim()))}
+                  placeholder="Ex: Boas-vindas Novos Leads"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                 />
-                <p className="text-xs text-muted-foreground">Separe por vírgula</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Descrição</Label>
+                <Textarea
+                  placeholder="Descreva o objetivo deste fluxo..."
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={2}
+                />
               </div>
             </div>
-          )}
 
-          {triggerType === "stage_change" && (
-            <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
-              <div className="space-y-2">
-                <Label>Funil</Label>
-                <Select
-                  value={triggerConfig.funnel_id || ""}
-                  onValueChange={(value) => {
-                    updateTriggerConfig("funnel_id", value);
-                    updateTriggerConfig("stage_id", undefined);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione o funil" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {funnels.map((funnel) => (
-                      <SelectItem key={funnel.id} value={funnel.id}>
-                        {funnel.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            {/* Trigger Type */}
+            <div className="space-y-3">
+              <Label>Gatilho (Quando o fluxo inicia)</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {triggerTypes.map((trigger) => {
+                  const Icon = trigger.icon;
+                  const isSelected = triggerType === trigger.value;
+                  return (
+                    <button
+                      key={trigger.value}
+                      type="button"
+                      onClick={() => {
+                        setTriggerType(trigger.value as TriggerType);
+                        setTriggerConfig({});
+                      }}
+                      className={`p-3 rounded-lg border-2 text-left transition-all ${
+                        isSelected
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <Icon className="w-4 h-4 text-primary" />
+                        <span className="text-sm font-medium">{trigger.label}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{trigger.description}</p>
+                    </button>
+                  );
+                })}
               </div>
-              {triggerConfig.funnel_id && (
+            </div>
+
+            {/* Trigger Config */}
+            {triggerType === "new_lead" && (
+              <div className="space-y-3 p-3 bg-muted/50 rounded-lg">
                 <div className="space-y-2">
-                  <Label>Etapa de Destino</Label>
+                  <Label className="text-sm">Funil (opcional)</Label>
                   <Select
-                    value={triggerConfig.stage_id || ""}
-                    onValueChange={(value) => updateTriggerConfig("stage_id", value)}
+                    value={triggerConfig.funnel_id || "all"}
+                    onValueChange={(value) => updateTriggerConfig("funnel_id", value === "all" ? undefined : value)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Quando entrar nesta etapa" />
+                      <SelectValue placeholder="Todos os funis" />
                     </SelectTrigger>
                     <SelectContent>
-                      {stages.map((stage) => (
-                        <SelectItem key={stage.id} value={stage.id}>
-                          {stage.name}
+                      <SelectItem value="all">Todos os funis</SelectItem>
+                      {funnels.map((funnel) => (
+                        <SelectItem key={funnel.id} value={funnel.id}>
+                          {funnel.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
 
-          {/* Schedule Config (always shown) */}
-          <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
-            <Label className="text-sm font-medium">Horários Permitidos</Label>
-            <div className="flex flex-wrap gap-2">
-              {weekDays.map((day) => (
-                <button
-                  key={day.value}
-                  type="button"
-                  onClick={() => toggleDay(day.value)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                    (scheduleConfig.days || []).includes(day.value)
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground hover:bg-muted/80"
-                  }`}
-                >
-                  {day.label}
-                </button>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-xs">Início</Label>
-                <Input
-                  type="time"
-                  value={scheduleConfig.start_time || "09:00"}
-                  onChange={(e) => setScheduleConfig((prev) => ({ ...prev, start_time: e.target.value }))}
-                />
+            {triggerType === "keyword" && (
+              <div className="space-y-3 p-3 bg-muted/50 rounded-lg">
+                <div className="space-y-2">
+                  <Label className="text-sm">Palavras-chave</Label>
+                  <Input
+                    placeholder="oi, olá, quero saber mais"
+                    value={(triggerConfig.keywords || []).join(", ")}
+                    onChange={(e) => updateTriggerConfig("keywords", e.target.value.split(",").map((k) => k.trim()))}
+                  />
+                  <p className="text-xs text-muted-foreground">Separe por vírgula</p>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label className="text-xs">Fim</Label>
-                <Input
-                  type="time"
-                  value={scheduleConfig.end_time || "18:00"}
-                  onChange={(e) => setScheduleConfig((prev) => ({ ...prev, end_time: e.target.value }))}
-                />
+            )}
+
+            {triggerType === "stage_change" && (
+              <div className="space-y-3 p-3 bg-muted/50 rounded-lg">
+                <div className="space-y-2">
+                  <Label className="text-sm">Funil</Label>
+                  <Select
+                    value={triggerConfig.funnel_id || ""}
+                    onValueChange={(value) => {
+                      updateTriggerConfig("funnel_id", value);
+                      updateTriggerConfig("stage_id", undefined);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione o funil" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {funnels.map((funnel) => (
+                        <SelectItem key={funnel.id} value={funnel.id}>
+                          {funnel.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {triggerConfig.funnel_id && (
+                  <div className="space-y-2">
+                    <Label className="text-sm">Etapa de Destino</Label>
+                    <Select
+                      value={triggerConfig.stage_id || ""}
+                      onValueChange={(value) => updateTriggerConfig("stage_id", value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Quando entrar nesta etapa" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {stages.map((stage) => (
+                          <SelectItem key={stage.id} value={stage.id}>
+                            {stage.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
+            )}
+
+            {/* Schedule Config (always shown) */}
+            <div className="space-y-3 p-3 bg-muted/50 rounded-lg">
+              <Label className="text-sm font-medium">Horários Permitidos</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {weekDays.map((day) => (
+                  <button
+                    key={day.value}
+                    type="button"
+                    onClick={() => toggleDay(day.value)}
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                      (scheduleConfig.days || []).includes(day.value)
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    }`}
+                  >
+                    {day.label}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Início</Label>
+                  <Input
+                    type="time"
+                    value={scheduleConfig.start_time || "09:00"}
+                    onChange={(e) => setScheduleConfig((prev) => ({ ...prev, start_time: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Fim</Label>
+                  <Input
+                    type="time"
+                    value={scheduleConfig.end_time || "18:00"}
+                    onChange={(e) => setScheduleConfig((prev) => ({ ...prev, end_time: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                O fluxo só será executado nesses horários
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground">
-              O fluxo só será executado nesses horários
-            </p>
           </div>
-        </div>
+        </ScrollArea>
 
-        <DialogFooter>
+        <DialogFooter className="px-6 py-4 border-t">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
