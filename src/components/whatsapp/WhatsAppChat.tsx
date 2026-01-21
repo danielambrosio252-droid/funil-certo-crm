@@ -400,6 +400,7 @@ export function WhatsAppChat() {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "pending":
+      case "processing":
         return <Clock className="w-3 h-3 text-white/60" />;
       case "sent":
         return <Check className="w-3 h-3 text-white/60" />;
