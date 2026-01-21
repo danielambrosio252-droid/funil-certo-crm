@@ -10,7 +10,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -20,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { VariablePicker, DEFAULT_VARIABLES } from "@/components/ui/variable-picker";
 import { useWhatsAppTemplates } from "@/hooks/useWhatsAppTemplates";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -190,15 +190,14 @@ function MessageConfig({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>Mensagem</Label>
-            <Textarea
-              placeholder="Digite a mensagem que será enviada..."
+            <VariablePicker
               value={(config.message as string) || ""}
-              onChange={(e) => updateConfig("message", e.target.value)}
+              onChange={(val) => updateConfig("message", val)}
+              variables={DEFAULT_VARIABLES}
+              placeholder="Digite a mensagem que será enviada..."
+              multiline
               rows={4}
             />
-            <p className="text-xs text-muted-foreground">
-              Use {"{nome}"} para incluir o nome do contato
-            </p>
           </div>
 
           {/* Quick Reply Buttons */}
@@ -475,10 +474,12 @@ function MediaConfig({ config, updateConfig }: { config: Record<string, unknown>
 
       <div className="space-y-2">
         <Label>Legenda (opcional)</Label>
-        <Textarea
-          placeholder="Legenda da mídia..."
+        <VariablePicker
           value={(config.caption as string) || ""}
-          onChange={(e) => updateConfig("caption", e.target.value)}
+          onChange={(val) => updateConfig("caption", val)}
+          variables={DEFAULT_VARIABLES}
+          placeholder="Legenda da mídia..."
+          multiline
           rows={2}
         />
       </div>

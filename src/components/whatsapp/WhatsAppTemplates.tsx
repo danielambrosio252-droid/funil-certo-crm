@@ -4,12 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { VariablePicker, DEFAULT_VARIABLES, TEMPLATE_VARIABLES } from "@/components/ui/variable-picker";
 import { 
   Plus, 
   RefreshCw, 
@@ -162,29 +162,32 @@ function CreateTemplateDialog({ open, onOpenChange, onSubmit, loading }: CreateT
 
           <div>
             <Label htmlFor="header">Cabeçalho (opcional)</Label>
-            <Input
-              id="header"
-              value={headerText}
-              onChange={(e) => setHeaderText(e.target.value)}
-              placeholder="Título da mensagem"
-              className="mt-1"
-              maxLength={60}
-            />
+            <div className="mt-1">
+              <VariablePicker
+                value={headerText}
+                onChange={setHeaderText}
+                variables={TEMPLATE_VARIABLES}
+                placeholder="Título da mensagem"
+                useDoubleBraces={true}
+                maxLength={60}
+              />
+            </div>
           </div>
 
           <div>
             <Label htmlFor="body">Corpo da Mensagem *</Label>
-            <Textarea
-              id="body"
-              value={bodyText}
-              onChange={(e) => setBodyText(e.target.value)}
-              placeholder="Olá {{1}}! Seu pedido {{2}} foi confirmado."
-              className="mt-1 min-h-[100px]"
-              maxLength={1024}
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              Use {"{{1}}"}, {"{{2}}"}, etc. para variáveis dinâmicas
-            </p>
+            <div className="mt-1">
+              <VariablePicker
+                value={bodyText}
+                onChange={setBodyText}
+                variables={TEMPLATE_VARIABLES}
+                placeholder="Olá {{1}}! Seu pedido {{2}} foi confirmado."
+                multiline
+                rows={4}
+                useDoubleBraces={true}
+                maxLength={1024}
+              />
+            </div>
           </div>
 
           <div>
