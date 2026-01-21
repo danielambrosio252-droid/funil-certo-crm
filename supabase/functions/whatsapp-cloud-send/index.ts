@@ -14,6 +14,7 @@ interface SendMessagePayload {
   media_url?: string;
   media_filename?: string;
   media_caption?: string;
+  audio_duration?: number;
 }
 
 Deno.serve(async (req) => {
@@ -247,7 +248,35 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Send via Meta Cloud API
+  // For AUDIO: Return 202 immediately, process in background
+  if (messageType === "audio" && payload.media_url) {
+    console.log("[AUDIO] Received audio request, returning 202 immediately");
+    console.log("[AUDIO] Will process asynchronously: ", payload.media_url);
+    
+    // Start async processing without awaiting
+    processAudioAsync(
+      supabase,
+      company.whatsapp_phone_number_id,
+      cloudAccessToken,
+      recipientPhone,
+      payload.media_url,
+      messageData.id,
+      messageInsert.contact_id as string | undefined
+    );
+    
+    // Return 202 Accepted immediately
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        message_id: messageData.id,
+        status: "processing",
+        message: "Audio queued for delivery"
+      }),
+      { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // Send via Meta Cloud API (for non-audio messages - synchronous)
   try {
     const sendUrl = `https://graph.facebook.com/v18.0/${company.whatsapp_phone_number_id}/messages`;
     
@@ -259,73 +288,8 @@ Deno.serve(async (req) => {
 
     if (messageType === "text") {
       metaPayload.text = { body: payload.content };
-    } else if (messageType === "audio" && payload.media_url) {
-      // AUDIO: Requires upload to Meta's /media endpoint first, then send with media_id
-      console.log("[AUDIO] Iniciando processamento de áudio...");
-      console.log("[AUDIO] URL do arquivo:", payload.media_url);
-      
-      // Step 1: Download audio from Supabase Storage
-      console.log("[AUDIO] Baixando arquivo do storage...");
-      const audioResponse = await fetch(payload.media_url);
-      
-      if (!audioResponse.ok) {
-        console.error("[AUDIO] Falha ao baixar arquivo:", audioResponse.status);
-        throw new Error("Failed to download audio file from storage");
-      }
-      
-      const audioBuffer = await audioResponse.arrayBuffer();
-      console.log("[AUDIO] Arquivo baixado, tamanho:", audioBuffer.byteLength, "bytes");
-      
-      // Step 2: Upload to Meta's /media endpoint
-      console.log("[AUDIO] Fazendo upload para Meta /media...");
-      const mediaUploadUrl = `https://graph.facebook.com/v18.0/${company.whatsapp_phone_number_id}/media`;
-      
-      // Create FormData for multipart upload
-      const formData = new FormData();
-      const audioBlob = new Blob([audioBuffer], { type: "audio/ogg" });
-      formData.append("file", audioBlob, "audio.ogg");
-      formData.append("type", "audio/ogg");
-      formData.append("messaging_product", "whatsapp");
-      
-      const uploadResponse = await fetch(mediaUploadUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${cloudAccessToken}`,
-        },
-        body: formData,
-      });
-      
-      const uploadResult = await uploadResponse.json();
-      console.log("[AUDIO] Resposta do upload:", JSON.stringify(uploadResult), "Status:", uploadResponse.status);
-      
-      if (!uploadResponse.ok || !uploadResult.id) {
-        console.error("[AUDIO] Falha no upload para Meta:", uploadResult);
-        
-        await supabase
-          .from("whatsapp_messages")
-          .update({ status: "failed" })
-          .eq("id", messageData.id);
-        
-        return new Response(
-          JSON.stringify({ 
-            error: uploadResult.error?.message || "Failed to upload audio to WhatsApp",
-            details: uploadResult,
-            message_id: messageData.id 
-          }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      
-      const mediaId = uploadResult.id;
-      console.log("[AUDIO] Upload concluído com sucesso, media_id:", mediaId);
-      
-      // Step 3: Build message payload with media_id (not link!)
-      metaPayload.audio = { id: mediaId };
-      console.log("[AUDIO] Payload preparado para envio com media_id");
-      
     } else {
-      // For other media messages (image, video, document), use the public URL directly
-      // Meta accepts public HTTPS URLs for these types
+      // For image, video, document - use public URL directly (link method)
       const mediaContent: Record<string, unknown> = {
         link: payload.media_url,
       };
@@ -374,10 +338,6 @@ Deno.serve(async (req) => {
 
     const metaMessageId = metaResult.messages?.[0]?.id;
     
-    if (messageType === "audio") {
-      console.log("[AUDIO] Mensagem enviada com sucesso! meta_message_id:", metaMessageId);
-    }
-    
     await supabase
       .from("whatsapp_messages")
       .update({ 
@@ -403,10 +363,6 @@ Deno.serve(async (req) => {
     );
   } catch (err) {
     console.error("Error sending to Meta API:", err);
-    
-    if (messageType === "audio") {
-      console.error("[AUDIO] Erro crítico no processamento de áudio:", err);
-    }
 
     await supabase
       .from("whatsapp_messages")
@@ -419,3 +375,136 @@ Deno.serve(async (req) => {
     );
   }
 });
+
+/**
+ * Async audio processing function - runs in background after 202 response
+ * Downloads audio, uploads to Meta /media, sends message
+ */
+async function processAudioAsync(
+  supabase: any,
+  phoneNumberId: string,
+  accessToken: string,
+  recipientPhone: string,
+  mediaUrl: string,
+  messageId: string,
+  contactId?: string
+): Promise<void> {
+  try {
+    console.log("[AUDIO-ASYNC] Starting background processing for message:", messageId);
+    
+    // Step 1: Download audio from Supabase Storage
+    console.log("[AUDIO-ASYNC] Downloading from:", mediaUrl);
+    const audioResponse = await fetch(mediaUrl);
+    
+    if (!audioResponse.ok) {
+      console.error("[AUDIO-ASYNC] Download failed:", audioResponse.status);
+      throw new Error("Failed to download audio file");
+    }
+    
+    const audioBuffer = await audioResponse.arrayBuffer();
+    console.log("[AUDIO-ASYNC] Downloaded size:", audioBuffer.byteLength, "bytes");
+    
+    // Determine MIME type from URL or default to audio/ogg
+    let mimeType = "audio/ogg";
+    if (mediaUrl.includes(".webm")) {
+      mimeType = "audio/webm";
+    } else if (mediaUrl.includes(".m4a") || mediaUrl.includes(".mp4")) {
+      mimeType = "audio/mp4";
+    }
+    console.log("[AUDIO-ASYNC] Detected MIME type:", mimeType);
+    
+    // Step 2: Upload to Meta's /media endpoint
+    console.log("[AUDIO-ASYNC] Uploading to Meta /media endpoint...");
+    const mediaUploadUrl = `https://graph.facebook.com/v18.0/${phoneNumberId}/media`;
+    
+    const formData = new FormData();
+    const audioBlob = new Blob([audioBuffer], { type: mimeType });
+    const filename = mimeType === "audio/ogg" ? "audio.ogg" : 
+                     mimeType === "audio/webm" ? "audio.webm" : "audio.m4a";
+    formData.append("file", audioBlob, filename);
+    formData.append("type", mimeType);
+    formData.append("messaging_product", "whatsapp");
+    
+    const uploadResponse = await fetch(mediaUploadUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: formData,
+    });
+    
+    const uploadResult = await uploadResponse.json();
+    console.log("[AUDIO-ASYNC] Upload response:", JSON.stringify(uploadResult), "Status:", uploadResponse.status);
+    
+    if (!uploadResponse.ok || !uploadResult.id) {
+      console.error("[AUDIO-ASYNC] Meta upload failed:", uploadResult);
+      throw new Error(uploadResult.error?.message || "Failed to upload audio to Meta");
+    }
+    
+    const mediaId = uploadResult.id;
+    console.log("[AUDIO-ASYNC] Media uploaded successfully, ID:", mediaId);
+    
+    // Step 3: Send message using media_id
+    console.log("[AUDIO-ASYNC] Sending audio message...");
+    const sendUrl = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`;
+    
+    const metaPayload = {
+      messaging_product: "whatsapp",
+      to: recipientPhone,
+      type: "audio",
+      audio: { id: mediaId }
+    };
+    
+    console.log("[AUDIO-ASYNC] Send payload:", JSON.stringify(metaPayload));
+    
+    const sendResponse = await fetch(sendUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(metaPayload),
+    });
+    
+    const sendResult = await sendResponse.json();
+    console.log("[AUDIO-ASYNC] Send response:", JSON.stringify(sendResult), "Status:", sendResponse.status);
+    
+    if (!sendResponse.ok) {
+      console.error("[AUDIO-ASYNC] Send failed:", sendResult);
+      throw new Error(sendResult.error?.message || "Failed to send audio message");
+    }
+    
+    const metaMessageId = sendResult.messages?.[0]?.id;
+    console.log("[AUDIO-ASYNC] SUCCESS! Meta message ID:", metaMessageId);
+    
+    // Update message status to sent
+    await supabase
+      .from("whatsapp_messages")
+      .update({ 
+        status: "sent",
+        message_id: metaMessageId 
+      })
+      .eq("id", messageId);
+    
+    // Update contact last_message_at
+    if (contactId) {
+      await supabase
+        .from("whatsapp_contacts")
+        .update({ last_message_at: new Date().toISOString() })
+        .eq("id", contactId);
+    }
+    
+    console.log("[AUDIO-ASYNC] Message status updated to sent");
+    
+  } catch (error) {
+    console.error("[AUDIO-ASYNC] Processing failed:", error);
+    
+    // Update message status to failed
+    await supabase
+      .from("whatsapp_messages")
+      .update({ status: "failed" })
+      .eq("id", messageId);
+    
+    console.log("[AUDIO-ASYNC] Message status updated to failed");
+  }
+}
