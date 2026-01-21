@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { preloadAudioTranscoder } from "@/lib/audioProcessor";
 
 /**
  * Hook to pre-load FFmpeg WebAssembly in background
@@ -17,28 +18,10 @@ export function useFFmpegPreload() {
     const timeoutId = setTimeout(async () => {
       try {
         console.log("[FFmpegPreload] Starting background preload...");
-        
-        const { default: WorkerCtor } = await import("@/workers/audioTranscode.worker?worker");
-        const worker = new WorkerCtor();
-        workerRef.current = worker;
 
-        worker.onmessage = (evt: MessageEvent) => {
-          const msg = evt.data;
-          if (msg?.type === "progress") {
-            console.log("[FFmpegPreload]", msg.message);
-          }
-          if (msg?.type === "error") {
-            console.warn("[FFmpegPreload] Preload warning:", msg.error);
-            // Don't terminate - let it retry on actual use
-          }
-          // If loaded successfully, keep worker alive for faster first use
-          if (msg?.message?.includes("ready")) {
-            console.log("[FFmpegPreload] FFmpeg cached and ready!");
-          }
-        };
-
-        // Trigger load without transcoding (avoids errors and heavy CPU)
-        worker.postMessage({ type: "preload" });
+        // Use the shared worker used by the audio pipeline (prevents duplicate downloads/timeouts)
+        await preloadAudioTranscoder();
+        console.log("[FFmpegPreload] FFmpeg cached and ready!");
 
       } catch (error) {
         console.warn("[FFmpegPreload] Background preload failed (non-critical):", error);
@@ -47,12 +30,6 @@ export function useFFmpegPreload() {
 
     return () => {
       clearTimeout(timeoutId);
-      // This worker is only for preloading; safe to terminate.
-      try {
-        workerRef.current?.terminate();
-      } catch {
-        // ignore
-      }
       workerRef.current = null;
     };
   }, []);

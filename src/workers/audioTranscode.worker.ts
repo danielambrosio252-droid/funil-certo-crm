@@ -45,22 +45,41 @@ async function ensureLoaded() {
   ffmpeg = new FFmpeg();
   loading = (async () => {
     try {
-      // Use jsDelivr CDN which is faster and more reliable
-      const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
-      post({ type: "progress", message: "[FFMPEG] downloading from CDN..." });
+      // CDN fallback (some networks throttle/block a specific CDN)
+      const baseURLs = [
+        "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm",
+        "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm",
+      ];
 
-      const coreURL = await withTimeout(
-        toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-        60_000,
-        "ffmpeg coreURL download"
-      );
-      const wasmURL = await withTimeout(
-        toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-        180_000,
-        "ffmpeg wasmURL download"
-      );
-      await withTimeout(ffmpeg.load({ coreURL, wasmURL }), 90_000, "ffmpeg.load");
-      post({ type: "progress", message: "[FFMPEG] ready!" });
+      let lastError: any = null;
+      for (const baseURL of baseURLs) {
+        try {
+          post({ type: "progress", message: `[FFMPEG] downloading from: ${baseURL}` });
+
+          const coreURL = await withTimeout(
+            toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+            120_000,
+            "ffmpeg coreURL download"
+          );
+          const wasmURL = await withTimeout(
+            toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+            240_000,
+            "ffmpeg wasmURL download"
+          );
+          // Some devices take a while to initialize WASM; be generous.
+          await withTimeout(ffmpeg.load({ coreURL, wasmURL }), 180_000, "ffmpeg.load");
+          post({ type: "progress", message: "[FFMPEG] ready!" });
+          return;
+        } catch (e: any) {
+          lastError = e;
+          post({
+            type: "progress",
+            message: `[FFMPEG] failed from ${baseURL}: ${e?.message || String(e)}`,
+          });
+        }
+      }
+
+      throw lastError || new Error("FFmpeg load failed (all CDNs)");
     } catch (e: any) {
       const msg = e?.message || String(e);
       post({ type: "error", error: `[FFMPEG] load failed: ${msg}` });
@@ -103,7 +122,7 @@ async function transcode(inputArrayBuffer, originalMimeType) {
   post({
     type: "progress",
     message:
-      "[FFMPEG] params: codec=libopus container=ogg ac=1 ar=16000 b:a=24k",
+      "[FFMPEG] params: codec=libopus container=ogg ac=1 ar=48000 b:a=32k",
   });
   await ffmpeg.exec([
     "-i",
@@ -112,11 +131,11 @@ async function transcode(inputArrayBuffer, originalMimeType) {
     "-ac",
     "1",                // Mono
     "-ar",
-    "16000",            // 16kHz - WhatsApp voice note standard
+    "48000",            // Opus standard sample rate (Meta scrutiny is stricter)
     "-c:a",
     "libopus",          // Opus codec
     "-b:a",
-    "24k",              // 24kbps bitrate
+    "32k",              // Slightly higher bitrate improves acceptance
     "-vbr",
     "on",               // Variable bitrate
     "-compression_level",

@@ -6,6 +6,159 @@
 
 import { supabase } from "@/integrations/supabase/client";
 
+// -----------------------------
+// Shared FFmpeg Worker (reused)
+// -----------------------------
+// Creating a new worker per audio forces FFmpeg to download/init repeatedly and frequently hits timeouts.
+// We keep a single worker alive for the whole session and serialize transcode jobs.
+let sharedWorker: Worker | null = null;
+let ffmpegReady = false;
+
+let preloadPromise: Promise<void> | null = null;
+let preloadResolve: (() => void) | null = null;
+let preloadReject: ((e: Error) => void) | null = null;
+let preloadTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+type ActiveJob = {
+  resolve: (b: Blob) => void;
+  reject: (e: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
+  signal?: AbortSignal;
+  abortHandler?: () => void;
+};
+let activeJob: ActiveJob | null = null;
+
+let transcodeQueue: Promise<unknown> = Promise.resolve();
+
+function ensureSharedWorker(): Worker {
+  if (sharedWorker) return sharedWorker;
+
+  // Lazy import is not allowed in sync context; worker is created by bundler import below.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // NOTE: Vite supports worker constructor via dynamic import, but we need it here.
+  // We'll create worker in an async path (preload/transcode) and store it.
+  throw new Error("Shared worker not initialized");
+}
+
+async function getOrCreateWorker(): Promise<Worker> {
+  if (sharedWorker) return sharedWorker;
+  const { default: WorkerCtor } = await import("@/workers/audioTranscode.worker?worker");
+  const worker = new WorkerCtor();
+  sharedWorker = worker;
+
+  worker.onmessage = (evt: MessageEvent) => {
+    const msg = evt.data;
+
+    if (msg?.type === "progress") {
+      console.log("[AudioProcessor][FFMPEG-WORKER]", msg.message);
+      if (!ffmpegReady && typeof msg.message === "string" && msg.message.toLowerCase().includes("ready")) {
+        ffmpegReady = true;
+        if (preloadTimeoutId) {
+          clearTimeout(preloadTimeoutId);
+          preloadTimeoutId = null;
+        }
+        preloadResolve?.();
+        preloadResolve = null;
+        preloadReject = null;
+        preloadPromise = null;
+      }
+      return;
+    }
+
+    if (msg?.type === "result") {
+      if (!activeJob) return;
+      const job = activeJob;
+      activeJob = null;
+      clearTimeout(job.timeoutId);
+      job.abortHandler?.();
+      job.resolve(new Blob([msg.oggArrayBuffer], { type: "audio/ogg" }));
+      return;
+    }
+
+    if (msg?.type === "error") {
+      const err = new Error(msg.error || "FFmpeg worker failed");
+
+      // If a transcode is running, fail it; otherwise, fail preload if waiting.
+      if (activeJob) {
+        const job = activeJob;
+        activeJob = null;
+        clearTimeout(job.timeoutId);
+        job.abortHandler?.();
+        job.reject(err);
+        return;
+      }
+
+      if (!ffmpegReady && preloadReject) {
+        if (preloadTimeoutId) {
+          clearTimeout(preloadTimeoutId);
+          preloadTimeoutId = null;
+        }
+        preloadReject(err);
+        preloadResolve = null;
+        preloadReject = null;
+        preloadPromise = null;
+      }
+    }
+  };
+
+  worker.onerror = (err) => {
+    const e = err instanceof Error ? err : new Error("FFmpeg worker error");
+    if (activeJob) {
+      const job = activeJob;
+      activeJob = null;
+      clearTimeout(job.timeoutId);
+      job.abortHandler?.();
+      job.reject(e);
+    }
+    if (!ffmpegReady && preloadReject) {
+      if (preloadTimeoutId) {
+        clearTimeout(preloadTimeoutId);
+        preloadTimeoutId = null;
+      }
+      preloadReject(e);
+      preloadResolve = null;
+      preloadReject = null;
+      preloadPromise = null;
+    }
+  };
+
+  return worker;
+}
+
+export async function preloadAudioTranscoder(): Promise<void> {
+  if (ffmpegReady) return;
+  if (preloadPromise) return preloadPromise;
+
+  const worker = await getOrCreateWorker();
+
+  preloadPromise = new Promise<void>((resolve, reject) => {
+    preloadResolve = resolve;
+    preloadReject = reject;
+
+    preloadTimeoutId = setTimeout(() => {
+      preloadTimeoutId = null;
+      preloadResolve = null;
+      preloadReject = null;
+      preloadPromise = null;
+      reject(new Error("FFmpeg preload timeout"));
+    }, 240_000);
+
+    // Trigger load without transcoding
+    worker.postMessage({ type: "preload" });
+  });
+
+  return preloadPromise;
+}
+
+function enqueueTranscode<T>(fn: () => Promise<T>): Promise<T> {
+  const next = transcodeQueue.then(fn, fn);
+  transcodeQueue = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
+}
+
 async function inspectOgg(blob: Blob): Promise<{
   size: number;
   duration?: number;
@@ -45,72 +198,52 @@ async function transcodeToOggInWorker(
   originalMimeType: string,
   signal?: AbortSignal
 ): Promise<Blob> {
-  // Run FFmpeg in a Web Worker to avoid blocking UI thread.
-  const { default: WorkerCtor } = await import("@/workers/audioTranscode.worker?worker");
-  const worker = new WorkerCtor();
+  return enqueueTranscode(async () => {
+    const worker = await getOrCreateWorker();
+    await preloadAudioTranscoder();
 
-  const cleanup = () => {
-    try {
-      worker.terminate();
-    } catch {
-      // ignore
-    }
-  };
-
-  return new Promise(async (resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      cleanup();
-      reject(new Error("Audio transcode timeout (worker did not respond)"));
-    }, 120_000);
-
-    const abortHandler = () => {
-      clearTimeout(timeoutId);
-      cleanup();
-      reject(new Error("Audio transcode aborted"));
-    };
-    if (signal) {
-      if (signal.aborted) return abortHandler();
-      signal.addEventListener("abort", abortHandler, { once: true });
+    if (activeJob) {
+      throw new Error("FFmpeg worker is busy");
     }
 
-    worker.onmessage = (evt: MessageEvent) => {
-      const msg = evt.data;
-      if (msg?.type === "progress") {
-        // Keep logs explicit for auditing
-        console.log("[AudioProcessor][FFMPEG-WORKER]", msg.message);
-        return;
-      }
-      if (msg?.type === "result") {
-        clearTimeout(timeoutId);
-        if (signal) signal.removeEventListener("abort", abortHandler);
-        cleanup();
-        resolve(new Blob([msg.oggArrayBuffer], { type: "audio/ogg" }));
-        return;
-      }
-      if (msg?.type === "error") {
-        clearTimeout(timeoutId);
-        if (signal) signal.removeEventListener("abort", abortHandler);
-        cleanup();
-        reject(new Error(msg.error || "FFmpeg worker failed"));
-      }
-    };
+    return new Promise<Blob>(async (resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        activeJob = null;
+        reject(new Error("Audio transcode timeout"));
+      }, 240_000);
 
-    worker.onerror = (err) => {
-      clearTimeout(timeoutId);
-      if (signal) signal.removeEventListener("abort", abortHandler);
-      cleanup();
-      reject(err);
-    };
+      const abortHandler = () => {
+        if (signal) signal.removeEventListener("abort", abortHandler);
+      };
 
-    const arrayBuffer = await input.arrayBuffer();
-    worker.postMessage(
-      {
-        type: "transcode",
-        originalMimeType,
-        inputArrayBuffer: arrayBuffer,
-      },
-      [arrayBuffer]
-    );
+      const onAbort = () => {
+        clearTimeout(timeoutId);
+        activeJob = null;
+        reject(new Error("Audio transcode aborted"));
+      };
+      if (signal) {
+        if (signal.aborted) return onAbort();
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+
+      activeJob = {
+        resolve,
+        reject,
+        timeoutId,
+        signal,
+        abortHandler,
+      };
+
+      const arrayBuffer = await input.arrayBuffer();
+      worker.postMessage(
+        {
+          type: "transcode",
+          originalMimeType,
+          inputArrayBuffer: arrayBuffer,
+        },
+        [arrayBuffer]
+      );
+    });
   });
 }
 
@@ -189,8 +322,8 @@ export async function processAndSendAudioAsync(job: AudioProcessingJob): Promise
           codec: "opus (libopus)",
           target: {
             channels: 1,
-            sampleRate: 16000, // WhatsApp voice note standard
-            bitrate: "24k",
+            sampleRate: 48000, // Opus standard (passes Meta scrutiny better)
+            bitrate: "32k",
             container: "ogg",
           },
         },
