@@ -6,6 +6,40 @@
 
 import { supabase } from "@/integrations/supabase/client";
 
+async function inspectOgg(blob: Blob): Promise<{
+  size: number;
+  duration?: number;
+  sampleRate?: number;
+  channels?: number;
+}> {
+  const size = blob.size;
+  const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+  if (!AudioCtx) return { size };
+
+  const ctx = new AudioCtx();
+  try {
+    // decodeAudioData may detach the buffer; pass a copy.
+    const ab = await blob.arrayBuffer();
+    const copy = ab.slice(0);
+    const audioBuffer = await ctx.decodeAudioData(copy);
+    return {
+      size,
+      duration: audioBuffer.duration,
+      sampleRate: audioBuffer.sampleRate,
+      channels: audioBuffer.numberOfChannels,
+    };
+  } catch (e) {
+    console.warn("[AudioProcessor] Could not decode OGG for inspection:", e);
+    return { size };
+  } finally {
+    try {
+      await ctx.close();
+    } catch {
+      // ignore
+    }
+  }
+}
+
 async function transcodeToOggInWorker(
   input: Blob,
   originalMimeType: string,
@@ -131,6 +165,42 @@ export async function processAndSendAudioAsync(job: AudioProcessingJob): Promise
       uploadMime = 'audio/ogg';
       extension = 'ogg';
       console.log('[AudioProcessor] Already OGG. Size:', uploadBlob.size, 'Duration(s):', duration);
+    }
+
+    // Post-transcode validation (explicit WhatsApp-compatibility checks)
+    const inspected = await inspectOgg(uploadBlob);
+    console.log(
+      "[AudioProcessor] Post-conversion inspection:",
+      JSON.stringify(
+        {
+          size_bytes: inspected.size,
+          duration_s: inspected.duration,
+          sample_rate_hz: inspected.sampleRate,
+          channels: inspected.channels,
+          codec: "opus (libopus)",
+          target: { channels: 1, sampleRate: 48000, bitrate: "24k", application: "voip", container: "ogg" },
+        },
+        null,
+        2
+      )
+    );
+
+    // Enforce the user-defined hard requirements
+    if (inspected.size < 1024) {
+      throw new Error(`Converted audio too small (<1KB): ${inspected.size} bytes`);
+    }
+    if (typeof inspected.duration === "number" && inspected.duration < 1) {
+      throw new Error(`Converted audio duration < 1s: ${inspected.duration}`);
+    }
+    if (typeof inspected.sampleRate === "number" && inspected.sampleRate !== 48000) {
+      console.warn(
+        `[AudioProcessor] WARNING: sample_rate is ${inspected.sampleRate}Hz (expected 48000Hz)`
+      );
+    }
+    if (typeof inspected.channels === "number" && inspected.channels !== 1) {
+      console.warn(
+        `[AudioProcessor] WARNING: channels is ${inspected.channels} (expected 1/mono)`
+      );
     }
     
     const filename = `${timestamp}-${randomId}.${extension}`;

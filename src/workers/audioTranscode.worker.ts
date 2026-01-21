@@ -97,21 +97,47 @@ async function transcode(inputArrayBuffer, originalMimeType) {
   await ffmpeg.writeFile(inputName, new Uint8Array(inputArrayBuffer));
 
   post({ type: "progress", message: "[FFMPEG] exec -> ogg/opus" });
+  // WhatsApp voice-note compatibility baseline (market-standard settings):
+  // - mono (ac=1)
+  // - 48kHz (ar=48000)
+  // - opus codec (libopus)
+  // - low bitrate (16k-32k) + application=voip
+  // - OGG container
+  post({
+    type: "progress",
+    message:
+      "[FFMPEG] params: codec=libopus container=ogg ac=1 ar=48000 b=24k application=voip",
+  });
   await ffmpeg.exec([
     "-i",
     inputName,
+    "-vn",
+    "-ac",
+    "1",
+    "-ar",
+    "48000",
     "-c:a",
     "libopus",
     "-b:a",
-    "64k",
-    "-vn",
-    "-ar",
-    "48000",
+    "24k",
+    "-application",
+    "voip",
+    "-f",
+    "ogg",
     outputName,
   ]);
 
   post({ type: "progress", message: `[FFMPEG] readFile ${outputName}` });
   const out = await ffmpeg.readFile(outputName);
+
+  // Quick sanity check: WhatsApp silently rejects some invalid OGGs.
+  // We'll fail-fast if the output is suspiciously tiny.
+  const outSize = out?.length ?? 0;
+  post({ type: "progress", message: `[FFMPEG] output size_bytes=${outSize}` });
+  if (outSize < 1024) {
+    post({ type: "error", error: `[FFMPEG] output too small (<1KB): ${outSize} bytes` });
+    throw new Error(`FFmpeg output too small: ${outSize} bytes`);
+  }
 
   // cleanup
   try {
