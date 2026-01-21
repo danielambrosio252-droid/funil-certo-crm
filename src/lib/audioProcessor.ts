@@ -189,9 +189,8 @@ export async function processAndSendAudioAsync(job: AudioProcessingJob): Promise
           codec: "opus (libopus)",
           target: {
             channels: 1,
-            sampleRate: 48000,
+            sampleRate: 16000, // WhatsApp voice note standard
             bitrate: "24k",
-            application: "voip",
             container: "ogg",
           },
         },
@@ -200,11 +199,11 @@ export async function processAndSendAudioAsync(job: AudioProcessingJob): Promise
       )
     );
 
-    if (inspected.size < 1024) {
-      throw new Error(`Converted audio too small (<1KB): ${inspected.size} bytes`);
+    if (inspected.size < 512) {
+      throw new Error(`Converted audio too small (<512B): ${inspected.size} bytes`);
     }
-    if (typeof inspected.duration === "number" && inspected.duration < 1) {
-      throw new Error(`Converted audio duration < 1s: ${inspected.duration}`);
+    if (typeof inspected.duration === "number" && inspected.duration < 0.5) {
+      throw new Error(`Converted audio duration < 0.5s: ${inspected.duration}`);
     }
     
     const filename = `${timestamp}-${randomId}.${extension}`;

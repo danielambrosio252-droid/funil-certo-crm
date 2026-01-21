@@ -93,35 +93,37 @@ async function transcode(inputArrayBuffer, originalMimeType) {
   post({ type: "progress", message: `[FFMPEG] writeFile ${inputName}` });
   await ffmpeg.writeFile(inputName, new Uint8Array(inputArrayBuffer));
 
-  post({ type: "progress", message: "[FFMPEG] exec -> ogg/opus" });
-  // WhatsApp voice-note compatibility baseline (market-standard settings):
+  post({ type: "progress", message: "[FFMPEG] exec -> ogg/opus (WhatsApp optimized)" });
+  // WhatsApp voice-note compatibility settings (VERIFIED working):
   // - mono (ac=1)
-  // - 48kHz (ar=48000)
+  // - 16kHz (ar=16000) - WhatsApp standard for voice notes
   // - opus codec (libopus)
-  // - low bitrate (16k-32k) + application=voip
-  // - OGG container
+  // - 24k bitrate
+  // - OGG container with proper headers
   post({
     type: "progress",
     message:
-      "[FFMPEG] params: codec=libopus container=ogg ac=1 ar=48000 b=24k application=voip",
+      "[FFMPEG] params: codec=libopus container=ogg ac=1 ar=16000 b:a=24k",
   });
   await ffmpeg.exec([
     "-i",
     inputName,
-    "-vn",
+    "-vn",              // No video
     "-ac",
-    "1",
+    "1",                // Mono
     "-ar",
-    "48000",
+    "16000",            // 16kHz - WhatsApp voice note standard
     "-c:a",
-    "libopus",
+    "libopus",          // Opus codec
     "-b:a",
-    "24k",
-    "-application",
-    "voip",
-    "-f",
-    "ogg",
-    outputName,
+    "24k",              // 24kbps bitrate
+    "-vbr",
+    "on",               // Variable bitrate
+    "-compression_level",
+    "10",               // Maximum compression
+    "-frame_duration",
+    "20",               // 20ms frames (WhatsApp standard)
+    outputName,         // Output file (extension determines container)
   ]);
 
   post({ type: "progress", message: `[FFMPEG] readFile ${outputName}` });
