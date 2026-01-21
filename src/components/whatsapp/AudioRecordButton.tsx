@@ -51,10 +51,13 @@ export function AudioRecordButton({
       streamRef.current = stream;
       audioChunksRef.current = [];
       
-      // Priority: OGG/Opus (native, best) > WebM/Opus (will be converted) > MP4
+      // PRIORITY: OGG/Opus native (eliminates transcoding entirely)
+      // Fallback: WebM/Opus → will be transcoded on Edge Function (backend)
+      // Note: Chrome 91+, Firefox, Edge support audio/ogg;codecs=opus
       const supportedFormats = [
-        'audio/ogg;codecs=opus',
-        'audio/webm;codecs=opus', 
+        'audio/ogg;codecs=opus', // BEST: No transcode needed!
+        'audio/ogg',            // OGG without explicit opus
+        'audio/webm;codecs=opus', // Will need backend transcode
         'audio/webm',
         'audio/mp4',
       ];
@@ -66,6 +69,9 @@ export function AudioRecordButton({
           break;
         }
       }
+      
+      console.log('[AudioRecord] Browser supported formats check:', 
+        supportedFormats.map(f => `${f}: ${MediaRecorder.isTypeSupported(f)}`).join(', '));
       
       if (!mimeType) {
         toast.error("Formato de áudio não suportado pelo navegador");
