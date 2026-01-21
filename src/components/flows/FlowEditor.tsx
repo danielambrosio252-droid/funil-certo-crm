@@ -15,7 +15,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
-import { Save, ArrowLeft, Plus } from "lucide-react";
+import { Save, ArrowLeft, LayoutGrid } from "lucide-react";
+import { toast } from "sonner";
 import { useFlowEditor, FlowNode, FlowEdge, NodeType } from "@/hooks/useWhatsAppFlows";
 import { flowNodeTypes, availableNodeTypes } from "./FlowNodeTypes";
 import { NodeConfigDialog } from "./NodeConfigDialog";
@@ -267,6 +268,98 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     }
   };
 
+  // Auto-organize layout using BFS from start node
+  const handleAutoOrganize = () => {
+    const currentNodes = nodesRef.current;
+    const currentEdges = edges;
+
+    if (currentNodes.length === 0) return;
+
+    // Find start node
+    const startNode = currentNodes.find((n) => n.type === "start");
+    if (!startNode) {
+      toast.error("Nó de início não encontrado");
+      return;
+    }
+
+    // Build adjacency map: source -> targets[]
+    const adjacency = new Map<string, string[]>();
+    currentEdges.forEach((edge) => {
+      const targets = adjacency.get(edge.source) || [];
+      targets.push(edge.target);
+      adjacency.set(edge.source, targets);
+    });
+
+    // BFS to assign levels
+    const levels = new Map<string, number>();
+    const visited = new Set<string>();
+    const queue: { id: string; level: number }[] = [{ id: startNode.id, level: 0 }];
+    visited.add(startNode.id);
+    levels.set(startNode.id, 0);
+
+    while (queue.length > 0) {
+      const { id, level } = queue.shift()!;
+      const children = adjacency.get(id) || [];
+      children.forEach((childId) => {
+        if (!visited.has(childId)) {
+          visited.add(childId);
+          levels.set(childId, level + 1);
+          queue.push({ id: childId, level: level + 1 });
+        }
+      });
+    }
+
+    // Group nodes by level
+    const nodesByLevel = new Map<number, Node[]>();
+    currentNodes.forEach((node) => {
+      const lvl = levels.get(node.id) ?? 999; // unconnected nodes go to the end
+      const arr = nodesByLevel.get(lvl) || [];
+      arr.push(node);
+      nodesByLevel.set(lvl, arr);
+    });
+
+    // Layout constants
+    const NODE_WIDTH = 200;
+    const NODE_HEIGHT = 80;
+    const GAP_X = 60;
+    const GAP_Y = 120;
+    const START_X = 300;
+    const START_Y = 60;
+
+    // Compute new positions
+    const newPositions = new Map<string, { x: number; y: number }>();
+    const sortedLevels = Array.from(nodesByLevel.keys()).sort((a, b) => a - b);
+
+    sortedLevels.forEach((level) => {
+      const nodesAtLevel = nodesByLevel.get(level)!;
+      const totalWidth = nodesAtLevel.length * NODE_WIDTH + (nodesAtLevel.length - 1) * GAP_X;
+      let x = START_X - totalWidth / 2 + NODE_WIDTH / 2;
+      const y = START_Y + level * (NODE_HEIGHT + GAP_Y);
+
+      nodesAtLevel.forEach((node) => {
+        newPositions.set(node.id, { x: Math.round(x), y: Math.round(y) });
+        x += NODE_WIDTH + GAP_X;
+      });
+    });
+
+    // Apply new positions to local state
+    setNodes((prev) =>
+      prev.map((node) => {
+        const pos = newPositions.get(node.id);
+        if (pos) {
+          return { ...node, position: pos };
+        }
+        return node;
+      })
+    );
+
+    // Update lastPlacedRef
+    const maxY = Math.max(...Array.from(newPositions.values()).map((p) => p.y));
+    lastPlacedRef.current = { x: START_X, y: maxY };
+
+    toast.success("Layout reorganizado! Clique em 'Salvar Fluxo' para persistir.");
+  };
+
   if (loadingNodes) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -285,10 +378,16 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           </Button>
           <h2 className="text-lg font-semibold">{flowName}</h2>
         </div>
-        <Button onClick={handleSave} disabled={saveFlow.isPending}>
-          <Save className="w-4 h-4 mr-2" />
-          Salvar Fluxo
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={handleAutoOrganize}>
+            <LayoutGrid className="w-4 h-4 mr-2" />
+            Auto-organizar
+          </Button>
+          <Button onClick={handleSave} disabled={saveFlow.isPending}>
+            <Save className="w-4 h-4 mr-2" />
+            Salvar Fluxo
+          </Button>
+        </div>
       </div>
 
       {/* Flow Editor */}
