@@ -166,6 +166,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   // Add new node
   const handleAddNode = async (type: NodeType) => {
+    // IMPORTANT: ReactFlow positions are floats while dragging/zooming,
+    // but our DB columns expect integers. Always round before inserting.
     const centerX = 250;
     const lastNode = nodes.length > 0 
       ? nodes.reduce((prev, curr) => prev.position.y > curr.position.y ? prev : curr)
@@ -175,8 +177,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     try {
       await addNode.mutateAsync({
         node_type: type,
-        position_x: centerX,
-        position_y: positionY,
+        position_x: Math.round(centerX),
+        position_y: Math.round(positionY),
       });
     } catch (error) {
       console.error("Error adding node:", error);
