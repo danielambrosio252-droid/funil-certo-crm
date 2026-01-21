@@ -24,7 +24,13 @@ async function transcodeToOggInWorker(
   };
 
   return new Promise(async (resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error("Audio transcode timeout (worker did not respond)"));
+    }, 120_000);
+
     const abortHandler = () => {
+      clearTimeout(timeoutId);
       cleanup();
       reject(new Error("Audio transcode aborted"));
     };
@@ -41,12 +47,14 @@ async function transcodeToOggInWorker(
         return;
       }
       if (msg?.type === "result") {
+        clearTimeout(timeoutId);
         if (signal) signal.removeEventListener("abort", abortHandler);
         cleanup();
         resolve(new Blob([msg.oggArrayBuffer], { type: "audio/ogg" }));
         return;
       }
       if (msg?.type === "error") {
+        clearTimeout(timeoutId);
         if (signal) signal.removeEventListener("abort", abortHandler);
         cleanup();
         reject(new Error(msg.error || "FFmpeg worker failed"));
@@ -54,6 +62,7 @@ async function transcodeToOggInWorker(
     };
 
     worker.onerror = (err) => {
+      clearTimeout(timeoutId);
       if (signal) signal.removeEventListener("abort", abortHandler);
       cleanup();
       reject(err);

@@ -5,6 +5,7 @@
  */
 
 import { FFmpeg } from "@ffmpeg/ffmpeg";
+import { toBlobURL } from "@ffmpeg/util";
 
 type WorkerSelf = {
   postMessage: (message: unknown, transfer?: Transferable[]) => void;
@@ -18,6 +19,21 @@ const ctx = self as unknown as WorkerSelf;
 let ffmpeg = null;
 let loading = null;
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const id = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms);
+    promise
+      .then((v) => {
+        clearTimeout(id);
+        resolve(v);
+      })
+      .catch((e) => {
+        clearTimeout(id);
+        reject(e);
+      });
+  });
+}
+
 function post(msg: unknown, transfer?: Transferable[]) {
   ctx.postMessage(msg, transfer);
 }
@@ -28,12 +44,34 @@ async function ensureLoaded() {
 
   ffmpeg = new FFmpeg();
   loading = (async () => {
+    const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
     post({ type: "progress", message: "[FFMPEG] loading" });
-    await ffmpeg.load({
-      coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js",
-      wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm",
-    });
-    post({ type: "progress", message: "[FFMPEG] loaded" });
+
+    try {
+      // Using Blob URLs avoids cross-origin worker quirks and gives clearer failures.
+      const coreURL = await withTimeout(
+        toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+        25_000,
+        "ffmpeg coreURL download"
+      );
+      const wasmURL = await withTimeout(
+        toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+        25_000,
+        "ffmpeg wasmURL download"
+      );
+
+      await withTimeout(
+        ffmpeg.load({ coreURL, wasmURL }),
+        45_000,
+        "ffmpeg.load"
+      );
+
+      post({ type: "progress", message: "[FFMPEG] loaded" });
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      post({ type: "error", error: `[FFMPEG] load failed: ${msg}` });
+      throw e;
+    }
   })();
 
   return loading;
