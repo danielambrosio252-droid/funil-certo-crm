@@ -1,5 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// Edge runtime helper (lets background tasks continue after the response)
+declare const EdgeRuntime: {
+  waitUntil: (promise: Promise<unknown>) => void;
+};
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -199,7 +204,7 @@ Deno.serve(async (req) => {
     company_id: companyId,
     content: messageContent,
     is_from_me: true,
-    status: "pending",
+    status: messageType === "audio" ? "processing" : "pending",
     message_type: messageType,
     media_url: payload.media_url || null,
     sent_at: new Date().toISOString(),
@@ -250,19 +255,33 @@ Deno.serve(async (req) => {
 
   // For AUDIO: Return 202 immediately, process in background
   if (messageType === "audio" && payload.media_url) {
-    console.log("[AUDIO] Received audio request, returning 202 immediately");
-    console.log("[AUDIO] Will process asynchronously: ", payload.media_url);
+    console.log("[AUDIO] Received audio request -> returning 202 immediately");
+    console.log("[AUDIO] message_id:", messageData.id);
+    console.log("[AUDIO] media_url:", payload.media_url);
+    console.log("[AUDIO] media_filename:", payload.media_filename);
+    console.log("[AUDIO] audio_duration:", payload.audio_duration);
     
-    // Start async processing without awaiting
-    processAudioAsync(
+    // Start async processing without awaiting (MUST use waitUntil so it actually runs)
+    const task = processAudioAsync(
       supabase,
       company.whatsapp_phone_number_id,
       cloudAccessToken,
       recipientPhone,
       payload.media_url,
       messageData.id,
-      messageInsert.contact_id as string | undefined
+      messageInsert.contact_id as string | undefined,
+      payload.audio_duration,
+      payload.media_filename
     );
+
+    try {
+      EdgeRuntime.waitUntil(task);
+      console.log("[AUDIO] Background task scheduled via EdgeRuntime.waitUntil");
+    } catch {
+      // Fallback (not ideal): run without waiting
+      task.catch(() => {});
+      console.warn("[AUDIO] EdgeRuntime.waitUntil not available; task may be interrupted");
+    }
     
     // Return 202 Accepted immediately
     return new Response(
@@ -387,10 +406,30 @@ async function processAudioAsync(
   recipientPhone: string,
   mediaUrl: string,
   messageId: string,
-  contactId?: string
+  contactId?: string,
+  audioDuration?: number,
+  mediaFilename?: string
 ): Promise<void> {
   try {
-    console.log("[AUDIO-ASYNC] Starting background processing for message:", messageId);
+    console.log("[AUDIO-ASYNC] Starting background processing");
+    console.log("[AUDIO-ASYNC] message_id:", messageId);
+    console.log("[AUDIO-ASYNC] recipient:", recipientPhone);
+    console.log("[AUDIO-ASYNC] duration_s:", audioDuration);
+    console.log("[AUDIO-ASYNC] media_url:", mediaUrl);
+
+    // Ensure DB status is processing (idempotent)
+    await supabase.from("whatsapp_messages").update({ status: "processing" }).eq("id", messageId);
+
+    if (typeof audioDuration === "number" && audioDuration < 1) {
+      throw new Error("Audio duration < 1s (invalid)");
+    }
+
+    // Extract storage path (for auditing)
+    const bucketMarker = "/whatsapp-media/";
+    const storagePath = mediaUrl.includes(bucketMarker)
+      ? mediaUrl.split(bucketMarker)[1]
+      : null;
+    console.log("[AUDIO-ASYNC] storage_path:", storagePath);
     
     // Step 1: Download audio from Supabase Storage
     console.log("[AUDIO-ASYNC] Downloading from:", mediaUrl);
@@ -401,17 +440,22 @@ async function processAudioAsync(
       throw new Error("Failed to download audio file");
     }
     
+    const contentTypeHeader = audioResponse.headers.get("content-type") || undefined;
     const audioBuffer = await audioResponse.arrayBuffer();
-    console.log("[AUDIO-ASYNC] Downloaded size:", audioBuffer.byteLength, "bytes");
+    console.log("[AUDIO-ASYNC] Downloaded size_bytes:", audioBuffer.byteLength);
+    console.log("[AUDIO-ASYNC] Downloaded content-type:", contentTypeHeader);
     
     // Determine MIME type from URL or default to audio/ogg
-    let mimeType = "audio/ogg";
-    if (mediaUrl.includes(".webm")) {
-      mimeType = "audio/webm";
-    } else if (mediaUrl.includes(".m4a") || mediaUrl.includes(".mp4")) {
-      mimeType = "audio/mp4";
+    let mimeType = (contentTypeHeader || "").split(";")[0] || "audio/ogg";
+    if (!mimeType.startsWith("audio/")) {
+      mimeType = "audio/ogg";
     }
     console.log("[AUDIO-ASYNC] Detected MIME type:", mimeType);
+
+    // We REQUIRE audio/ogg for WhatsApp compatibility
+    if (mimeType !== "audio/ogg") {
+      console.warn("[AUDIO-ASYNC] WARNING: mimeType is not audio/ogg. This may fail on Meta /media.");
+    }
     
     // Step 2: Upload to Meta's /media endpoint
     console.log("[AUDIO-ASYNC] Uploading to Meta /media endpoint...");
@@ -419,8 +463,7 @@ async function processAudioAsync(
     
     const formData = new FormData();
     const audioBlob = new Blob([audioBuffer], { type: mimeType });
-    const filename = mimeType === "audio/ogg" ? "audio.ogg" : 
-                     mimeType === "audio/webm" ? "audio.webm" : "audio.m4a";
+    const filename = mediaFilename || (mimeType === "audio/ogg" ? "audio.ogg" : "audio.bin");
     formData.append("file", audioBlob, filename);
     formData.append("type", mimeType);
     formData.append("messaging_product", "whatsapp");
@@ -434,7 +477,8 @@ async function processAudioAsync(
     });
     
     const uploadResult = await uploadResponse.json();
-    console.log("[AUDIO-ASYNC] Upload response:", JSON.stringify(uploadResult), "Status:", uploadResponse.status);
+    console.log("[AUDIO-ASYNC] /media status:", uploadResponse.status);
+    console.log("[AUDIO-ASYNC] /media response:", JSON.stringify(uploadResult, null, 2));
     
     if (!uploadResponse.ok || !uploadResult.id) {
       console.error("[AUDIO-ASYNC] Meta upload failed:", uploadResult);
@@ -455,7 +499,7 @@ async function processAudioAsync(
       audio: { id: mediaId }
     };
     
-    console.log("[AUDIO-ASYNC] Send payload:", JSON.stringify(metaPayload));
+    console.log("[AUDIO-ASYNC] /messages payload:", JSON.stringify(metaPayload, null, 2));
     
     const sendResponse = await fetch(sendUrl, {
       method: "POST",
@@ -467,7 +511,8 @@ async function processAudioAsync(
     });
     
     const sendResult = await sendResponse.json();
-    console.log("[AUDIO-ASYNC] Send response:", JSON.stringify(sendResult), "Status:", sendResponse.status);
+    console.log("[AUDIO-ASYNC] /messages status:", sendResponse.status);
+    console.log("[AUDIO-ASYNC] /messages response:", JSON.stringify(sendResult, null, 2));
     
     if (!sendResponse.ok) {
       console.error("[AUDIO-ASYNC] Send failed:", sendResult);
