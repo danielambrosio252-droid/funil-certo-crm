@@ -6,6 +6,71 @@
 
 import { supabase } from "@/integrations/supabase/client";
 
+async function transcodeToOggInWorker(
+  input: Blob,
+  originalMimeType: string,
+  signal?: AbortSignal
+): Promise<Blob> {
+  // Run FFmpeg in a Web Worker to avoid blocking UI thread.
+  const { default: WorkerCtor } = await import("@/workers/audioTranscode.worker?worker");
+  const worker = new WorkerCtor();
+
+  const cleanup = () => {
+    try {
+      worker.terminate();
+    } catch {
+      // ignore
+    }
+  };
+
+  return new Promise(async (resolve, reject) => {
+    const abortHandler = () => {
+      cleanup();
+      reject(new Error("Audio transcode aborted"));
+    };
+    if (signal) {
+      if (signal.aborted) return abortHandler();
+      signal.addEventListener("abort", abortHandler, { once: true });
+    }
+
+    worker.onmessage = (evt: MessageEvent) => {
+      const msg = evt.data;
+      if (msg?.type === "progress") {
+        // Keep logs explicit for auditing
+        console.log("[AudioProcessor][FFMPEG-WORKER]", msg.message);
+        return;
+      }
+      if (msg?.type === "result") {
+        if (signal) signal.removeEventListener("abort", abortHandler);
+        cleanup();
+        resolve(new Blob([msg.oggArrayBuffer], { type: "audio/ogg" }));
+        return;
+      }
+      if (msg?.type === "error") {
+        if (signal) signal.removeEventListener("abort", abortHandler);
+        cleanup();
+        reject(new Error(msg.error || "FFmpeg worker failed"));
+      }
+    };
+
+    worker.onerror = (err) => {
+      if (signal) signal.removeEventListener("abort", abortHandler);
+      cleanup();
+      reject(err);
+    };
+
+    const arrayBuffer = await input.arrayBuffer();
+    worker.postMessage(
+      {
+        type: "transcode",
+        originalMimeType,
+        inputArrayBuffer: arrayBuffer,
+      },
+      [arrayBuffer]
+    );
+  });
+}
+
 interface AudioProcessingJob {
   blob: Blob;
   mimeType: string;
@@ -34,26 +99,42 @@ export async function processAndSendAudioAsync(job: AudioProcessingJob): Promise
     
     if (abortController.signal.aborted) return;
     
-    // Step 1: Upload to Supabase Storage immediately (no transcoding)
-    // Edge function will handle conversion if needed
-    console.log('[AudioProcessor] Uploading raw audio to storage...');
+    // Step 1: Ensure Storage-compatible & WhatsApp-compatible format.
+    // Storage bucket currently rejects audio/webm; WhatsApp requires audio/ogg (opus).
+    // We transcode in a Web Worker to avoid blocking UI.
+    console.log('[AudioProcessor] Preparing audio for upload (ogg/opus)...');
     const timestamp = Date.now();
     const randomId = Math.random().toString(36).substring(2, 7);
-    
-    // Determine extension based on MIME type
+
+    let uploadBlob = blob;
+    let uploadMime = mimeType.split(';')[0];
     let extension = 'ogg';
-    if (mimeType.includes('webm')) extension = 'webm';
-    else if (mimeType.includes('mp4') || mimeType.includes('m4a')) extension = 'm4a';
-    else if (mimeType.includes('ogg')) extension = 'ogg';
+
+    const needsOgg = !uploadMime.includes('ogg');
+    if (needsOgg) {
+      console.log('[AudioProcessor] Transcoding required. From:', uploadMime);
+      uploadBlob = await transcodeToOggInWorker(blob, mimeType, abortController.signal);
+      uploadMime = 'audio/ogg';
+      extension = 'ogg';
+      console.log('[AudioProcessor] Transcoded OK. Size:', uploadBlob.size, 'Mime:', uploadMime, 'Duration(s):', duration);
+    } else {
+      // Keep it OGG, but normalize mime/extension
+      uploadMime = 'audio/ogg';
+      extension = 'ogg';
+      console.log('[AudioProcessor] Already OGG. Size:', uploadBlob.size, 'Duration(s):', duration);
+    }
     
     const filename = `${timestamp}-${randomId}.${extension}`;
     const filePath = `${companyId}/audio/${filename}`;
     
-    // Upload with original MIME type - Edge function handles conversion
+    console.log('[AudioProcessor] Final file path:', filePath);
+    console.log('[AudioProcessor] Final upload size:', uploadBlob.size, 'mime:', uploadMime);
+
+    // Upload (must be audio/ogg, otherwise bucket rejects)
     const { error: uploadError } = await supabase.storage
       .from("whatsapp-media")
-      .upload(filePath, blob, {
-        contentType: mimeType.split(';')[0], // Remove codec info
+      .upload(filePath, uploadBlob, {
+        contentType: uploadMime,
         cacheControl: '3600',
         upsert: false,
       });
