@@ -306,6 +306,32 @@ Deno.serve(async (req) => {
 
     console.log(`[Lead Webhook] ✅ Lead criado com sucesso: ${newLead.id} (Reentrada: ${isReentry})`);
 
+    // ===== TRIGGER: DISPARAR FLUXOS DE AUTOMAÇÃO =====
+    try {
+      const flowExecutorUrl = `${supabaseUrl}/functions/v1/flow-executor`;
+      
+      // Disparar trigger new_lead
+      await fetch(flowExecutorUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${supabaseServiceKey}`,
+        },
+        body: JSON.stringify({
+          trigger_type: "new_lead",
+          company_id: companyId,
+          lead_id: newLead.id,
+          funnel_id: finalFunnelId,
+          stage_id: finalStageId,
+        }),
+      });
+      
+      console.log(`[Lead Webhook] 🚀 Trigger new_lead disparado`);
+    } catch (flowError) {
+      // Não falhar o webhook se o flow-executor falhar
+      console.error("[Lead Webhook] Erro ao disparar fluxo:", flowError);
+    }
+
     return new Response(
       JSON.stringify({ 
         success: true, 
