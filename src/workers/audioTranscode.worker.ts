@@ -174,6 +174,13 @@ ctx.onmessage = async (evt) => {
       return;
     }
 
+    // Explicit preload hook: loads FFmpeg core/WASM without attempting a transcode.
+    if (msg.type === "preload") {
+      await ensureLoaded();
+      post({ type: "progress", message: "[FFMPEG] ready!" });
+      return;
+    }
+
     if (msg.type === "transcode") {
       await transcode(msg.inputArrayBuffer, msg.originalMimeType);
       return;

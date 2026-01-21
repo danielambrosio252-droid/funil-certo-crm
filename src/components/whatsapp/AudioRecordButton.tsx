@@ -57,9 +57,11 @@ export function AudioRecordButton({
       const supportedFormats = [
         'audio/ogg;codecs=opus', // BEST: No transcode needed!
         'audio/ogg',            // OGG without explicit opus
-        'audio/webm;codecs=opus', // Will need backend transcode
-        'audio/webm',
+        // IMPORTANT: Prefer MP4 over WebM to avoid FFmpeg WASM download/transcode.
+        // Most Chromium browsers support recording to audio/mp4.
         'audio/mp4',
+        'audio/webm;codecs=opus',
+        'audio/webm',
       ];
       
       let mimeType = '';
