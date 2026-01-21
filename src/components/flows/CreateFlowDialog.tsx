@@ -113,38 +113,40 @@ export function CreateFlowDialog({ open, onOpenChange, onSuccess }: CreateFlowDi
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[85vh] flex flex-col p-0">
-        <DialogHeader className="px-5 pt-5 pb-3">
-          <DialogTitle className="text-lg">Criar Novo Fluxo</DialogTitle>
+      <DialogContent className="max-w-sm max-h-[80vh] flex flex-col p-0">
+        <DialogHeader className="px-4 pt-4 pb-2">
+          <DialogTitle className="text-base">Criar Novo Fluxo</DialogTitle>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 px-5">
-          <div className="space-y-4 py-3">
+        <ScrollArea className="flex-1 px-4">
+          <div className="space-y-3 py-2">
             {/* Basic Info */}
-            <div className="space-y-3">
-              <div className="space-y-2">
-                <Label>Nome do Fluxo *</Label>
+            <div className="space-y-2">
+              <div className="space-y-1">
+                <Label className="text-sm">Nome do Fluxo *</Label>
                 <Input
                   placeholder="Ex: Boas-vindas Novos Leads"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  className="h-9"
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Descrição</Label>
+              <div className="space-y-1">
+                <Label className="text-sm">Descrição</Label>
                 <Textarea
-                  placeholder="Descreva o objetivo deste fluxo..."
+                  placeholder="Objetivo do fluxo..."
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={2}
+                  className="resize-none text-sm"
                 />
               </div>
             </div>
 
             {/* Trigger Type */}
-            <div className="space-y-3">
-              <Label>Gatilho (Quando o fluxo inicia)</Label>
-              <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-2">
+              <Label className="text-sm">Gatilho</Label>
+              <div className="grid grid-cols-2 gap-1.5">
                 {triggerTypes.map((trigger) => {
                   const Icon = trigger.icon;
                   const isSelected = triggerType === trigger.value;
@@ -156,17 +158,16 @@ export function CreateFlowDialog({ open, onOpenChange, onSuccess }: CreateFlowDi
                         setTriggerType(trigger.value as TriggerType);
                         setTriggerConfig({});
                       }}
-                      className={`p-3 rounded-lg border-2 text-left transition-all ${
+                      className={`p-2 rounded-md border text-left transition-all ${
                         isSelected
-                          ? "border-primary bg-primary/5"
+                          ? "border-primary bg-primary/10"
                           : "border-border hover:border-primary/50"
                       }`}
                     >
-                      <div className="flex items-center gap-2 mb-1">
-                        <Icon className="w-4 h-4 text-primary" />
-                        <span className="text-sm font-medium">{trigger.label}</span>
+                      <div className="flex items-center gap-1.5">
+                        <Icon className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                        <span className="text-xs font-medium truncate">{trigger.label}</span>
                       </div>
-                      <p className="text-xs text-muted-foreground">{trigger.description}</p>
                     </button>
                   );
                 })}
@@ -175,47 +176,44 @@ export function CreateFlowDialog({ open, onOpenChange, onSuccess }: CreateFlowDi
 
             {/* Trigger Config */}
             {triggerType === "new_lead" && (
-              <div className="space-y-3 p-3 bg-muted/50 rounded-lg">
-                <div className="space-y-2">
-                  <Label className="text-sm">Funil (opcional)</Label>
-                  <Select
-                    value={triggerConfig.funnel_id || "all"}
-                    onValueChange={(value) => updateTriggerConfig("funnel_id", value === "all" ? undefined : value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Todos os funis" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos os funis</SelectItem>
-                      {funnels.map((funnel) => (
-                        <SelectItem key={funnel.id} value={funnel.id}>
-                          {funnel.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-1.5 p-2.5 bg-muted/50 rounded-md">
+                <Label className="text-xs">Funil (opcional)</Label>
+                <Select
+                  value={triggerConfig.funnel_id || "all"}
+                  onValueChange={(value) => updateTriggerConfig("funnel_id", value === "all" ? undefined : value)}
+                >
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder="Todos os funis" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os funis</SelectItem>
+                    {funnels.map((funnel) => (
+                      <SelectItem key={funnel.id} value={funnel.id}>
+                        {funnel.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
 
             {triggerType === "keyword" && (
-              <div className="space-y-3 p-3 bg-muted/50 rounded-lg">
-                <div className="space-y-2">
-                  <Label className="text-sm">Palavras-chave</Label>
-                  <Input
-                    placeholder="oi, olá, quero saber mais"
-                    value={(triggerConfig.keywords || []).join(", ")}
-                    onChange={(e) => updateTriggerConfig("keywords", e.target.value.split(",").map((k) => k.trim()))}
-                  />
-                  <p className="text-xs text-muted-foreground">Separe por vírgula</p>
-                </div>
+              <div className="space-y-1.5 p-2.5 bg-muted/50 rounded-md">
+                <Label className="text-xs">Palavras-chave</Label>
+                <Input
+                  placeholder="oi, olá, quero saber mais"
+                  value={(triggerConfig.keywords || []).join(", ")}
+                  onChange={(e) => updateTriggerConfig("keywords", e.target.value.split(",").map((k) => k.trim()))}
+                  className="h-8 text-sm"
+                />
+                <p className="text-xs text-muted-foreground">Separe por vírgula</p>
               </div>
             )}
 
             {triggerType === "stage_change" && (
-              <div className="space-y-3 p-3 bg-muted/50 rounded-lg">
-                <div className="space-y-2">
-                  <Label className="text-sm">Funil</Label>
+              <div className="space-y-2 p-2.5 bg-muted/50 rounded-md">
+                <div className="space-y-1">
+                  <Label className="text-xs">Funil</Label>
                   <Select
                     value={triggerConfig.funnel_id || ""}
                     onValueChange={(value) => {
@@ -223,7 +221,7 @@ export function CreateFlowDialog({ open, onOpenChange, onSuccess }: CreateFlowDi
                       updateTriggerConfig("stage_id", undefined);
                     }}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="h-8 text-sm">
                       <SelectValue placeholder="Selecione o funil" />
                     </SelectTrigger>
                     <SelectContent>
@@ -236,13 +234,13 @@ export function CreateFlowDialog({ open, onOpenChange, onSuccess }: CreateFlowDi
                   </Select>
                 </div>
                 {triggerConfig.funnel_id && (
-                  <div className="space-y-2">
-                    <Label className="text-sm">Etapa de Destino</Label>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Etapa de Destino</Label>
                     <Select
                       value={triggerConfig.stage_id || ""}
                       onValueChange={(value) => updateTriggerConfig("stage_id", value)}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="h-8 text-sm">
                         <SelectValue placeholder="Quando entrar nesta etapa" />
                       </SelectTrigger>
                       <SelectContent>
@@ -259,55 +257,54 @@ export function CreateFlowDialog({ open, onOpenChange, onSuccess }: CreateFlowDi
             )}
 
             {/* Schedule Config (always shown) */}
-            <div className="space-y-3 p-3 bg-muted/50 rounded-lg">
-              <Label className="text-sm font-medium">Horários Permitidos</Label>
-              <div className="flex flex-wrap gap-1.5">
+            <div className="space-y-2 p-2.5 bg-muted/50 rounded-md">
+              <Label className="text-xs font-medium">Horários Permitidos</Label>
+              <div className="flex flex-wrap gap-1">
                 {weekDays.map((day) => (
                   <button
                     key={day.value}
                     type="button"
                     onClick={() => toggleDay(day.value)}
-                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                    className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
                       (scheduleConfig.days || []).includes(day.value)
                         ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                        : "bg-background text-muted-foreground hover:bg-muted"
                     }`}
                   >
                     {day.label}
                   </button>
                 ))}
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-0.5">
                   <Label className="text-xs">Início</Label>
                   <Input
                     type="time"
                     value={scheduleConfig.start_time || "09:00"}
                     onChange={(e) => setScheduleConfig((prev) => ({ ...prev, start_time: e.target.value }))}
+                    className="h-8 text-sm"
                   />
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   <Label className="text-xs">Fim</Label>
                   <Input
                     type="time"
                     value={scheduleConfig.end_time || "18:00"}
                     onChange={(e) => setScheduleConfig((prev) => ({ ...prev, end_time: e.target.value }))}
+                    className="h-8 text-sm"
                   />
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">
-                O fluxo só será executado nesses horários
-              </p>
             </div>
           </div>
         </ScrollArea>
 
-        <DialogFooter className="px-5 py-3 border-t">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="px-4 py-2.5 border-t">
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button onClick={handleSubmit} disabled={!name.trim() || createFlow.isPending}>
-            Criar Fluxo
+          <Button size="sm" onClick={handleSubmit} disabled={!name.trim() || createFlow.isPending}>
+            Criar
           </Button>
         </DialogFooter>
       </DialogContent>
