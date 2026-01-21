@@ -25,6 +25,7 @@ const menuItems = [
   { icon: Kanban, label: "Funis", path: "/funnels" },
   { icon: Users, label: "Leads", path: "/leads" },
   { icon: MessageCircle, label: "WhatsApp", path: "/whatsapp" },
+  { icon: Zap, label: "Fluxos", path: "/flows" },
   { icon: Mail, label: "E-mail Marketing", path: "/email" },
   { icon: BarChart3, label: "Meta Ads", path: "/meta-ads" },
   { icon: Settings, label: "Configurações", path: "/settings" },
