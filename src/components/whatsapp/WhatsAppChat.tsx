@@ -444,11 +444,11 @@ export function WhatsAppChat() {
           Conecte seu WhatsApp para começar a atender seus clientes.
         </p>
         <Button 
-          onClick={() => navigate("/whatsapp")}
+          onClick={() => navigate("/settings")}
           className="bg-emerald-500 hover:bg-emerald-600"
         >
           <Wifi className="w-4 h-4 mr-2" />
-          Conectar WhatsApp
+          Ir para Configurações
         </Button>
       </div>
     );
