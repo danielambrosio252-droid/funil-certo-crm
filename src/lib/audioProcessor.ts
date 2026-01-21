@@ -155,7 +155,6 @@ export async function processAndSendAudioAsync(job: AudioProcessingJob): Promise
     let extension = "ogg";
 
     const isOggNative = originalBaseMime.includes("ogg");
-    const isMp4Native = originalBaseMime === "audio/mp4";
 
     if (isOggNative) {
       // BEST PATH: Browser recorded native OGG/Opus - no transcode needed.
@@ -167,64 +166,45 @@ export async function processAndSendAudioAsync(job: AudioProcessingJob): Promise
         "Duration(s):",
         duration
       );
-    } else if (isMp4Native) {
-      // FAST PATH: audio/mp4 avoids FFmpeg WASM download/transcode.
-      // Meta generally accepts audio/mp4; the backend will upload it as-is.
-      uploadMime = "audio/mp4";
-      extension = "m4a";
-      console.log(
-        "[AudioProcessor] Native MP4! No transcode. Size:",
-        uploadBlob.size,
-        "Duration(s):",
-        duration
-      );
     } else {
-      // Fallback: Transcode WebM/other formats to OGG/Opus for maximum compatibility.
-      console.log("[AudioProcessor] Non-OGG/MP4 format:", originalBaseMime, "- transcoding to OGG...");
-      uploadBlob = await transcodeToOggInWorker(blob, mimeType);
+      // ALL OTHER FORMATS (MP4, WebM, etc): Transcode to OGG/Opus for Meta Cloud API compatibility.
+      // Meta /media endpoint REJECTS audio/mp4 - it requires audio/ogg for audio messages.
+      console.log("[AudioProcessor] Non-OGG format:", originalBaseMime, "- transcoding to OGG/Opus...");
+      uploadBlob = await transcodeToOggInWorker(blob, mimeType, abortController.signal);
       uploadMime = "audio/ogg";
       extension = "ogg";
       console.log("[AudioProcessor] Transcoded OK. Size:", uploadBlob.size, "Mime:", uploadMime);
     }
 
-    // Post-processing validation:
-    // - For OGG, inspect container for basic sanity.
-    // - For MP4, we skip decode inspection (WebAudio often can't decode AAC consistently).
-    if (uploadMime === "audio/ogg") {
-      const inspected = await inspectOgg(uploadBlob);
-      console.log(
-        "[AudioProcessor] Post-conversion inspection:",
-        JSON.stringify(
-          {
-            size_bytes: inspected.size,
-            duration_s: inspected.duration,
-            sample_rate_hz: inspected.sampleRate,
-            channels: inspected.channels,
-            codec: "opus (libopus)",
-            target: {
-              channels: 1,
-              sampleRate: 48000,
-              bitrate: "24k",
-              application: "voip",
-              container: "ogg",
-            },
+    // Post-processing validation for OGG files
+    const inspected = await inspectOgg(uploadBlob);
+    console.log(
+      "[AudioProcessor] Post-conversion inspection:",
+      JSON.stringify(
+        {
+          size_bytes: inspected.size,
+          duration_s: inspected.duration,
+          sample_rate_hz: inspected.sampleRate,
+          channels: inspected.channels,
+          codec: "opus (libopus)",
+          target: {
+            channels: 1,
+            sampleRate: 48000,
+            bitrate: "24k",
+            application: "voip",
+            container: "ogg",
           },
-          null,
-          2
-        )
-      );
+        },
+        null,
+        2
+      )
+    );
 
-      if (inspected.size < 1024) {
-        throw new Error(`Converted audio too small (<1KB): ${inspected.size} bytes`);
-      }
-      if (typeof inspected.duration === "number" && inspected.duration < 1) {
-        throw new Error(`Converted audio duration < 1s: ${inspected.duration}`);
-      }
-    } else {
-      // Minimal sanity check for MP4
-      if (uploadBlob.size < 1024) {
-        throw new Error(`Recorded audio too small (<1KB): ${uploadBlob.size} bytes`);
-      }
+    if (inspected.size < 1024) {
+      throw new Error(`Converted audio too small (<1KB): ${inspected.size} bytes`);
+    }
+    if (typeof inspected.duration === "number" && inspected.duration < 1) {
+      throw new Error(`Converted audio duration < 1s: ${inspected.duration}`);
     }
     
     const filename = `${timestamp}-${randomId}.${extension}`;
