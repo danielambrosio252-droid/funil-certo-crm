@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useEffect } from "react";
+import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import {
   ReactFlow,
   Background,
@@ -43,6 +43,12 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [showConfigDialog, setShowConfigDialog] = useState(false);
 
+  // Placement helpers (avoid stacked nodes when user adds quickly)
+  const nodesRef = useRef<Node[]>([]);
+  const placementAnchorIdRef = useRef<string | null>(null);
+  const lastPlacedRef = useRef<{ x: number; y: number } | null>(null);
+  const NODE_GAP_Y = 140;
+
   // Convert DB nodes to React Flow format
   const initialNodes = useMemo(() => 
     dbNodes.map((node) => ({
@@ -79,6 +85,10 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
   // Sync with DB data
   useEffect(() => {
     if (dbNodes.length > 0) {
@@ -100,6 +110,13 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           },
         },
       })));
+
+      // Keep lastPlacedRef in sync with persisted positions
+      const maxNode = dbNodes.reduce(
+        (prev, curr) => (prev.position_y > curr.position_y ? prev : curr),
+        dbNodes[0]
+      );
+      lastPlacedRef.current = { x: Math.round(maxNode.position_x), y: Math.round(maxNode.position_y) };
     }
   }, [dbNodes, setNodes]);
 
@@ -166,19 +183,46 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   // Add new node
   const handleAddNode = async (type: NodeType) => {
-    // IMPORTANT: ReactFlow positions are floats while dragging/zooming,
+    // IMPORTANT: ReactFlow positions can be floats while dragging/zooming,
     // but our DB columns expect integers. Always round before inserting.
-    const centerX = 250;
-    const lastNode = nodes.length > 0 
-      ? nodes.reduce((prev, curr) => prev.position.y > curr.position.y ? prev : curr)
+    const currentNodes = nodesRef.current;
+
+    // Prefer placing below the last clicked node; fallback to bottom-most node.
+    const anchor = placementAnchorIdRef.current
+      ? currentNodes.find((n) => n.id === placementAnchorIdRef.current) || null
       : null;
-    const positionY = lastNode ? lastNode.position.y + 120 : 50;
+
+    const bottomMost = currentNodes.length
+      ? currentNodes.reduce((prev, curr) => (prev.position.y > curr.position.y ? prev : curr))
+      : null;
+
+    const baseX = Math.round(
+      anchor?.position.x ??
+        lastPlacedRef.current?.x ??
+        bottomMost?.position.x ??
+        250
+    );
+
+    // If user clicks add quickly, rely on lastPlacedRef to avoid stacking while DB refetch is pending.
+    let nextY = Math.round(
+      anchor?.position.y != null
+        ? anchor.position.y + NODE_GAP_Y
+        : (lastPlacedRef.current?.y ?? bottomMost?.position.y ?? 50) + NODE_GAP_Y
+    );
+
+    // Simple collision avoidance: if there's already a node at (x,y), push down.
+    const isOccupied = (x: number, y: number) =>
+      currentNodes.some((n) => Math.abs(n.position.x - x) < 10 && Math.abs(n.position.y - y) < 10);
+    while (isOccupied(baseX, nextY)) nextY += NODE_GAP_Y;
+
+    // Reserve slot immediately (prevents overlap on rapid clicks)
+    lastPlacedRef.current = { x: baseX, y: nextY };
 
     try {
       await addNode.mutateAsync({
         node_type: type,
-        position_x: Math.round(centerX),
-        position_y: Math.round(positionY),
+        position_x: baseX,
+        position_y: nextY,
       });
     } catch (error) {
       console.error("Error adding node:", error);
@@ -257,6 +301,9 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           onConnect={onConnect}
           onNodesDelete={onNodesDelete}
           onEdgesDelete={onEdgesDelete}
+          onNodeClick={(_, node) => {
+            placementAnchorIdRef.current = node.id;
+          }}
           nodeTypes={flowNodeTypes}
           fitView
           deleteKeyCode={["Backspace", "Delete"]}
