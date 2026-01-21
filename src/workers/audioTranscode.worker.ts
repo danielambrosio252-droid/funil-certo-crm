@@ -123,6 +123,10 @@ async function transcode(inputArrayBuffer, originalMimeType) {
     "10",               // Maximum compression
     "-frame_duration",
     "20",               // 20ms frames (WhatsApp standard)
+    "-application",
+    "voip",             // Voice-note oriented Opus tuning (improves Meta compatibility)
+    "-f",
+    "ogg",              // Force OGG container explicitly (avoid ambiguous muxing)
     outputName,         // Output file (extension determines container)
   ]);
 
