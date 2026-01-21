@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -20,7 +21,6 @@ import {
   Clock,
   AlertCircle,
   Smile,
-  Mic,
   Phone,
   MoreVertical,
   MessageSquare,
@@ -28,10 +28,7 @@ import {
   WifiOff,
   Plus,
   UserPlus,
-  Image,
   FileText,
-  Video,
-  Play,
   Download,
   RotateCcw,
   Loader2,
@@ -46,6 +43,7 @@ import { toast } from "sonner";
 import { MediaUploadButton } from "./MediaUploadButton";
 import { AudioRecordButton } from "./AudioRecordButton";
 import { AudioPlayer } from "./AudioPlayer";
+import { TextImproveMenu } from "./TextImproveMenu";
 import { processAndSendAudioAsync } from "@/lib/audioProcessor";
 
 interface Contact {
@@ -79,6 +77,7 @@ export function WhatsAppChat() {
   const [sending, setSending] = useState(false);
   const sendLockRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [newConversationOpen, setNewConversationOpen] = useState(false);
   const [newPhoneNumber, setNewPhoneNumber] = useState("");
   const [newContactName, setNewContactName] = useState("");
@@ -107,6 +106,14 @@ export function WhatsAppChat() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + "px";
+    }
+  }, [messageInput]);
+
   // Load messages when contact changes
   useEffect(() => {
     if (selectedContact) {
@@ -117,10 +124,6 @@ export function WhatsAppChat() {
       
       fetchMessages(selectedContact.id).then((msgs) => {
         console.log(`[WhatsApp] Carregadas ${msgs.length} mensagens para contato ${selectedContact.id}`);
-        // Log para debug
-        const fromMe = msgs.filter(m => m.is_from_me).length;
-        const received = msgs.filter(m => !m.is_from_me).length;
-        console.log(`[WhatsApp] Enviadas: ${fromMe}, Recebidas: ${received}`);
         setMessages(msgs);
       });
       markAsRead(selectedContact.id);
@@ -140,9 +143,8 @@ export function WhatsAppChat() {
       oscillator.connect(gainNode);
       gainNode.connect(audioContext.destination);
       
-      // Pleasant notification tone
-      oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // A5
-      oscillator.frequency.setValueAtTime(1108.73, audioContext.currentTime + 0.1); // C#6
+      oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(1108.73, audioContext.currentTime + 0.1);
       
       gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
       gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
@@ -171,26 +173,21 @@ export function WhatsAppChat() {
         (payload) => {
           const newMessage = payload.new as Message;
           
-          // Se a mensagem é nossa, limpar pendente (texto ou áudio)
           if (newMessage.is_from_me) {
-            // Clear text pending message
             if (pendingContentRef.current === newMessage.content) {
               pendingContentRef.current = null;
               setPendingMessage(null);
             }
-            // Clear audio pending message
             if (newMessage.message_type === "audio" && pendingMessage?.type === "audio") {
               setPendingMessage(null);
             }
           }
           
-          // Play sound for incoming messages (not from me)
           if (!newMessage.is_from_me) {
             playNotificationSound();
           }
           
           setMessages((prev) => {
-            // Evitar duplicatas por ID
             if (prev.some((m) => m.id === newMessage.id)) return prev;
             return [...prev, newMessage];
           });
@@ -216,7 +213,7 @@ export function WhatsAppChat() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedContact?.id, profile?.company_id, playNotificationSound]);
+  }, [selectedContact?.id, profile?.company_id, playNotificationSound, pendingMessage]);
 
   // Subscribe to typing indicators via broadcast
   useEffect(() => {
@@ -231,11 +228,9 @@ export function WhatsAppChat() {
           presence: "composing" | "recording";
         };
 
-        // Só mostrar se for do contato selecionado
         if (selectedContact?.id === contact_id) {
           setContactTyping({ contactId: contact_id, presence });
 
-          // Limpar após 3 segundos sem nova atualização
           if (typingTimeoutRef.current) {
             clearTimeout(typingTimeoutRef.current);
           }
@@ -257,7 +252,6 @@ export function WhatsAppChat() {
   const handleSend = async () => {
     if (!messageInput.trim() || !selectedContact) return;
 
-    // Trava síncrona para evitar disparos múltiplos (clique duplo / Enter repetido)
     if (sendLockRef.current) return;
     sendLockRef.current = true;
 
@@ -265,7 +259,6 @@ export function WhatsAppChat() {
     setMessageInput("");
     setSending(true);
 
-    // Definir mensagem pendente (exibida separadamente, fora do array)
     pendingContentRef.current = content;
     setPendingMessage({
       content,
@@ -276,12 +269,10 @@ export function WhatsAppChat() {
       const messageId = await sendMessage(selectedContact.id, content);
 
       if (!messageId || typeof messageId !== "string") {
-        // Falhou - limpar pendente e mostrar erro
         pendingContentRef.current = null;
         setPendingMessage(null);
         toast.error("Erro ao enviar mensagem");
       }
-      // Se sucesso, o realtime INSERT vai adicionar a mensagem e limpar a pendente
     } finally {
       setSending(false);
       sendLockRef.current = false;
@@ -293,13 +284,11 @@ export function WhatsAppChat() {
     
     setSending(true);
     try {
-      // Delete the failed message first
       await supabase
         .from("whatsapp_messages")
         .delete()
         .eq("id", msg.id);
       
-      // Resend based on message type
       const messageId = await sendMessage(selectedContact.id, msg.content, {
         messageType: msg.message_type as "text" | "image" | "video" | "audio" | "document",
         mediaUrl: msg.media_url || undefined,
@@ -333,7 +322,6 @@ export function WhatsAppChat() {
   const handleCreateConversation = async () => {
     if (!newPhoneNumber.trim() || !profile?.company_id) return;
 
-    // Clean and normalize the phone number
     const cleanPhone = normalizePhone(newPhoneNumber);
     
     if (!cleanPhone || cleanPhone.length < 12) {
@@ -344,7 +332,6 @@ export function WhatsAppChat() {
     setCreatingConversation(true);
 
     try {
-      // Check if contact already exists (comparing normalized phones)
       const existingContact = contacts.find(c => normalizePhone(c.phone) === cleanPhone);
       
       if (existingContact) {
@@ -357,12 +344,11 @@ export function WhatsAppChat() {
         return;
       }
 
-      // Create new contact in database with normalized phone
       const { data: newContact, error } = await supabase
         .from("whatsapp_contacts")
         .insert({
           company_id: profile.company_id,
-          phone: cleanPhone, // ✅ Telefone normalizado E.164
+          phone: cleanPhone,
           normalized_phone: cleanPhone,
           name: newContactName.trim() || null,
           is_group: false,
@@ -373,7 +359,6 @@ export function WhatsAppChat() {
 
       if (error) throw error;
 
-      // Refresh contacts and select the new one
       await refetch();
       
       setSelectedContact({
@@ -437,38 +422,30 @@ export function WhatsAppChat() {
     }
   };
 
-
-  // Show loading state while checking connection status
-  // This prevents showing "Disconnected" before cloudApiConfigured is loaded
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-[calc(100vh-200px)] bg-card border border-border rounded-xl p-8">
-        <div className="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center mb-6">
-          <div className="w-8 h-8 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      <div className="flex flex-col items-center justify-center h-full bg-card rounded-xl p-8">
+        <div className="w-12 h-12 rounded-full bg-emerald-50 flex items-center justify-center mb-4">
+          <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
         </div>
-        <h3 className="text-lg font-medium text-foreground">
-          Carregando WhatsApp...
-        </h3>
+        <p className="text-sm text-muted-foreground">Carregando WhatsApp...</p>
       </div>
     );
   }
 
-  // Not connected state - only show after loading completes
   if (!isConnected) {
     return (
-      <div className="flex flex-col items-center justify-center h-[calc(100vh-200px)] bg-card border border-border rounded-xl p-8">
-        <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mb-6">
-          <WifiOff className="w-10 h-10 text-slate-400" />
+      <div className="flex flex-col items-center justify-center h-full bg-card rounded-xl p-8">
+        <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-4">
+          <WifiOff className="w-8 h-8 text-slate-400" />
         </div>
-        <h3 className="text-xl font-semibold text-foreground mb-2">
-          WhatsApp Desconectado
-        </h3>
-        <p className="text-muted-foreground text-center max-w-sm mb-6">
-          Conecte seu WhatsApp para começar a receber e enviar mensagens aos seus clientes.
+        <h3 className="text-lg font-semibold text-foreground mb-2">WhatsApp Desconectado</h3>
+        <p className="text-sm text-muted-foreground text-center max-w-sm mb-4">
+          Conecte seu WhatsApp para começar a atender seus clientes.
         </p>
         <Button 
           onClick={() => navigate("/whatsapp")}
-          className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white"
+          className="bg-emerald-500 hover:bg-emerald-600"
         >
           <Wifi className="w-4 h-4 mr-2" />
           Conectar WhatsApp
@@ -478,27 +455,24 @@ export function WhatsAppChat() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-200px)] bg-card border border-border rounded-xl overflow-hidden shadow-lg">
-      {/* Contacts List */}
-      <div className="w-80 lg:w-96 border-r border-border flex flex-col bg-background">
-        {/* Search Header */}
-        <div className="p-4 border-b border-border bg-muted/30">
+    <div className="flex h-full bg-background rounded-xl overflow-hidden border border-border">
+      {/* Contacts List - Compact */}
+      <div className="w-72 lg:w-80 border-r border-border flex flex-col bg-card">
+        {/* Search Header - Compact */}
+        <div className="p-3 border-b border-border">
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 placeholder="Buscar conversas..."
-                className="pl-10 bg-background"
+                className="pl-8 h-9 text-sm bg-muted/50"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
             <Dialog open={newConversationOpen} onOpenChange={setNewConversationOpen}>
               <DialogTrigger asChild>
-                <Button 
-                  size="icon" 
-                  className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 shadow-md shrink-0"
-                >
+                <Button size="icon" className="h-9 w-9 bg-emerald-500 hover:bg-emerald-600 shrink-0">
                   <Plus className="w-4 h-4" />
                 </Button>
               </DialogTrigger>
@@ -511,23 +485,18 @@ export function WhatsAppChat() {
                 </DialogHeader>
                 <div className="space-y-4 pt-4">
                   <div>
-                    <label className="text-sm font-medium text-foreground mb-2 block">
-                      Número de WhatsApp *
-                    </label>
+                    <label className="text-sm font-medium mb-2 block">Número de WhatsApp *</label>
                     <Input
                       placeholder="Ex: 5583999999999"
                       value={newPhoneNumber}
                       onChange={(e) => setNewPhoneNumber(e.target.value)}
-                      className="text-base"
                     />
                     <p className="text-xs text-muted-foreground mt-1">
                       Digite o número com código do país (55 para Brasil)
                     </p>
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-foreground mb-2 block">
-                      Nome do Contato (opcional)
-                    </label>
+                    <label className="text-sm font-medium mb-2 block">Nome (opcional)</label>
                     <Input
                       placeholder="Ex: João Silva"
                       value={newContactName}
@@ -535,13 +504,13 @@ export function WhatsAppChat() {
                     />
                   </div>
                   <Button
-                    className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700"
+                    className="w-full bg-emerald-500 hover:bg-emerald-600"
                     onClick={handleCreateConversation}
                     disabled={!newPhoneNumber.trim() || creatingConversation}
                   >
                     {creatingConversation ? (
                       <>
-                        <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                         Criando...
                       </>
                     ) : (
@@ -557,111 +526,85 @@ export function WhatsAppChat() {
           </div>
         </div>
 
-        {/* Status indicator */}
-        <div className="px-4 py-2 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs text-emerald-700 font-medium">WhatsApp conectado</span>
+        {/* Status indicator - Compact */}
+        <div className="px-3 py-1.5 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            <span className="text-xs text-emerald-700">Conectado</span>
           </div>
           <span className="text-xs text-emerald-600">{contacts.length} conversas</span>
         </div>
 
+        {/* Contacts List */}
         <ScrollArea className="flex-1">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : filteredContacts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center p-8 text-center">
-              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
-                <MessageSquare className="w-8 h-8 text-muted-foreground" />
-              </div>
-              <p className="text-sm font-medium text-foreground mb-1">
+          {filteredContacts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center p-6 text-center">
+              <MessageSquare className="w-8 h-8 text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">
                 {contacts.length === 0 ? "Nenhuma conversa" : "Nenhum resultado"}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {contacts.length === 0
-                  ? "Novas conversas aparecerão aqui"
-                  : "Tente buscar por outro termo"}
               </p>
             </div>
           ) : (
             filteredContacts.map((contact) => (
-              <motion.div
+              <div
                 key={contact.id}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
                 onClick={() => setSelectedContact(contact)}
                 className={cn(
-                  "p-4 border-b border-border cursor-pointer hover:bg-muted/50 transition-all duration-200",
+                  "px-3 py-2.5 border-b border-border cursor-pointer hover:bg-muted/50 transition-colors",
                   selectedContact?.id === contact.id && "bg-emerald-50 hover:bg-emerald-50 border-l-2 border-l-emerald-500"
                 )}
               >
-                <div className="flex items-start gap-3">
-                  <Avatar className="w-12 h-12 ring-2 ring-background shadow-sm">
+                <div className="flex items-center gap-2.5">
+                  <Avatar className="w-10 h-10">
                     {contact.profile_picture ? (
-                      <img src={contact.profile_picture} alt={contact.name || contact.phone} className="object-cover" />
+                      <img src={contact.profile_picture} alt="" className="object-cover" />
                     ) : (
-                      <AvatarFallback className="bg-gradient-to-br from-emerald-400 to-emerald-600 text-white font-medium">
-                        {(contact.name || contact.phone)
-                          .split(" ")
-                          .map((n) => n[0])
-                          .join("")
-                          .substring(0, 2)
-                          .toUpperCase()}
+                      <AvatarFallback className="bg-emerald-500 text-white text-sm">
+                        {(contact.name || contact.phone).substring(0, 2).toUpperCase()}
                       </AvatarFallback>
                     )}
                   </Avatar>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="font-medium text-foreground truncate">
-                        {contact.name || contact.phone}
-                      </p>
-                      <span className="text-xs text-muted-foreground flex-shrink-0 ml-2">
+                    <div className="flex items-center justify-between">
+                      <p className="font-medium text-sm truncate">{contact.name || formatLocalPhone(contact.phone)}</p>
+                      <span className="text-[10px] text-muted-foreground">
                         {contact.last_message_at && formatDate(contact.last_message_at)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <p className="text-sm text-muted-foreground truncate">
-                        {formatLocalPhone(contact.phone)}
+                      <p className="text-xs text-muted-foreground truncate">
+                        {contact.name ? formatLocalPhone(contact.phone) : ""}
                       </p>
                       {contact.unread_count > 0 && (
-                        <Badge className="bg-emerald-500 text-white ml-2 h-5 min-w-[20px] p-0 flex items-center justify-center text-xs shadow-sm">
+                        <Badge className="bg-emerald-500 text-white h-4 min-w-4 p-0 flex items-center justify-center text-[10px]">
                           {contact.unread_count}
                         </Badge>
                       )}
                     </div>
                   </div>
                 </div>
-              </motion.div>
+              </div>
             ))
           )}
         </ScrollArea>
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 flex flex-col bg-gradient-to-b from-slate-50 to-slate-100">
+      <div className="flex-1 flex flex-col bg-slate-50">
         {selectedContact ? (
           <>
-            {/* Chat Header */}
-            <div className="p-4 border-b border-border flex items-center justify-between bg-white shadow-sm">
+            {/* Chat Header - Compact */}
+            <div className="px-4 py-2.5 border-b border-border flex items-center justify-between bg-white">
               <div className="flex items-center gap-3">
-                <Avatar className="w-10 h-10 ring-2 ring-emerald-100">
-                  <AvatarFallback className="bg-gradient-to-br from-emerald-400 to-emerald-600 text-white font-medium">
-                    {(selectedContact.name || selectedContact.phone)
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")
-                      .substring(0, 2)
-                      .toUpperCase()}
+                <Avatar className="w-9 h-9">
+                  <AvatarFallback className="bg-emerald-500 text-white text-sm">
+                    {(selectedContact.name || selectedContact.phone).substring(0, 2).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <div>
-                  <p className="font-semibold text-foreground">
-                    {selectedContact.name || selectedContact.phone}
-                  </p>
+                  <p className="font-medium text-sm">{selectedContact.name || formatLocalPhone(selectedContact.phone)}</p>
                   {contactTyping?.contactId === selectedContact.id ? (
-                    <p className="text-xs text-emerald-600 font-medium animate-pulse">
+                    <p className="text-xs text-emerald-600 animate-pulse">
                       {contactTyping.presence === "recording" ? "Gravando áudio..." : "Digitando..."}
                     </p>
                   ) : (
@@ -670,70 +613,55 @@ export function WhatsAppChat() {
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="rounded-full">
-                  <Phone className="w-5 h-5 text-muted-foreground" />
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <Phone className="w-4 h-4 text-muted-foreground" />
                 </Button>
-                <Button variant="ghost" size="icon" className="rounded-full">
-                  <MoreVertical className="w-5 h-5 text-muted-foreground" />
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <MoreVertical className="w-4 h-4 text-muted-foreground" />
                 </Button>
               </div>
             </div>
 
-            {/* Messages */}
-            <ScrollArea className="flex-1 p-4">
-              <div className="space-y-3 max-w-3xl mx-auto">
-                {/* Debug: Total de mensagens */}
-                {messages.length > 0 && (
-                  <div className="text-center mb-4">
-                    <span className="text-xs text-muted-foreground bg-slate-100 px-3 py-1 rounded-full">
-                      {messages.length} mensagens carregadas
-                    </span>
-                  </div>
-                )}
+            {/* Messages - Full space */}
+            <ScrollArea className="flex-1 p-3">
+              <div className="space-y-2 max-w-4xl mx-auto">
                 <AnimatePresence mode="popLayout">
                   {messages.map((msg) => (
                     <motion.div
                       key={msg.id}
-                      initial={{ opacity: 0, y: 10 }}
+                      initial={{ opacity: 0, y: 5 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0 }}
-                      className={cn("flex", msg.is_from_me === true ? "justify-end" : "justify-start")}
+                      className={cn("flex", msg.is_from_me ? "justify-end" : "justify-start")}
                     >
                       <div
                         className={cn(
-                          "max-w-[75%] rounded-2xl shadow-sm overflow-hidden",
-                          msg.is_from_me === true
-                            ? "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-br-md"
-                            : "bg-white text-foreground rounded-bl-md border border-slate-200",
+                          "max-w-[70%] rounded-2xl shadow-sm overflow-hidden",
+                          msg.is_from_me
+                            ? "bg-emerald-500 text-white rounded-br-sm"
+                            : "bg-white text-foreground rounded-bl-sm border border-slate-200",
                           msg.status === "failed" && "ring-2 ring-red-300",
-                          msg.message_type !== "text" && msg.media_url ? "p-1" : "px-4 py-2.5"
+                          msg.message_type !== "text" && msg.media_url ? "p-1" : "px-3 py-2"
                         )}
                       >
-                        {/* Renderizar mídia se existir */}
+                        {/* Media content */}
                         {msg.message_type === "image" && msg.media_url && (
                           <div className="mb-1">
                             <img 
                               src={msg.media_url} 
                               alt="Imagem" 
-                              className="rounded-xl max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                              className="rounded-xl max-w-full max-h-52 object-cover cursor-pointer hover:opacity-90"
                               onClick={() => window.open(msg.media_url!, "_blank")}
                             />
                           </div>
                         )}
                         {msg.message_type === "video" && msg.media_url && (
-                          <div className="mb-1 relative">
-                            <video 
-                              src={msg.media_url} 
-                              className="rounded-xl max-w-full max-h-64"
-                              controls
-                            />
+                          <div className="mb-1">
+                            <video src={msg.media_url} className="rounded-xl max-w-full max-h-52" controls />
                           </div>
                         )}
                         {msg.message_type === "audio" && msg.media_url && (
-                          <AudioPlayer 
-                            src={msg.media_url} 
-                            isFromMe={msg.is_from_me === true}
-                          />
+                          <AudioPlayer src={msg.media_url} isFromMe={msg.is_from_me} />
                         )}
                         {msg.message_type === "document" && msg.media_url && (
                           <a 
@@ -741,103 +669,88 @@ export function WhatsAppChat() {
                             target="_blank" 
                             rel="noopener noreferrer"
                             className={cn(
-                              "flex items-center gap-3 px-3 py-2 rounded-xl mb-1",
+                              "flex items-center gap-2 px-2 py-1.5 rounded-xl mb-1",
                               msg.is_from_me ? "bg-white/10 hover:bg-white/20" : "bg-slate-50 hover:bg-slate-100"
                             )}
                           >
-                            <FileText className={cn("w-8 h-8", msg.is_from_me ? "text-white" : "text-purple-600")} />
+                            <FileText className={cn("w-6 h-6", msg.is_from_me ? "text-white" : "text-purple-600")} />
                             <div className="flex-1 min-w-0">
-                              <p className={cn("text-sm font-medium truncate", msg.is_from_me ? "text-white" : "text-foreground")}>
+                              <p className={cn("text-xs font-medium truncate", msg.is_from_me ? "text-white" : "text-foreground")}>
                                 Documento
                               </p>
-                              <p className={cn("text-xs", msg.is_from_me ? "text-white/70" : "text-muted-foreground")}>
-                                Clique para abrir
-                              </p>
                             </div>
-                            <Download className={cn("w-4 h-4", msg.is_from_me ? "text-white/70" : "text-muted-foreground")} />
+                            <Download className={cn("w-3 h-3", msg.is_from_me ? "text-white/70" : "text-muted-foreground")} />
                           </a>
                         )}
                         
-                        {/* Conteúdo de texto */}
+                        {/* Text content */}
                         {(msg.message_type === "text" || msg.content) && msg.content !== `[${msg.message_type?.toUpperCase()}]` && (
-                          <p className={cn("whitespace-pre-wrap text-sm leading-relaxed", msg.message_type !== "text" && msg.media_url && "px-3 pb-1")}>
+                          <p className={cn("whitespace-pre-wrap text-sm", msg.message_type !== "text" && msg.media_url && "px-2 pb-1")}>
                             {msg.content}
                           </p>
                         )}
                         
-                        <div
-                          className={cn(
-                            "flex items-center gap-1 mt-1",
-                            msg.is_from_me === true ? "justify-end" : "justify-start",
-                            msg.message_type !== "text" && msg.media_url && "px-3 pb-1"
-                          )}
-                        >
-                          {/* Resend button for failed messages */}
-                          {msg.status === "failed" && msg.is_from_me === true && (
+                        <div className={cn(
+                          "flex items-center gap-1 mt-0.5",
+                          msg.is_from_me ? "justify-end" : "justify-start",
+                          msg.message_type !== "text" && msg.media_url && "px-2 pb-1"
+                        )}>
+                          {msg.status === "failed" && msg.is_from_me && (
                             <button
                               onClick={() => handleResend(msg)}
                               disabled={sending}
-                              className="flex items-center gap-1 text-[10px] text-white/90 bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-full transition-colors mr-1"
+                              className="flex items-center gap-1 text-[10px] text-white/90 bg-white/20 hover:bg-white/30 px-1.5 py-0.5 rounded-full mr-1"
                             >
-                              <RotateCcw className="w-3 h-3" />
+                              <RotateCcw className="w-2.5 h-2.5" />
                               Reenviar
                             </button>
                           )}
-                          <span
-                            className={cn(
-                              "text-[10px]",
-                              msg.is_from_me === true
-                                ? "text-white/70"
-                                : "text-muted-foreground"
-                            )}
-                          >
+                          <span className={cn("text-[10px]", msg.is_from_me ? "text-white/70" : "text-muted-foreground")}>
                             {formatTime(msg.sent_at)}
                           </span>
-                          {msg.is_from_me === true && getStatusIcon(msg.status)}
+                          {msg.is_from_me && getStatusIcon(msg.status)}
                         </div>
                       </div>
                     </motion.div>
                   ))}
                 </AnimatePresence>
                 
-                {/* Mensagem pendente (exibida separadamente enquanto envia) */}
+                {/* Pending message */}
                 <AnimatePresence>
                   {pendingMessage && (
                     <motion.div
                       key="pending-message"
-                      initial={{ opacity: 0, y: 10 }}
+                      initial={{ opacity: 0, y: 5 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.95 }}
                       className="flex justify-end"
                     >
-                      <div className="max-w-[75%] rounded-2xl px-4 py-2.5 shadow-sm bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-br-md opacity-80">
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed">{pendingMessage.content}</p>
-                        <div className="flex items-center gap-1 mt-1 justify-end">
-                          <span className="text-[10px] text-white/70">
-                            {formatTime(pendingMessage.timestamp)}
-                          </span>
-                          <Clock className="w-3 h-3 text-white/60" />
+                      <div className="max-w-[70%] rounded-2xl px-3 py-2 shadow-sm bg-emerald-500 text-white rounded-br-sm opacity-80">
+                        <p className="whitespace-pre-wrap text-sm">{pendingMessage.content}</p>
+                        <div className="flex items-center gap-1 mt-0.5 justify-end">
+                          <span className="text-[10px] text-white/70">{formatTime(pendingMessage.timestamp)}</span>
+                          <Clock className="w-2.5 h-2.5 text-white/60" />
                         </div>
                       </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
                 
-                {/* Indicador de digitando (contato) */}
+                {/* Typing indicator */}
                 <AnimatePresence>
                   {contactTyping?.contactId === selectedContact?.id && (
                     <motion.div
                       key="typing-indicator"
-                      initial={{ opacity: 0, y: 10 }}
+                      initial={{ opacity: 0, y: 5 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
+                      exit={{ opacity: 0, y: -5 }}
                       className="flex justify-start"
                     >
-                      <div className="bg-white rounded-2xl rounded-bl-md px-4 py-3 shadow-sm border border-slate-200">
+                      <div className="bg-white rounded-2xl rounded-bl-sm px-3 py-2 shadow-sm border border-slate-200">
                         <div className="flex items-center gap-1">
-                          <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                          <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                          <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                          <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                          <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                          <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                         </div>
                       </div>
                     </motion.div>
@@ -848,10 +761,10 @@ export function WhatsAppChat() {
               </div>
             </ScrollArea>
 
-            {/* Input Area */}
-            <div className="p-4 border-t border-border bg-white">
-              <div className="flex items-center gap-2 max-w-3xl mx-auto">
-                <Button variant="ghost" size="icon" className="rounded-full shrink-0">
+            {/* Input Area - Enhanced with AI */}
+            <div className="p-3 border-t border-border bg-white">
+              <div className="flex items-end gap-2 max-w-4xl mx-auto">
+                <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0 mb-0.5">
                   <Smile className="w-5 h-5 text-muted-foreground" />
                 </Button>
                 <MediaUploadButton
@@ -871,32 +784,39 @@ export function WhatsAppChat() {
                     }
                   }}
                 />
-                <Input
-                  placeholder="Digite uma mensagem..."
-                  value={messageInput}
-                  onChange={(e) => setMessageInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  className="flex-1 rounded-full bg-slate-100 border-0 focus-visible:ring-emerald-500"
+                <TextImproveMenu 
+                  text={messageInput}
+                  onTextImproved={setMessageInput}
                   disabled={sending}
                 />
+                <div className="flex-1 relative">
+                  <Textarea
+                    ref={textareaRef}
+                    placeholder="Digite uma mensagem..."
+                    value={messageInput}
+                    onChange={(e) => setMessageInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    className="min-h-[36px] max-h-[120px] py-2 px-3 resize-none rounded-2xl bg-slate-100 border-0 focus-visible:ring-emerald-500 text-sm"
+                    disabled={sending}
+                    rows={1}
+                  />
+                </div>
                 {messageInput.trim() ? (
                   <Button
                     size="icon"
-                    className="rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 shadow-lg"
+                    className="h-9 w-9 rounded-full bg-emerald-500 hover:bg-emerald-600 shrink-0 mb-0.5"
                     onClick={handleSend}
                     disabled={sending}
                   >
-                    <Send className="w-5 h-5" />
+                    <Send className="w-4 h-4" />
                   </Button>
                 ) : (
-                  <>
+                  <div className="flex items-center gap-1 mb-0.5">
                     <AudioRecordButton
                       disabled={sending}
                       onRecordingComplete={(data) => {
                         if (!selectedContact || !profile?.company_id) return;
                         
-                        // Show optimistic UI immediately
-                        const tempId = `temp-audio-${Date.now()}`;
                         setPendingMessage({
                           content: "[AUDIO]",
                           timestamp: new Date().toISOString(),
@@ -905,42 +825,37 @@ export function WhatsAppChat() {
                         });
                         setAudioProcessingCount(prev => prev + 1);
                         
-                        // Process in background (non-blocking)
                         processAndSendAudioAsync({
                           blob: data.blob,
                           mimeType: data.mimeType,
                           duration: data.duration,
                           contactId: selectedContact.id,
                           companyId: profile.company_id,
-                          tempMessageId: tempId,
+                          tempMessageId: `temp-audio-${Date.now()}`,
                         }).finally(() => {
                           setAudioProcessingCount(prev => Math.max(0, prev - 1));
-                          // Pending message will be cleared by realtime subscription
                         });
                       }}
                     />
                     {audioProcessingCount > 0 && (
                       <div className="flex items-center gap-1 text-xs text-emerald-600">
                         <Loader2 className="w-3 h-3 animate-spin" />
-                        <span>{audioProcessingCount > 1 ? `${audioProcessingCount} áudios` : 'Enviando'}</span>
                       </div>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
             </div>
           </>
         ) : (
           /* Empty State */
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-gradient-to-b from-white to-slate-50">
-            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-100 to-emerald-200 flex items-center justify-center mb-6 shadow-lg">
-              <MessageSquare className="w-12 h-12 text-emerald-600" />
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
+            <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mb-4">
+              <MessageSquare className="w-8 h-8 text-emerald-600" />
             </div>
-            <h3 className="text-xl font-semibold text-foreground mb-2">
-              Central de Atendimento
-            </h3>
-            <p className="text-muted-foreground max-w-sm">
-              Selecione uma conversa à esquerda para começar a atender seus clientes
+            <h3 className="text-lg font-semibold mb-1">Central de Atendimento</h3>
+            <p className="text-sm text-muted-foreground max-w-xs">
+              Selecione uma conversa para começar a atender
             </p>
           </div>
         )}

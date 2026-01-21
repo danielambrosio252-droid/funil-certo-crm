@@ -45,27 +45,7 @@ async function ensureLoaded() {
   ffmpeg = new FFmpeg();
   loading = (async () => {
     try {
-      // Prefer local bundled core (avoids CDN blockers / corporate proxies)
-      post({ type: "progress", message: "[FFMPEG] loading bundled core..." });
-
-      try {
-        const coreURL = new URL(
-          "@ffmpeg/core/dist/esm/ffmpeg-core.js",
-          import.meta.url
-        ).toString();
-        const wasmURL = new URL(
-          "@ffmpeg/core/dist/esm/ffmpeg-core.wasm",
-          import.meta.url
-        ).toString();
-
-        await withTimeout(ffmpeg.load({ coreURL, wasmURL }), 90_000, "ffmpeg.load (bundled)");
-        post({ type: "progress", message: "[FFMPEG] ready! (bundled)" });
-        return;
-      } catch (e) {
-        post({ type: "progress", message: "[FFMPEG] bundled load failed; falling back to CDN..." });
-      }
-
-      // Fallback: CDN via Blob URLs
+      // Use jsDelivr CDN which is faster and more reliable
       const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
       post({ type: "progress", message: "[FFMPEG] downloading from CDN..." });
 
@@ -79,8 +59,8 @@ async function ensureLoaded() {
         180_000,
         "ffmpeg wasmURL download"
       );
-      await withTimeout(ffmpeg.load({ coreURL, wasmURL }), 90_000, "ffmpeg.load (cdn)");
-      post({ type: "progress", message: "[FFMPEG] ready! (cdn)" });
+      await withTimeout(ffmpeg.load({ coreURL, wasmURL }), 90_000, "ffmpeg.load");
+      post({ type: "progress", message: "[FFMPEG] ready!" });
     } catch (e: any) {
       const msg = e?.message || String(e);
       post({ type: "error", error: `[FFMPEG] load failed: ${msg}` });
