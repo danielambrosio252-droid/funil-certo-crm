@@ -150,64 +150,81 @@ export async function processAndSendAudioAsync(job: AudioProcessingJob): Promise
     const randomId = Math.random().toString(36).substring(2, 7);
 
     let uploadBlob = blob;
-    let uploadMime = mimeType.split(';')[0];
-    let extension = 'ogg';
+    const originalBaseMime = mimeType.split(";")[0].toLowerCase();
+    let uploadMime = originalBaseMime;
+    let extension = "ogg";
 
-    const isOggNative = uploadMime.includes('ogg');
-    
+    const isOggNative = originalBaseMime.includes("ogg");
+    const isMp4Native = originalBaseMime === "audio/mp4";
+
     if (isOggNative) {
-      // BEST PATH: Browser recorded native OGG/Opus - no transcode needed!
-      uploadMime = 'audio/ogg';
-      extension = 'ogg';
-      console.log('[AudioProcessor] Native OGG! No transcode. Size:', uploadBlob.size, 'Duration(s):', duration);
+      // BEST PATH: Browser recorded native OGG/Opus - no transcode needed.
+      uploadMime = "audio/ogg";
+      extension = "ogg";
+      console.log(
+        "[AudioProcessor] Native OGG! No transcode. Size:",
+        uploadBlob.size,
+        "Duration(s):",
+        duration
+      );
+    } else if (isMp4Native) {
+      // FAST PATH: audio/mp4 avoids FFmpeg WASM download/transcode.
+      // Meta generally accepts audio/mp4; the backend will upload it as-is.
+      uploadMime = "audio/mp4";
+      extension = "m4a";
+      console.log(
+        "[AudioProcessor] Native MP4! No transcode. Size:",
+        uploadBlob.size,
+        "Duration(s):",
+        duration
+      );
     } else {
-      // CRITICAL: WebM/other formats MUST be transcoded - Storage bucket rejects audio/webm!
-      // Use longer timeout (90s) - FFmpeg loading can take 30-60s on slow networks
-      console.log('[AudioProcessor] Non-OGG format:', uploadMime, '- MUST transcode to OGG...');
-      
-      // NO ABORT CONTROLLER - let it complete or fail naturally
-      // The 120s timeout in the worker is the final safety net
+      // Fallback: Transcode WebM/other formats to OGG/Opus for maximum compatibility.
+      console.log("[AudioProcessor] Non-OGG/MP4 format:", originalBaseMime, "- transcoding to OGG...");
       uploadBlob = await transcodeToOggInWorker(blob, mimeType);
-      
-      uploadMime = 'audio/ogg';
-      extension = 'ogg';
-      console.log('[AudioProcessor] Transcoded OK. Size:', uploadBlob.size, 'Mime:', uploadMime);
+      uploadMime = "audio/ogg";
+      extension = "ogg";
+      console.log("[AudioProcessor] Transcoded OK. Size:", uploadBlob.size, "Mime:", uploadMime);
     }
 
-    // Post-processing validation - always OGG at this point
-    const inspected = await inspectOgg(uploadBlob);
-    console.log(
-      "[AudioProcessor] Post-conversion inspection:",
-      JSON.stringify(
-        {
-          size_bytes: inspected.size,
-          duration_s: inspected.duration,
-          sample_rate_hz: inspected.sampleRate,
-          channels: inspected.channels,
-          codec: "opus (libopus)",
-          target: { channels: 1, sampleRate: 48000, bitrate: "24k", application: "voip", container: "ogg" },
-        },
-        null,
-        2
-      )
-    );
+    // Post-processing validation:
+    // - For OGG, inspect container for basic sanity.
+    // - For MP4, we skip decode inspection (WebAudio often can't decode AAC consistently).
+    if (uploadMime === "audio/ogg") {
+      const inspected = await inspectOgg(uploadBlob);
+      console.log(
+        "[AudioProcessor] Post-conversion inspection:",
+        JSON.stringify(
+          {
+            size_bytes: inspected.size,
+            duration_s: inspected.duration,
+            sample_rate_hz: inspected.sampleRate,
+            channels: inspected.channels,
+            codec: "opus (libopus)",
+            target: {
+              channels: 1,
+              sampleRate: 48000,
+              bitrate: "24k",
+              application: "voip",
+              container: "ogg",
+            },
+          },
+          null,
+          2
+        )
+      );
 
-    // Enforce hard requirements
-    if (inspected.size < 1024) {
-      throw new Error(`Converted audio too small (<1KB): ${inspected.size} bytes`);
-    }
-    if (typeof inspected.duration === "number" && inspected.duration < 1) {
-      throw new Error(`Converted audio duration < 1s: ${inspected.duration}`);
-    }
-    if (typeof inspected.sampleRate === "number" && inspected.sampleRate !== 48000) {
-      console.warn(
-        `[AudioProcessor] WARNING: sample_rate is ${inspected.sampleRate}Hz (expected 48000Hz)`
-      );
-    }
-    if (typeof inspected.channels === "number" && inspected.channels !== 1) {
-      console.warn(
-        `[AudioProcessor] WARNING: channels is ${inspected.channels} (expected 1/mono)`
-      );
+      if (inspected.size < 1024) {
+        throw new Error(`Converted audio too small (<1KB): ${inspected.size} bytes`);
+      }
+      if (typeof inspected.duration === "number" && inspected.duration < 1) {
+        throw new Error(`Converted audio duration < 1s: ${inspected.duration}`);
+      }
+    } else {
+      // Minimal sanity check for MP4
+      if (uploadBlob.size < 1024) {
+        throw new Error(`Recorded audio too small (<1KB): ${uploadBlob.size} bytes`);
+      }
     }
     
     const filename = `${timestamp}-${randomId}.${extension}`;
@@ -216,7 +233,7 @@ export async function processAndSendAudioAsync(job: AudioProcessingJob): Promise
     console.log('[AudioProcessor] Final file path:', filePath);
     console.log('[AudioProcessor] Final upload size:', uploadBlob.size, 'mime:', uploadMime);
 
-    // Upload (must be audio/ogg, otherwise bucket rejects)
+    // Upload
     const { error: uploadError } = await supabase.storage
       .from("whatsapp-media")
       .upload(filePath, uploadBlob, {

@@ -37,20 +37,8 @@ export function useFFmpegPreload() {
           }
         };
 
-        // Send a ping to trigger loading
-        worker.postMessage({ type: "ping" });
-        
-        // Also trigger actual load by sending a tiny transcode request
-        // This ensures FFmpeg is fully initialized
-        const silentBlob = new Blob([new Uint8Array(1000)], { type: "audio/webm" });
-        const arrayBuffer = await silentBlob.arrayBuffer();
-        
-        // Trigger load (it will fail on transcode but FFmpeg will be loaded)
-        worker.postMessage({
-          type: "transcode",
-          originalMimeType: "audio/webm",
-          inputArrayBuffer: arrayBuffer,
-        }, [arrayBuffer]);
+        // Trigger load without transcoding (avoids errors and heavy CPU)
+        worker.postMessage({ type: "preload" });
 
       } catch (error) {
         console.warn("[FFmpegPreload] Background preload failed (non-critical):", error);
@@ -59,7 +47,13 @@ export function useFFmpegPreload() {
 
     return () => {
       clearTimeout(timeoutId);
-      // Don't terminate worker on unmount - keep it for actual recording
+      // This worker is only for preloading; safe to terminate.
+      try {
+        workerRef.current?.terminate();
+      } catch {
+        // ignore
+      }
+      workerRef.current = null;
     };
   }, []);
 
