@@ -299,9 +299,27 @@ Deno.serve(async (req) => {
       let content = "";
       let messageType = "text";
       let mediaUrl: string | null = null;
+      let buttonId: string | null = null; // For interactive button responses
 
       if (message.type === "text") {
         content = message.text?.body || "";
+      } else if (message.type === "interactive") {
+        // Interactive button response
+        if (message.interactive?.type === "button_reply") {
+          buttonId = message.interactive.button_reply?.id || null;
+          content = message.interactive.button_reply?.title || "";
+          messageType = "interactive_reply";
+          console.log(`📱 Button reply received: id="${buttonId}", title="${content}"`);
+        } else if (message.interactive?.type === "list_reply") {
+          buttonId = message.interactive.list_reply?.id || null;
+          content = message.interactive.list_reply?.title || "";
+          messageType = "interactive_reply";
+        }
+      } else if (message.type === "button") {
+        // Legacy button response
+        buttonId = message.button?.payload || null;
+        content = message.button?.text || "";
+        messageType = "button_reply";
       } else if (message.type === "image") {
         content = message.image?.caption || "[Imagem]";
         messageType = "image";
@@ -451,7 +469,7 @@ Deno.serve(async (req) => {
             .maybeSingle();
           
           if (waitingExecution) {
-            // Retomar execução
+            // Retomar execução - passar button_id se for resposta de botão
             const flowExecutorUrl = `${supabaseUrl}/functions/v1/flow-executor`;
             
             await fetch(flowExecutorUrl, {
@@ -464,10 +482,12 @@ Deno.serve(async (req) => {
                 trigger_type: "continue_execution",
                 company_id: companyId,
                 execution_id: waitingExecution.id,
+                button_id: buttonId, // Pass button_id for interactive responses
+                user_response: content, // Pass the content as well
               }),
             });
             
-            console.log(`[Webhook] 🔄 Execução retomada: ${waitingExecution.id}`);
+            console.log(`[Webhook] 🔄 Execução retomada: ${waitingExecution.id}, buttonId: ${buttonId}`);
           }
         } catch (execError) {
           console.error("[Webhook] Erro ao retomar execução:", execError);
