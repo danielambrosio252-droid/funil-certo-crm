@@ -32,6 +32,7 @@ import { ptBR } from "date-fns/locale";
 export default function Chatbot() {
   const [editingFlowId, setEditingFlowId] = useState<string | null>(null);
   const [isCreatingDefault, setIsCreatingDefault] = useState(false);
+  const [hasDismissedEditor, setHasDismissedEditor] = useState(false);
   const hasTriedCreating = useRef(false);
   const { flows, loadingFlows, createFlow, toggleFlow, deleteFlow } = useChatbotFlows();
 
@@ -53,6 +54,7 @@ export default function Chatbot() {
           is_default: true 
         });
         // Automatically open the editor for the new flow
+        setHasDismissedEditor(false);
         setEditingFlowId(flow.id);
       } catch (error) {
         console.error("Error creating default flow:", error);
@@ -67,18 +69,20 @@ export default function Chatbot() {
 
   // Auto-open editor if there's exactly one flow and user just landed
   useEffect(() => {
-    if (!loadingFlows && flows.length === 1 && !editingFlowId && !isCreatingDefault) {
+    if (!loadingFlows && flows.length === 1 && !editingFlowId && !isCreatingDefault && !hasDismissedEditor) {
       setEditingFlowId(flows[0].id);
     }
-  }, [loadingFlows, flows, editingFlowId, isCreatingDefault]);
+  }, [loadingFlows, flows, editingFlowId, isCreatingDefault, hasDismissedEditor]);
 
   const handleEditFlow = (flowId: string) => {
+    setHasDismissedEditor(false);
     setEditingFlowId(flowId);
   };
 
   const handleCreateFlow = async () => {
     try {
       const flow = await createFlow.mutateAsync({ name: "Novo Fluxo" });
+      setHasDismissedEditor(false);
       setEditingFlowId(flow.id);
     } catch (error) {
       console.error("Error creating flow:", error);
@@ -97,7 +101,10 @@ export default function Chatbot() {
         <FlowBuilderCanvas
           flowId={editingFlow.id}
           flowName={editingFlow.name}
-          onClose={() => setEditingFlowId(null)}
+          onClose={() => {
+            setEditingFlowId(null);
+            setHasDismissedEditor(true);
+          }}
         />
       </div>
     );
