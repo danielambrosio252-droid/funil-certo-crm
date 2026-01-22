@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, useEffect, type CSSProperties } from "react";
+import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import {
   ReactFlow,
   Background,
@@ -13,6 +13,8 @@ import {
   Panel,
   MarkerType,
   type ReactFlowInstance,
+  type NodeChange,
+  type EdgeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
@@ -30,33 +32,29 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type FlowEditorNode = {
-  id: string;
-  type: NodeType;
-  position: { x: number; y: number };
-  draggable: boolean;
-  style?: CSSProperties;
-  data: {
-    label: string;
-    config: Record<string, unknown>;
-    createdAt: string;
-    nodeIndex: number;
-    onConfigure: () => void;
-    onUpdateConfig: (config: Record<string, unknown>) => void;
-  };
-};
+// ============================================================================
+// STABLE FLOW EDITOR - ManyChat-style stability
+// ============================================================================
+// RULES:
+// 1. NO auto-layout on load/render - layout ONLY on explicit user action
+// 2. Node positions are deterministic and persisted
+// 3. Edges are IMMUTABLE after creation - no re-rendering
+// 4. Camera/zoom changes do NOT trigger layout recalculation
+// 5. Stability > aesthetics
+// ============================================================================
 
-type FlowEditorEdge = {
-  id: string;
-  source: string;
-  target: string;
-  sourceHandle: string | null;
-  label: string | null;
-  animated: boolean;
-  type: string;
-  markerEnd: { type: MarkerType; color: string };
-  style: { stroke: string; strokeWidth: number };
-};
+type FlowEditorNode = Node<{
+  label: string;
+  config: Record<string, unknown>;
+  createdAt: string;
+  nodeIndex: number;
+  onConfigure: () => void;
+  onUpdateConfig: (config: Record<string, unknown>) => void;
+  onDuplicate?: () => void;
+  onDelete?: () => void;
+}>;
+
+type FlowEditorEdge = Edge<Record<string, unknown>>;
 
 interface FlowEditorProps {
   flowId: string;
@@ -64,19 +62,29 @@ interface FlowEditorProps {
   onBack: () => void;
 }
 
-// Constants for VERTICAL layout (Clean, professional, top-to-bottom)
+// Layout constants
 const LAYOUT = {
   CENTER_X: 400,
   START_Y: 80,
   GAP_Y: 180,
-  NODE_WIDTH: 340,
+};
+
+// Edge styling - STATIC, never changes
+const EDGE_STYLE = {
+  stroke: "#64748b",
+  strokeWidth: 2,
+};
+
+const EDGE_MARKER = {
+  type: MarkerType.ArrowClosed as const,
+  color: "#64748b",
 };
 
 export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const { profile, loading: authLoading } = useAuth();
-  const { 
-    nodes: dbNodes, 
-    edges: dbEdges, 
+  const {
+    nodes: dbNodes,
+    edges: dbEdges,
     loadingNodes,
     loadingEdges,
     addNode,
@@ -89,535 +97,288 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [showConfigDialog, setShowConfigDialog] = useState(false);
-  const [rfInitTick, setRfInitTick] = useState(0);
 
-  // Guard against render loops: keep mutation fns in refs so callbacks/effects stay stable.
-  const updateNodeMutateRef = useRef(updateNode.mutateAsync);
-  useEffect(() => {
-    updateNodeMutateRef.current = updateNode.mutateAsync;
-  }, [updateNode.mutateAsync]);
-
-  const didAutoFixRef = useRef(false);
-  const didEnsureStartRef = useRef(false);
-  const didEnsureMinimumFlowRef = useRef(false);
-  const didHardResetLayoutRef = useRef(false);
+  // Refs for stability - prevent re-renders from causing instability
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
-  const lastFitViewTsRef = useRef(0);
+  const initializedRef = useRef(false);
+  const hasEnsuredMinimumRef = useRef(false);
 
-  // IMPORTANT: react-query can temporarily return `undefined` data when queries are disabled
-  // (e.g. auth/profile briefly toggles). If we blindly map that to [], the canvas looks like
-  // "sumiu" after ~1-2s. We keep the last non-empty snapshot to avoid clearing the editor.
-  const lastStableDbNodesRef = useRef<typeof dbNodes>([]);
-  const lastStableDbEdgesRef = useRef<typeof dbEdges>([]);
+  // Track if we've done initial sync
+  const didInitialSyncRef = useRef(false);
 
-  useEffect(() => {
-    if (!loadingNodes && dbNodes.length > 0) {
-      lastStableDbNodesRef.current = dbNodes;
-    }
-  }, [dbNodes, loadingNodes]);
-
-  useEffect(() => {
-    if (!loadingEdges && dbEdges.length > 0) {
-      lastStableDbEdgesRef.current = dbEdges;
-    }
-  }, [dbEdges, loadingEdges]);
-
-  const requestFitView = useCallback(() => {
-    const inst = rfInstanceRef.current;
-    if (!inst) return;
-    const now = Date.now();
-    // throttle to avoid jitter / loops
-    if (now - lastFitViewTsRef.current < 300) return;
-    lastFitViewTsRef.current = now;
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        try {
-          inst.fitView({
-            padding: 0.3,
-            includeHiddenNodes: false,
-            minZoom: 0.5,
-            maxZoom: 1.5,
-          });
-        } catch (e) {
-          console.error("fitView failed:", e);
-        }
-      });
-    });
-  }, []);
-  useEffect(() => {
-    didAutoFixRef.current = false;
-    didEnsureStartRef.current = false;
-    didEnsureMinimumFlowRef.current = false;
-    didHardResetLayoutRef.current = false;
-    lastStableDbNodesRef.current = [];
-    lastStableDbEdgesRef.current = [];
-    setRfInitTick(0);
-  }, [flowId]);
-
-  const forceDomVisibility = useCallback(() => {
-    try {
-      const nodesEls = document.querySelectorAll<HTMLElement>(".react-flow__node");
-      nodesEls.forEach((el) => {
-        el.style.opacity = "1";
-        el.style.visibility = "visible";
-        el.style.display = "block";
-      });
-
-      // Also ensure the pane itself never goes fully transparent.
-      const pane = document.querySelector<HTMLElement>(".react-flow__pane");
-      if (pane) {
-        pane.style.opacity = "1";
-        pane.style.visibility = "visible";
-      }
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn("[FlowEditor] forceDomVisibility failed", e);
-    }
-  }, []);
-
-  const ensureStartNode = useCallback(async () => {
-    if (didEnsureStartRef.current) return;
-    if (loadingNodes) return;
-    if (dbNodes.length > 0) return;
-
-    didEnsureStartRef.current = true;
-    try {
-      await addNode.mutateAsync({
-        node_type: "start",
-        position_x: LAYOUT.CENTER_X,
-        position_y: LAYOUT.START_Y,
-        config: {},
-      });
-    } catch (error) {
-      didEnsureStartRef.current = false;
-      console.error("Error creating start node:", error);
-      toast.error("Não consegui criar o bloco inicial. Tente novamente.");
-    }
-  }, [addNode, dbNodes.length, loadingNodes]);
-
-  const ensureMinimumFlow = useCallback(async () => {
-    // Absolute fallback: never allow a flow to remain without something visible.
-    if (didEnsureMinimumFlowRef.current) return;
-    if (loadingNodes) return;
-
-    const hasStart = dbNodes.some((n) => n.node_type === "start");
-    const hasNonStart = dbNodes.some((n) => n.node_type !== "start");
-
-    // If nothing exists, create Start + Message.
-    if (dbNodes.length === 0) {
-      didEnsureMinimumFlowRef.current = true;
-      try {
-        const createdStart = await addNode.mutateAsync({
-          node_type: "start",
-          position_x: LAYOUT.CENTER_X,
-          position_y: LAYOUT.START_Y,
-          config: {},
-        });
-
-        await addNode.mutateAsync({
-          node_type: "message",
-          position_x: LAYOUT.CENTER_X,
-          position_y: LAYOUT.START_Y + LAYOUT.GAP_Y,
-          config: {},
-        });
-
-        // Best-effort: frame after creation.
-        requestAnimationFrame(() => requestFitView());
-        void createdStart;
-      } catch (error) {
-        didEnsureMinimumFlowRef.current = false;
-        console.error("Error creating minimum flow:", error);
-        toast.error("Não consegui criar o fluxo mínimo. Tente novamente.");
-      }
-      return;
-    }
-
-    // If there is Start but nothing else, add a Message below.
-    if (hasStart && !hasNonStart) {
-      didEnsureMinimumFlowRef.current = true;
-      try {
-        await addNode.mutateAsync({
-          node_type: "message",
-          position_x: LAYOUT.CENTER_X,
-          position_y: LAYOUT.START_Y + LAYOUT.GAP_Y,
-          config: {},
-        });
-        requestAnimationFrame(() => requestFitView());
-      } catch (error) {
-        didEnsureMinimumFlowRef.current = false;
-        console.error("Error creating default message node:", error);
-        toast.error("Não consegui criar o bloco de mensagem. Tente novamente.");
-      }
-    }
-  }, [addNode, dbNodes, loadingNodes, requestFitView]);
-
-  // Se por qualquer motivo um fluxo vier sem nós (ex: dados antigos), cria o START automaticamente.
-  useEffect(() => {
-    if (loadingNodes) return;
-    // Make sure we ALWAYS have at least Start + Message.
-    void ensureMinimumFlow();
-    // Keep old behavior as a safety net.
-    if (dbNodes.length === 0) void ensureStartNode();
-  }, [dbNodes.length, ensureStartNode, ensureMinimumFlow, loadingNodes]);
-
-  // Build node index map
+  // Node index map for display
   const nodeIndexMap = useMemo(() => {
     const map = new Map<string, number>();
-    const sortedNodes = [...dbNodes].sort((a, b) => {
+    const sorted = [...dbNodes].sort((a, b) => {
       if (a.node_type === "start") return -1;
       if (b.node_type === "start") return 1;
       return a.created_at.localeCompare(b.created_at);
     });
-    
-    let index = 0;
-    sortedNodes.forEach((node) => {
-      if (node.node_type !== "start") {
-        index++;
-        map.set(node.id, index);
+    let idx = 0;
+    sorted.forEach((n) => {
+      if (n.node_type !== "start") {
+        idx++;
+        map.set(n.id, idx);
       }
     });
     return map;
   }, [dbNodes]);
 
-  // Inline update handler for chat nodes
-  const handleInlineUpdate = useCallback(async (nodeId: string, config: Record<string, unknown>) => {
-    try {
-      await updateNodeMutateRef.current({ id: nodeId, config });
-    } catch (error) {
-      console.error("Error updating node inline:", error);
-    }
-  }, []);
-
-  // Handle node duplication
-  const handleDuplicateNode = useCallback(async (node: typeof dbNodes[0]) => {
-    try {
-      // Find max Y position to place duplicate below
-      let maxY = node.position_y;
-      dbNodes.forEach((n) => {
-        if (n.position_y > maxY) maxY = n.position_y;
-      });
-
-      await addNode.mutateAsync({
-        node_type: node.node_type,
-        position_x: node.position_x,
-        position_y: maxY + LAYOUT.GAP_Y,
-        config: { ...node.config },
-      });
-      toast.success("Bloco duplicado!");
-    } catch (error) {
-      console.error("Error duplicating node:", error);
-      toast.error("Erro ao duplicar bloco");
-    }
-  }, [addNode, dbNodes]);
-
-  // Handle node deletion
-  const handleDeleteNodeById = useCallback(async (nodeId: string, nodeType: string) => {
-    if (nodeType === "start") {
-      toast.error("Não é possível excluir o bloco inicial");
-      return;
-    }
-    try {
-      await deleteNode.mutateAsync(nodeId);
-      toast.success("Bloco excluído!");
-    } catch (error) {
-      console.error("Error deleting node:", error);
-      toast.error("Erro ao excluir bloco");
-    }
-  }, [deleteNode]);
-
-  // Convert DB nodes to React Flow format
-  const createNodeData = useCallback((node: typeof dbNodes[0]) => ({
-    id: node.id,
-    type: node.node_type as NodeType,
-    position: { x: node.position_x, y: node.position_y },
-    draggable: node.node_type !== "start",
-    // Hard-force visibility (some sessions reported nodes going hidden).
-    style: { opacity: 1, visibility: "visible", display: "block" },
-    data: { 
-      label: getNodeLabel(node.node_type),
-      config: node.config,
-      createdAt: node.created_at,
-      nodeIndex: nodeIndexMap.get(node.id) || 0,
-      onConfigure: () => {
-        setSelectedNode({
-          id: node.id,
-          type: node.node_type,
-          position: { x: node.position_x, y: node.position_y },
-          data: { config: node.config },
-        });
-        setShowConfigDialog(true);
-      },
-      onUpdateConfig: (config: Record<string, unknown>) => {
-        handleInlineUpdate(node.id, config);
-      },
-      onDuplicate: () => handleDuplicateNode(node),
-      onDelete: node.node_type !== "start" ? () => handleDeleteNodeById(node.id, node.node_type) : undefined,
+  // Inline config update
+  const handleInlineUpdate = useCallback(
+    async (nodeId: string, config: Record<string, unknown>) => {
+      try {
+        await updateNode.mutateAsync({ id: nodeId, config });
+      } catch (e) {
+        console.error("Inline update failed:", e);
+      }
     },
-  }), [nodeIndexMap, handleInlineUpdate, handleDuplicateNode, handleDeleteNodeById]);
-
-  const initialNodes = useMemo(() => 
-    dbNodes.map(createNodeData) as FlowEditorNode[], 
-    [dbNodes, createNodeData]
+    [updateNode]
   );
 
-  // Convert DB edges to React Flow format
-  const initialEdges = useMemo(() => 
-    dbEdges.map((edge) => ({
-      id: edge.id,
-      source: edge.source_node_id,
-      target: edge.target_node_id,
-      sourceHandle: edge.source_handle,
-      label: edge.label,
-      animated: false,
-      type: "smoothstep",
-      markerEnd: { type: MarkerType.ArrowClosed, color: "#64748b" },
-      style: { stroke: "#64748b", strokeWidth: 2 },
-    })) as FlowEditorEdge[], [dbEdges]);
+  // Duplicate node
+  const handleDuplicateNode = useCallback(
+    async (node: (typeof dbNodes)[0]) => {
+      const maxY = Math.max(...dbNodes.map((n) => n.position_y), LAYOUT.START_Y);
+      try {
+        await addNode.mutateAsync({
+          node_type: node.node_type,
+          position_x: LAYOUT.CENTER_X,
+          position_y: maxY + LAYOUT.GAP_Y,
+          config: { ...node.config },
+        });
+        toast.success("Bloco duplicado!");
+      } catch (e) {
+        console.error("Duplicate failed:", e);
+        toast.error("Erro ao duplicar");
+      }
+    },
+    [addNode, dbNodes]
+  );
 
+  // Delete node
+  const handleDeleteNodeById = useCallback(
+    async (nodeId: string, nodeType: string) => {
+      if (nodeType === "start") {
+        toast.error("Não é possível excluir o bloco inicial");
+        return;
+      }
+      try {
+        await deleteNode.mutateAsync(nodeId);
+        toast.success("Bloco excluído!");
+      } catch (e) {
+        console.error("Delete failed:", e);
+        toast.error("Erro ao excluir");
+      }
+    },
+    [deleteNode]
+  );
+
+  // Convert DB node to React Flow node - STABLE, no random changes
+  const toFlowNode = useCallback(
+    (dbNode: (typeof dbNodes)[0]): FlowEditorNode => ({
+      id: dbNode.id,
+      type: dbNode.node_type as string,
+      position: { x: dbNode.position_x, y: dbNode.position_y },
+      draggable: dbNode.node_type !== "start",
+      data: {
+        label: getNodeLabel(dbNode.node_type),
+        config: dbNode.config,
+        createdAt: dbNode.created_at,
+        nodeIndex: nodeIndexMap.get(dbNode.id) || 0,
+        onConfigure: () => {
+          setSelectedNode({
+            id: dbNode.id,
+            type: dbNode.node_type,
+            position: { x: dbNode.position_x, y: dbNode.position_y },
+            data: { config: dbNode.config },
+          });
+          setShowConfigDialog(true);
+        },
+        onUpdateConfig: (config: Record<string, unknown>) =>
+          handleInlineUpdate(dbNode.id, config),
+        onDuplicate: () => handleDuplicateNode(dbNode),
+        onDelete:
+          dbNode.node_type !== "start"
+            ? () => handleDeleteNodeById(dbNode.id, dbNode.node_type)
+            : undefined,
+      },
+    }),
+    [nodeIndexMap, handleInlineUpdate, handleDuplicateNode, handleDeleteNodeById]
+  );
+
+  // Convert DB edge to React Flow edge - IMMUTABLE styling
+  const toFlowEdge = useCallback((dbEdge: (typeof dbEdges)[0]): FlowEditorEdge => ({
+    id: dbEdge.id,
+    source: dbEdge.source_node_id,
+    target: dbEdge.target_node_id,
+    sourceHandle: dbEdge.source_handle || undefined,
+    label: dbEdge.label || undefined,
+    type: "smoothstep",
+    animated: false,
+    markerEnd: EDGE_MARKER,
+    style: EDGE_STYLE,
+  }), []);
+
+  // Initial nodes/edges from DB
+  const initialNodes = useMemo(() => dbNodes.map(toFlowNode), [dbNodes, toFlowNode]);
+  const initialEdges = useMemo(() => dbEdges.map(toFlowEdge), [dbEdges, toFlowEdge]);
+
+  // React Flow state - CONTROLLED
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowEditorNode>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEditorEdge>(initialEdges);
 
-  // Sync with DB data
+  // STABLE: Only sync from DB when data actually changes, NOT on every render
   useEffect(() => {
-    // If DB temporarily reports empty while still loading/auth gating, do NOT wipe the canvas.
-    if ((loadingNodes || authLoading) && dbNodes.length === 0) return;
-
-    const source = dbNodes.length > 0 ? dbNodes : lastStableDbNodesRef.current;
-    const mapped = source.map(createNodeData) as FlowEditorNode[];
-    setNodes(mapped);
-
-    // Emergency: make sure DOM never hides nodes.
-    forceDomVisibility();
-  }, [dbNodes, setNodes, createNodeData, loadingNodes, authLoading, forceDomVisibility]);
-
-  // Keep viewport stable: fit on initial load AND after automatic re-layout.
-  useEffect(() => {
-    if (loadingNodes || loadingEdges) return;
-    if (nodes.length === 0) return;
-    // rfInitTick ensures ReactFlow instance exists
-    if (rfInitTick === 0) return;
-    requestFitView();
-    forceDomVisibility();
-  }, [loadingNodes, loadingEdges, nodes.length, rfInitTick, requestFitView, forceDomVisibility]);
-
-  // Mandatory hard reset: when nodes exist in DB, force a clean vertical layout once per flow.
-  useEffect(() => {
-    if (loadingNodes || loadingEdges) return;
-    if (dbNodes.length === 0) return;
-    if (didHardResetLayoutRef.current) return;
-
-    didHardResetLayoutRef.current = true;
-
-    const newPositions = computeVerticalLayout(
-      dbNodes.map((n) => ({
-        id: n.id,
-        node_type: n.node_type,
-        created_at: n.created_at,
-        position_x: n.position_x,
-        position_y: n.position_y,
-      }))
-    );
-
-    const organizedNodes = dbNodes.map((node) => {
-      const pos = newPositions.get(node.id);
-      return createNodeData({
-        ...node,
-        position_x: pos?.x ?? LAYOUT.CENTER_X,
-        position_y: pos?.y ?? LAYOUT.START_Y,
-      });
-    }) as FlowEditorNode[];
-
-    setNodes(organizedNodes);
-    requestFitView();
-    forceDomVisibility();
-
-    // Persist positions best-effort (avoid changing business logic beyond recovery).
-    const nodesToSave: FlowNode[] = organizedNodes.map((node) => ({
-      id: node.id,
-      flow_id: flowId,
-      company_id: "",
-      node_type: node.type as NodeType,
-      position_x: Math.round(node.position.x),
-      position_y: Math.round(node.position.y),
-      config: (node.data?.config || {}) as Record<string, unknown>,
-      created_at: "",
-    }));
-
-    const edgesToSave: FlowEdge[] = dbEdges.map((edge) => ({
-      id: edge.id,
-      flow_id: flowId,
-      company_id: "",
-      source_node_id: edge.source_node_id,
-      target_node_id: edge.target_node_id,
-      source_handle: edge.source_handle || null,
-      label: edge.label || null,
-      created_at: "",
-    }));
-
-    void saveFlow.mutateAsync({ nodes: nodesToSave, edges: edgesToSave });
-  }, [
-    loadingNodes,
-    loadingEdges,
-    dbNodes,
-    dbEdges,
-    createNodeData,
-    setNodes,
-    requestFitView,
-    forceDomVisibility,
-    flowId,
-    saveFlow,
-  ]);
-
-  useEffect(() => {
-    if ((loadingEdges || authLoading) && dbEdges.length === 0) return;
-
-    const source = dbEdges.length > 0 ? dbEdges : lastStableDbEdgesRef.current;
-    setEdges(
-      (source.map((edge) => ({
-        id: edge.id,
-        source: edge.source_node_id,
-        target: edge.target_node_id,
-        sourceHandle: edge.source_handle,
-        label: edge.label,
-        animated: false,
-        type: "smoothstep",
-        markerEnd: { type: MarkerType.ArrowClosed, color: "#94a3b8" },
-        style: { stroke: "#94a3b8", strokeWidth: 2 },
-      })) as FlowEditorEdge[])
-    );
-  }, [dbEdges, setEdges, loadingEdges, authLoading]);
-
-  // Auto-fix layout on load
-  useEffect(() => {
-    if (loadingNodes || loadingEdges) return;
-    if (didAutoFixRef.current) return;
-    if (dbNodes.length === 0) return;
-
-    didAutoFixRef.current = true;
-
-    const positions = dbNodes.map(n => ({ x: n.position_x, y: n.position_y }));
-    const hasOverlap = positions.some((p1, i) => 
-      positions.some((p2, j) => i !== j && Math.abs(p1.y - p2.y) < 120)
-    );
+    if (loadingNodes || authLoading) return;
+    if (didInitialSyncRef.current && dbNodes.length === nodes.length) {
+      // Only update if node count changed (add/delete) - don't override positions
+      return;
+    }
     
-    const notCentered = positions.some(p => Math.abs(p.x - LAYOUT.CENTER_X) > 50);
-    const needsReorganization = hasOverlap || notCentered;
+    didInitialSyncRef.current = true;
+    setNodes(dbNodes.map(toFlowNode));
+  }, [dbNodes, loadingNodes, authLoading, toFlowNode, setNodes, nodes.length]);
 
-    if (!needsReorganization) return;
+  // Sync edges only when DB edges change
+  useEffect(() => {
+    if (loadingEdges || authLoading) return;
+    setEdges(dbEdges.map(toFlowEdge));
+  }, [dbEdges, loadingEdges, authLoading, toFlowEdge, setEdges]);
 
-    const newPositions = computeVerticalLayout(dbNodes);
-    
-    const organizedNodes = dbNodes.map(node => {
-      const pos = newPositions.get(node.id);
-      return createNodeData({
-        ...node,
-        position_x: pos?.x ?? node.position_x,
-        position_y: pos?.y ?? node.position_y,
+  // Ensure minimum flow (Start + Message) - ONCE only
+  useEffect(() => {
+    if (loadingNodes || hasEnsuredMinimumRef.current) return;
+    if (dbNodes.length > 0) {
+      hasEnsuredMinimumRef.current = true;
+      return;
+    }
+
+    hasEnsuredMinimumRef.current = true;
+
+    const createMinimum = async () => {
+      try {
+        await addNode.mutateAsync({
+          node_type: "start",
+          position_x: LAYOUT.CENTER_X,
+          position_y: LAYOUT.START_Y,
+          config: {},
+        });
+        await addNode.mutateAsync({
+          node_type: "message",
+          position_x: LAYOUT.CENTER_X,
+          position_y: LAYOUT.START_Y + LAYOUT.GAP_Y,
+          config: {},
+        });
+      } catch (e) {
+        console.error("Failed to create minimum flow:", e);
+        hasEnsuredMinimumRef.current = false;
+      }
+    };
+
+    void createMinimum();
+  }, [loadingNodes, dbNodes.length, addNode]);
+
+  // Reset refs when flowId changes
+  useEffect(() => {
+    initializedRef.current = false;
+    hasEnsuredMinimumRef.current = false;
+    didInitialSyncRef.current = false;
+  }, [flowId]);
+
+  // STABLE node change handler - only handle position changes, no auto-layout
+  const handleNodesChange = useCallback(
+    (changes: NodeChange<FlowEditorNode>[]) => {
+      // Filter out any automatic dimension changes that could cause instability
+      const safeChanges = changes.filter((change) => {
+        // Allow position changes (drag)
+        if (change.type === "position") return true;
+        // Allow selection changes
+        if (change.type === "select") return true;
+        // Allow removal
+        if (change.type === "remove") return true;
+        // Block dimension changes that could cause jitter
+        if (change.type === "dimensions") return false;
+        return true;
       });
-    }) as FlowEditorNode[];
+      onNodesChange(safeChanges);
+    },
+    [onNodesChange]
+  );
 
-    setNodes(organizedNodes);
-    // Important: viewport must be refit AFTER nodes are repositioned, otherwise it looks like it "disappeared".
-    requestFitView();
+  // STABLE edge change handler
+  const handleEdgesChange = useCallback(
+    (changes: EdgeChange<FlowEditorEdge>[]) => {
+      // Only allow selection and removal, block any automatic updates
+      const safeChanges = changes.filter(
+        (change) => change.type === "select" || change.type === "remove"
+      );
+      onEdgesChange(safeChanges);
+    },
+    [onEdgesChange]
+  );
 
-    const nodesToSave: FlowNode[] = organizedNodes.map((node) => ({
-      id: node.id,
-      flow_id: flowId,
-      company_id: "",
-      node_type: node.type as NodeType,
-      position_x: Math.round(node.position.x),
-      position_y: Math.round(node.position.y),
-      config: (node.data?.config || {}) as Record<string, unknown>,
-      created_at: "",
-    }));
-
-    const edgesToSave: FlowEdge[] = dbEdges.map((edge) => ({
-      id: edge.id,
-      flow_id: flowId,
-      company_id: "",
-      source_node_id: edge.source_node_id,
-      target_node_id: edge.target_node_id,
-      source_handle: edge.source_handle || null,
-      label: edge.label || null,
-      created_at: "",
-    }));
-
-    saveFlow.mutateAsync({ nodes: nodesToSave, edges: edgesToSave }).then(() => {
-      toast.success("Layout organizado!");
-    });
-  }, [dbNodes, dbEdges, loadingNodes, loadingEdges, setNodes, flowId, saveFlow, createNodeData, requestFitView]);
-
-  // Handle new connections
-  const onConnect = useCallback(
+  // Handle new connection - create in DB, edge will sync automatically
+  const handleConnect = useCallback(
     async (connection: Connection) => {
       if (!connection.source || !connection.target) return;
-      
       try {
         await addDbEdge.mutateAsync({
           source_node_id: connection.source,
           target_node_id: connection.target,
           source_handle: connection.sourceHandle || undefined,
         });
-      } catch (error) {
-        console.error("Error adding edge:", error);
+      } catch (e) {
+        console.error("Connect failed:", e);
       }
     },
     [addDbEdge]
   );
 
-  const onEdgesDelete = useCallback(
+  // Delete edges
+  const handleEdgesDelete = useCallback(
     async (edgesToDelete: Edge[]) => {
       for (const edge of edgesToDelete) {
         try {
           await deleteEdge.mutateAsync(edge.id);
-        } catch (error) {
-          console.error("Error deleting edge:", error);
+        } catch (e) {
+          console.error("Delete edge failed:", e);
         }
       }
     },
     [deleteEdge]
   );
 
-  const onNodesDelete = useCallback(
+  // Delete nodes
+  const handleNodesDelete = useCallback(
     async (nodesToDelete: Node[]) => {
       for (const node of nodesToDelete) {
         if (node.type === "start") continue;
         try {
           await deleteNode.mutateAsync(node.id);
-        } catch (error) {
-          console.error("Error deleting node:", error);
+        } catch (e) {
+          console.error("Delete node failed:", e);
         }
       }
     },
     [deleteNode]
   );
 
-  // Add new node - VERTICAL layout
+  // Add new node
   const handleAddNode = async (type: NodeType) => {
-    const currentNodes = nodes;
-    
-    let maxY = LAYOUT.START_Y - LAYOUT.GAP_Y;
-    currentNodes.forEach((node) => {
-      if (node.position.y > maxY) {
-        maxY = node.position.y;
-      }
-    });
-
-    const nextY = maxY + LAYOUT.GAP_Y;
-
+    const maxY = Math.max(...nodes.map((n) => n.position.y), LAYOUT.START_Y - LAYOUT.GAP_Y);
     try {
       await addNode.mutateAsync({
         node_type: type,
         position_x: LAYOUT.CENTER_X,
-        position_y: nextY,
+        position_y: maxY + LAYOUT.GAP_Y,
       });
-    } catch (error) {
-      console.error("Error adding node:", error);
+    } catch (e) {
+      console.error("Add node failed:", e);
     }
   };
 
-  // Save flow
+  // Save flow - persist current positions
   const handleSave = async () => {
     const nodesToSave: FlowNode[] = nodes.map((node) => ({
       id: node.id,
@@ -641,56 +402,75 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       created_at: "",
     }));
 
-    await saveFlow.mutateAsync({ nodes: nodesToSave, edges: edgesToSave });
+    try {
+      await saveFlow.mutateAsync({ nodes: nodesToSave, edges: edgesToSave });
+      toast.success("Fluxo salvo!");
+    } catch (e) {
+      console.error("Save failed:", e);
+      toast.error("Erro ao salvar");
+    }
   };
 
-  // Update node config (from modal)
+  // Update node config from modal
   const handleUpdateNodeConfig = async (nodeId: string, config: Record<string, unknown>) => {
     try {
       await updateNode.mutateAsync({ id: nodeId, config });
       setShowConfigDialog(false);
       setSelectedNode(null);
-    } catch (error) {
-      console.error("Error updating node:", error);
+    } catch (e) {
+      console.error("Config update failed:", e);
     }
   };
 
-  // Auto-organize
+  // MANUAL auto-organize - ONLY on explicit user action
   const handleAutoOrganize = () => {
     if (nodes.length === 0) return;
 
-    const newPositions = computeVerticalLayout(
-      nodes.map(n => ({
-        id: n.id,
-        node_type: n.type,
-        position_x: n.position.x,
-        position_y: n.position.y,
-        created_at: n.data.createdAt,
-        config: n.data.config,
-        company_id: "",
-        flow_id: flowId,
+    const sorted = [...nodes].sort((a, b) => {
+      if (a.type === "start") return -1;
+      if (b.type === "start") return 1;
+      return (a.data.createdAt || "").localeCompare(b.data.createdAt || "");
+    });
+
+    setNodes(
+      sorted.map((node, index) => ({
+        ...node,
+        position: {
+          x: LAYOUT.CENTER_X,
+          y: LAYOUT.START_Y + index * LAYOUT.GAP_Y,
+        },
       }))
     );
 
-    setNodes((prev) =>
-      prev.map((node) => {
-        const pos = newPositions.get(node.id);
-        return pos ? { ...node, position: pos } : node;
-      })
-    );
-
-    requestFitView();
-
-    toast.success("Layout reorganizado!");
+    toast.success("Layout organizado! Clique em Salvar para persistir.");
   };
 
-  // Guard: don't render the editor until auth/profile is ready.
+  // Center view - MANUAL only
+  const handleCenterView = () => {
+    rfInstanceRef.current?.fitView({
+      padding: 0.3,
+      minZoom: 0.5,
+      maxZoom: 1.5,
+    });
+  };
+
+  // Initialize ReactFlow
+  const handleInit = useCallback((instance: ReactFlowInstance) => {
+    rfInstanceRef.current = instance;
+    initializedRef.current = true;
+    // Fit view once on init
+    setTimeout(() => {
+      instance.fitView({ padding: 0.3, minZoom: 0.5, maxZoom: 1.5 });
+    }, 100);
+  }, []);
+
+  // Loading states
   if (authLoading || !profile?.company_id) {
     return (
       <div className="h-full flex items-center justify-center bg-slate-950">
         <div className="flex items-center gap-3">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-          <div className="text-sm text-muted-foreground">Carregando seu workspace…</div>
+          <span className="text-sm text-muted-foreground">Carregando...</span>
         </div>
       </div>
     );
@@ -705,14 +485,14 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   }
 
   return (
-    <div className="h-full flex flex-col" style={{ backgroundColor: '#1e293b' }}>
-      {/* Professional Header - Stripe-style */}
+    <div className="h-full flex flex-col" style={{ backgroundColor: "#1e293b" }}>
+      {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-slate-600 bg-slate-800">
         <div className="flex items-center gap-4">
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={onBack} 
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onBack}
             className="text-white hover:text-white hover:bg-slate-700"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -728,126 +508,102 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           <Button
             variant="outline"
             size="sm"
-            onClick={requestFitView}
-            className="border-slate-500 bg-slate-700 text-white hover:bg-slate-600 hover:text-white"
+            onClick={handleCenterView}
+            className="border-slate-500 bg-slate-700 text-white hover:bg-slate-600"
           >
             Centralizar
           </Button>
-          <Button 
-            variant="outline" 
-            size="sm" 
+          <Button
+            variant="outline"
+            size="sm"
             onClick={handleAutoOrganize}
-            className="border-slate-500 bg-slate-700 text-white hover:bg-slate-600 hover:text-white"
+            className="border-slate-500 bg-slate-700 text-white hover:bg-slate-600"
           >
             <LayoutGrid className="w-4 h-4 mr-2" />
             Organizar
           </Button>
-          <Button 
-            onClick={handleSave} 
+          <Button
+            onClick={handleSave}
             disabled={saveFlow.isPending}
             className="bg-emerald-500 hover:bg-emerald-400 text-white font-semibold shadow-lg"
           >
             <Save className="w-4 h-4 mr-2" />
-            Salvar Fluxo
+            Salvar
           </Button>
         </div>
       </div>
 
-      {/* Flow Editor Canvas - Professional dark graphite */}
-      <div className="flex-1 relative" style={{ backgroundColor: '#1e293b' }}>
-        {/* Estado vazio / recuperação obrigatória: o usuário NUNCA pode ver canvas vazio */}
-        {nodes.length === 0 && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center p-6">
-            <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-sm">
-              <h3 className="text-base font-semibold text-foreground">Recuperando o canvas…</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Estamos forçando um layout seguro (vertical) e centralizando os blocos. Se este fluxo
-                estiver vazio, criaremos automaticamente <strong>Início</strong> e <strong>Mensagem</strong>.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Button
-                  onClick={() => {
-                    forceDomVisibility();
-                    void ensureMinimumFlow();
-                    requestFitView();
-                  }}
-                  disabled={addNode.isPending}
-                >
-                  Forçar recuperação
-                </Button>
-                <Button variant="outline" onClick={onBack}>
-                  Voltar
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
+      {/* Canvas */}
+      <div className="flex-1 relative" style={{ backgroundColor: "#1e293b" }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onNodesDelete={onNodesDelete}
-          onEdgesDelete={onEdgesDelete}
+          onNodesChange={handleNodesChange}
+          onEdgesChange={handleEdgesChange}
+          onConnect={handleConnect}
+          onNodesDelete={handleNodesDelete}
+          onEdgesDelete={handleEdgesDelete}
           nodeTypes={flowNodeTypes}
-          onInit={(instance) => {
-            rfInstanceRef.current = instance;
-            setRfInitTick((t) => t + 1);
-            // Ensure we frame nodes immediately on mount.
-            requestAnimationFrame(() => requestFitView());
-            requestAnimationFrame(() => forceDomVisibility());
-          }}
-          fitView
-          fitViewOptions={{
-            padding: 0.3,
-            includeHiddenNodes: false,
-            minZoom: 0.5,
-            maxZoom: 1.5,
-          }}
+          onInit={handleInit}
           minZoom={0.2}
           maxZoom={2}
           deleteKeyCode={["Backspace", "Delete"]}
-          style={{ backgroundColor: '#1e293b' }}
+          style={{ backgroundColor: "#1e293b" }}
           defaultEdgeOptions={{
             type: "smoothstep",
             animated: false,
-            markerEnd: { type: MarkerType.ArrowClosed, color: "#94a3b8" },
-            style: { stroke: "#94a3b8", strokeWidth: 2 },
+            markerEnd: EDGE_MARKER,
+            style: EDGE_STYLE,
           }}
+          // STABILITY: Disable automatic behaviors that cause jitter
+          nodesDraggable={true}
+          nodesConnectable={true}
+          elementsSelectable={true}
+          panOnDrag={true}
+          zoomOnScroll={true}
+          // Don't auto-fit on changes
+          fitView={false}
         >
-          <Background 
-            variant={BackgroundVariant.Dots} 
-            gap={20} 
-            size={1.5} 
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={20}
+            size={1.5}
             color="#475569"
           />
           <Controls className="!bg-slate-700 !border-slate-500 !shadow-xl !rounded-lg [&_button]:!bg-slate-600 [&_button]:!border-slate-400 [&_button]:hover:!bg-slate-500 [&_button_svg]:!fill-white [&_button]:!rounded-md" />
-          <MiniMap 
+          <MiniMap
             className="!bg-slate-800/80 !backdrop-blur-sm !border-slate-700/50 !shadow-xl !rounded-xl"
             maskColor="rgba(0,0,0,0.85)"
             nodeColor={(node) => {
               switch (node.type) {
-                case "start": return "#10b981";
-                case "message": return "#10b981";
-                case "template": return "#8b5cf6";
-                case "media": return "#f97316";
-                case "delay": return "#f59e0b";
-                case "wait_response": return "#ec4899";
-                case "condition": return "#6366f1";
-                case "end": return "#64748b";
-                default: return "#64748b";
+                case "start":
+                  return "#10b981";
+                case "message":
+                  return "#10b981";
+                case "template":
+                  return "#8b5cf6";
+                case "media":
+                  return "#f97316";
+                case "delay":
+                  return "#f59e0b";
+                case "wait_response":
+                  return "#ec4899";
+                case "condition":
+                  return "#6366f1";
+                case "end":
+                  return "#64748b";
+                default:
+                  return "#64748b";
               }
             }}
           />
 
-          {/* Floating Add Panel */}
+          {/* Add Node Panel */}
           <Panel position="top-center" className="!mt-4">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button 
-                  size="default" 
+                <Button
+                  size="default"
                   className="bg-slate-800/90 hover:bg-slate-700 text-white border border-slate-700/50 shadow-2xl px-6 backdrop-blur-sm rounded-xl"
                 >
                   <Plus className="w-4 h-4 mr-2" />
@@ -855,12 +611,14 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
                   <ChevronDown className="w-4 h-4 ml-2" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent 
-                align="center" 
+              <DropdownMenuContent
+                align="center"
                 className="w-72 bg-slate-800/95 backdrop-blur-sm border-slate-700/50 shadow-2xl p-2 rounded-xl"
               >
                 <div className="px-3 py-2 mb-2 border-b border-slate-700/50">
-                  <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">Selecione uma ação</p>
+                  <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">
+                    Selecione uma ação
+                  </p>
                 </div>
                 <div className="grid gap-1">
                   {availableNodeTypes.map((nodeType) => {
@@ -883,16 +641,17 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
             </DropdownMenu>
           </Panel>
 
-          {/* Tip panel */}
+          {/* Tip */}
           <Panel position="bottom-center" className="!mb-4">
             <div className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/30 rounded-xl px-4 py-2 text-xs text-slate-400">
-              💡 Clique em uma mensagem para editar diretamente • Conecte botões aos próximos passos
+              💡 Arraste blocos para posicionar • Conecte saídas às entradas • Clique em
+              Salvar para persistir
             </div>
           </Panel>
         </ReactFlow>
       </div>
 
-      {/* Node Config Dialog - for non-message nodes */}
+      {/* Config Dialog */}
       <NodeConfigDialog
         open={showConfigDialog}
         onOpenChange={setShowConfigDialog}
@@ -901,32 +660,6 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       />
     </div>
   );
-}
-
-/**
- * Vertical layout algorithm
- */
-function computeVerticalLayout(
-  nodes: Array<{ id: string; node_type: string; created_at: string; position_x: number; position_y: number }>
-): Map<string, { x: number; y: number }> {
-  const newPositions = new Map<string, { x: number; y: number }>();
-  
-  if (nodes.length === 0) return newPositions;
-
-  const sortedNodes = [...nodes].sort((a, b) => {
-    if (a.node_type === "start") return -1;
-    if (b.node_type === "start") return 1;
-    return a.created_at.localeCompare(b.created_at);
-  });
-
-  sortedNodes.forEach((node, index) => {
-    newPositions.set(node.id, {
-      x: LAYOUT.CENTER_X,
-      y: LAYOUT.START_Y + index * LAYOUT.GAP_Y,
-    });
-  });
-
-  return newPositions;
 }
 
 function getNodeLabel(type: string): string {
