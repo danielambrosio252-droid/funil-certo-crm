@@ -108,6 +108,12 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     channels: [],
     selectedChannelId: null
   });
+  
+  // Use ref to avoid re-triggering node creation when channelInfo updates
+  const channelInfoRef = useRef(channelInfo);
+  useEffect(() => {
+    channelInfoRef.current = channelInfo;
+  }, [channelInfo]);
 
   // Fetch ALL available channels (both API and Baileys if configured)
   useEffect(() => {
@@ -225,7 +231,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       config: node.config,
       createdAt: node.created_at,
       nodeIndex: nodeIndexMap.get(node.id) || 0,
-      channelInfo,
+      channelInfo: channelInfoRef.current,
       onConfigure: () => {
         setSelectedNode({
           id: node.id,
@@ -237,7 +243,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       },
       onChannelChange: (channelId: string) => handleChannelChange(node.id, channelId),
     },
-  }), [nodeIndexMap, handleChannelChange, channelInfo]);
+  }), [nodeIndexMap, handleChannelChange]);
 
   const initialNodes = useMemo(() => 
     dbNodes.map(createNodeData) as FlowEditorNode[], 
@@ -261,9 +267,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowEditorNode>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEditorEdge>(initialEdges);
 
-  // Sync with DB data - only when dbNodes changes, not channelInfo
+  // Sync with DB data
   useEffect(() => {
-    if (dbNodes.length === 0) return;
     const mapped = dbNodes.map(createNodeData) as FlowEditorNode[];
     setNodes(mapped);
   }, [dbNodes, setNodes, createNodeData]);
