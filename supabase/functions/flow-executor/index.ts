@@ -24,7 +24,7 @@ interface ChatbotFlow {
   trigger_keywords: string[];
 }
 
-// Send message via WhatsApp Cloud API
+// Send text message via WhatsApp Cloud API
 async function sendWhatsAppMessage(
   phoneNumberId: string,
   accessToken: string,
@@ -59,6 +59,68 @@ async function sendWhatsAppMessage(
     return true;
   } catch (error) {
     console.error("Error sending WhatsApp message:", error);
+    return false;
+  }
+}
+
+// Send interactive button message via WhatsApp Cloud API
+async function sendWhatsAppInteractiveButtons(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  bodyText: string,
+  buttons: { id: string; title: string }[]
+): Promise<boolean> {
+  try {
+    // WhatsApp limits: max 3 buttons, max 20 chars per button title
+    const validButtons = buttons.slice(0, 3).map((btn, idx) => ({
+      type: "reply",
+      reply: {
+        id: btn.id || `option-${idx}`,
+        title: btn.title.substring(0, 20), // Max 20 chars
+      },
+    }));
+
+    const payload = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: {
+          text: bodyText.substring(0, 1024), // Max 1024 chars for body
+        },
+        action: {
+          buttons: validButtons,
+        },
+      },
+    };
+
+    console.log(`📤 Sending interactive buttons:`, JSON.stringify(payload, null, 2));
+
+    const response = await fetch(
+      `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("WhatsApp API error (interactive):", error);
+      return false;
+    }
+
+    console.log(`✅ Interactive buttons sent to ${to}`);
+    return true;
+  } catch (error) {
+    console.error("Error sending WhatsApp interactive message:", error);
     return false;
   }
 }
@@ -264,32 +326,59 @@ async function processNode(
       const question = (config.question as string) || "";
       const options = (config.options as string[]) || [];
 
-      // Build question message with options
-      let fullMessage = question;
-      if (options.length > 0) {
-        fullMessage += "\n\n";
-        options.forEach((opt, idx) => {
-          fullMessage += `${idx + 1}. ${opt}\n`;
-        });
-      }
+      // Use interactive buttons if we have 1-3 options (WhatsApp limit)
+      if (options.length > 0 && options.length <= 3) {
+        const buttons = options.map((opt, idx) => ({
+          id: `option-${idx}`,
+          title: opt,
+        }));
 
-      if (fullMessage) {
-        await sendWhatsAppMessage(
+        await sendWhatsAppInteractiveButtons(
           context.phoneNumberId,
           context.accessToken,
           context.contactPhone,
-          fullMessage
+          question,
+          buttons
         );
 
+        // Save as interactive message
         await supabase.from("whatsapp_messages").insert({
           company_id: context.companyId,
           contact_id: context.contactId,
-          content: fullMessage,
-          message_type: "text",
+          content: `${question}\n\n[Botões: ${options.join(" | ")}]`,
+          message_type: "interactive",
           is_from_me: true,
           status: "sent",
           sent_at: new Date().toISOString(),
         });
+      } else {
+        // Fallback to text with numbered options for 4+ options or no options
+        let fullMessage = question;
+        if (options.length > 0) {
+          fullMessage += "\n\n";
+          options.forEach((opt, idx) => {
+            fullMessage += `${idx + 1}. ${opt}\n`;
+          });
+        }
+
+        if (fullMessage) {
+          await sendWhatsAppMessage(
+            context.phoneNumberId,
+            context.accessToken,
+            context.contactPhone,
+            fullMessage
+          );
+
+          await supabase.from("whatsapp_messages").insert({
+            company_id: context.companyId,
+            contact_id: context.contactId,
+            content: fullMessage,
+            message_type: "text",
+            is_from_me: true,
+            status: "sent",
+            sent_at: new Date().toISOString(),
+          });
+        }
       }
 
       // Update execution to wait for response
@@ -519,9 +608,10 @@ async function executeFlow(
 async function continueExecution(
   supabase: any,
   executionId: string,
-  userResponse?: string
+  userResponse?: string,
+  buttonId?: string // Direct button ID from interactive response
 ) {
-  console.log(`🔄 Continuing execution ${executionId} with response: "${userResponse}"`);
+  console.log(`🔄 Continuing execution ${executionId} with response: "${userResponse}", buttonId: "${buttonId}"`);
   
   const { data: execution, error: execError } = await supabase
     .from("chatbot_flow_executions")
@@ -582,31 +672,38 @@ async function continueExecution(
   const accessToken = Deno.env.get("WHATSAPP_CLOUD_ACCESS_TOKEN") || "";
 
   // If it's a question node, determine the next path based on response
-  if (currentNode.node_type === "question" && userResponse) {
+  if (currentNode.node_type === "question") {
     const options = (currentNode.config?.options as string[]) || [];
-    const responseLower = userResponse.toLowerCase().trim();
 
-    console.log(`🤔 Question options: ${JSON.stringify(options)}, Response: "${responseLower}"`);
+    console.log(`🤔 Question options: ${JSON.stringify(options)}, buttonId: "${buttonId}", Response: "${userResponse}"`);
 
-    // Try to match by number (1, 2, 3...) or by content
-    let matchedIndex = -1;
-    const responseNum = parseInt(responseLower);
-    
-    if (!isNaN(responseNum) && responseNum >= 1 && responseNum <= options.length) {
-      matchedIndex = responseNum - 1;
-      console.log(`✅ Matched by number: ${responseNum} -> index ${matchedIndex}`);
-    } else {
-      // Try to match by content
-      matchedIndex = options.findIndex((opt: string) =>
-        responseLower.includes(opt.toLowerCase())
-      );
-      if (matchedIndex >= 0) {
-        console.log(`✅ Matched by content: "${options[matchedIndex]}" -> index ${matchedIndex}`);
+    let sourceHandle: string | null = null;
+
+    // Priority 1: Use buttonId directly if available (from interactive buttons)
+    if (buttonId && buttonId.startsWith("option-")) {
+      sourceHandle = buttonId;
+      console.log(`✅ Using buttonId directly: ${sourceHandle}`);
+    } else if (userResponse) {
+      // Priority 2: Try to match by number or content
+      const responseLower = userResponse.toLowerCase().trim();
+      const responseNum = parseInt(responseLower);
+      
+      if (!isNaN(responseNum) && responseNum >= 1 && responseNum <= options.length) {
+        sourceHandle = `option-${responseNum - 1}`;
+        console.log(`✅ Matched by number: ${responseNum} -> ${sourceHandle}`);
+      } else {
+        // Try to match by content
+        const matchedIndex = options.findIndex((opt: string) =>
+          responseLower.includes(opt.toLowerCase()) || opt.toLowerCase().includes(responseLower)
+        );
+        if (matchedIndex >= 0) {
+          sourceHandle = `option-${matchedIndex}`;
+          console.log(`✅ Matched by content: "${options[matchedIndex]}" -> ${sourceHandle}`);
+        }
       }
     }
 
-    if (matchedIndex >= 0) {
-      const sourceHandle = `option-${matchedIndex}`;
+    if (sourceHandle) {
       console.log(`🔍 Looking for edge with source_handle: ${sourceHandle}`);
       
       const nextNode = await getNextNode(supabase, currentNode.flow_id, currentNode.id, sourceHandle);
@@ -671,7 +768,7 @@ async function continueExecution(
           .eq("id", executionId);
       }
     } else {
-      console.log(`❌ No matching option for response: "${userResponse}"`);
+      console.log(`❌ No matching option for buttonId: "${buttonId}" or response: "${userResponse}"`);
       
       // Could send a "didn't understand" message here in the future
     }
@@ -766,7 +863,9 @@ Deno.serve(async (req) => {
     }
 
     if (trigger_type === "continue_execution" && execution_id) {
-      // Get the last message from contact
+      const { button_id, user_response } = body;
+      
+      // Get the last message from contact if no user_response provided
       const { data: execution } = await supabase
         .from("chatbot_flow_executions")
         .select("contact_id")
@@ -774,16 +873,23 @@ Deno.serve(async (req) => {
         .single();
 
       if (execution) {
-        const { data: lastMessage } = await supabase
-          .from("whatsapp_messages")
-          .select("content")
-          .eq("contact_id", execution.contact_id)
-          .eq("is_from_me", false)
-          .order("sent_at", { ascending: false })
-          .limit(1)
-          .single();
+        let responseContent = user_response;
+        
+        // If no user_response was passed, fetch from last message
+        if (!responseContent) {
+          const { data: lastMessage } = await supabase
+            .from("whatsapp_messages")
+            .select("content")
+            .eq("contact_id", execution.contact_id)
+            .eq("is_from_me", false)
+            .order("sent_at", { ascending: false })
+            .limit(1)
+            .single();
+          
+          responseContent = lastMessage?.content;
+        }
 
-        await continueExecution(supabase, execution_id, lastMessage?.content);
+        await continueExecution(supabase, execution_id, responseContent, button_id);
       }
 
       return new Response(JSON.stringify({ status: "continued" }), {
