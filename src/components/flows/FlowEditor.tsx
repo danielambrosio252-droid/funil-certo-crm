@@ -183,8 +183,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         label: edge.label,
         animated: false,
         type: "smoothstep",
-        markerEnd: { type: MarkerType.ArrowClosed, color: "#64748b" },
-        style: { stroke: "#64748b", strokeWidth: 2 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: "#94a3b8" },
+        style: { stroke: "#94a3b8", strokeWidth: 2 },
       })) as FlowEditorEdge[])
     );
   }, [dbEdges, setEdges]);
@@ -442,7 +442,14 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           onEdgesDelete={onEdgesDelete}
           nodeTypes={flowNodeTypes}
           fitView
-          fitViewOptions={{ padding: 0.4 }}
+          fitViewOptions={{ 
+            padding: 0.3,
+            includeHiddenNodes: false,
+            minZoom: 0.5,
+            maxZoom: 1.5,
+          }}
+          minZoom={0.2}
+          maxZoom={2}
           deleteKeyCode={["Backspace", "Delete"]}
           style={{ backgroundColor: '#1e293b' }}
           defaultEdgeOptions={{
