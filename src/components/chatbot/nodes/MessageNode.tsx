@@ -2,26 +2,36 @@ import { memo, useState, useCallback } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { MessageSquare, Trash2 } from "lucide-react";
+import { MessageSquare, Trash2, Plus } from "lucide-react";
+import { BlockSelectionMenu } from "../menus/BlockSelectionMenu";
+import { NodeType } from "@/hooks/useChatbotFlows";
 
 interface MessageNodeData {
   message?: string;
   onUpdate?: (config: Record<string, unknown>) => void;
   onDelete?: () => void;
+  onAddNode?: (nodeType: NodeType, sourceNodeId: string) => void;
 }
 
-function MessageNode({ data }: NodeProps) {
+function MessageNode({ id, data }: NodeProps) {
   const nodeData = data as MessageNodeData;
   const [editing, setEditing] = useState(false);
   const [localMessage, setLocalMessage] = useState(nodeData?.message || "");
+  const [showMenu, setShowMenu] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   const handleBlur = useCallback(() => {
     setEditing(false);
     nodeData?.onUpdate?.({ message: localMessage });
   }, [localMessage, nodeData]);
 
+  const handleSelectBlock = (type: NodeType) => {
+    nodeData?.onAddNode?.(type, id);
+    setShowMenu(false);
+  };
+
   return (
-    <Card className="w-[320px] bg-white border shadow-lg rounded-2xl overflow-hidden">
+    <Card className="w-[320px] bg-white border shadow-lg rounded-2xl overflow-visible">
       <Handle
         type="target"
         position={Position.Left}
@@ -69,11 +79,48 @@ function MessageNode({ data }: NodeProps) {
         </div>
       </CardContent>
 
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!w-4 !h-4 !bg-blue-400 !border-2 !border-white hover:!scale-125 transition-transform"
-      />
+      {/* Output handle with + button */}
+      <div 
+        className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2"
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => {
+          setIsHovered(false);
+          if (!showMenu) setShowMenu(false);
+        }}
+      >
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!w-4 !h-4 !bg-blue-400 !border-2 !border-white transition-all"
+        />
+        
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowMenu(!showMenu);
+          }}
+          className={`
+            absolute top-1/2 -translate-y-1/2 left-3
+            w-6 h-6 rounded-full bg-blue-500 hover:bg-blue-600
+            flex items-center justify-center
+            text-white shadow-lg
+            transition-all duration-200
+            ${(isHovered || showMenu) ? 'opacity-100 scale-100' : 'opacity-0 scale-75'}
+            z-10
+          `}
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+
+        {showMenu && (
+          <div className="absolute top-1/2 -translate-y-1/2 left-12 z-50">
+            <BlockSelectionMenu 
+              onSelect={handleSelectBlock} 
+              onClose={() => setShowMenu(false)} 
+            />
+          </div>
+        )}
+      </div>
     </Card>
   );
 }

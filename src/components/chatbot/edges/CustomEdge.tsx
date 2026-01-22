@@ -4,16 +4,10 @@ import {
   EdgeLabelRenderer,
   EdgeProps,
   getBezierPath,
-  useReactFlow,
 } from "@xyflow/react";
 import { Button } from "@/components/ui/button";
 import { X, Plus } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { BlockSelectionMenu } from "../menus/BlockSelectionMenu";
 import { NodeType } from "@/hooks/useChatbotFlows";
 
 interface CustomEdgeData {
@@ -34,7 +28,7 @@ function CustomEdge({
   data,
 }: EdgeProps) {
   const [isHovered, setIsHovered] = useState(false);
-  const { getNodes } = useReactFlow();
+  const [showMenu, setShowMenu] = useState(false);
   const edgeData = data as CustomEdgeData;
 
   const [edgePath, labelX, labelY] = getBezierPath({
@@ -44,17 +38,14 @@ function CustomEdge({
     targetX,
     targetY,
     targetPosition,
+    curvature: 0.3,
   });
 
-  const nodeTypes: { type: NodeType; label: string; color: string }[] = [
-    { type: "message", label: "Mensagem", color: "bg-blue-500" },
-    { type: "question", label: "Pergunta", color: "bg-purple-500" },
-    { type: "condition", label: "Condição", color: "bg-amber-500" },
-    { type: "delay", label: "Delay", color: "bg-cyan-500" },
-    { type: "action", label: "Ação", color: "bg-violet-500" },
-    { type: "transfer", label: "Transferir", color: "bg-rose-500" },
-    { type: "end", label: "Fim", color: "bg-slate-700" },
-  ];
+  const handleSelectBlock = (type: NodeType) => {
+    edgeData?.onInsertNode?.(type, { x: labelX, y: labelY });
+    setShowMenu(false);
+    setIsHovered(false);
+  };
 
   return (
     <>
@@ -64,70 +55,93 @@ function CustomEdge({
         style={{
           ...style,
           strokeWidth: isHovered ? 3 : 2,
-          stroke: isHovered ? "#3b82f6" : "#94a3b8",
+          stroke: isHovered ? "#10b981" : "#64748b",
           transition: "all 0.2s",
         }}
         interactionWidth={20}
       />
       
+      {/* Arrow marker in the middle */}
+      <defs>
+        <marker
+          id={`arrow-${id}`}
+          viewBox="0 0 10 10"
+          refX="5"
+          refY="5"
+          markerWidth="4"
+          markerHeight="4"
+          orient="auto-start-reverse"
+        >
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+        </marker>
+      </defs>
+      
       {/* Invisible wider path for hover detection */}
       <path
         d={edgePath}
         fill="none"
-        strokeWidth={20}
+        strokeWidth={24}
         stroke="transparent"
         onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        onMouseLeave={() => {
+          if (!showMenu) {
+            setIsHovered(false);
+          }
+        }}
         style={{ cursor: "pointer" }}
       />
 
       <EdgeLabelRenderer>
-        {isHovered && (
+        {(isHovered || showMenu) && (
           <div
             style={{
               position: "absolute",
               transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
               pointerEvents: "all",
             }}
-            className="flex items-center gap-1 nodrag nopan"
+            className="flex items-center gap-2 nodrag nopan"
             onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
+            onMouseLeave={() => {
+              if (!showMenu) {
+                setIsHovered(false);
+              }
+            }}
           >
             {/* Delete edge button */}
             <Button
               variant="destructive"
               size="icon"
-              className="h-6 w-6 rounded-full shadow-lg"
+              className="h-7 w-7 rounded-full shadow-xl border-2 border-white"
               onClick={() => edgeData?.onDelete?.()}
             >
-              <X className="w-3 h-3" />
+              <X className="w-4 h-4" />
             </Button>
 
-            {/* Insert node dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="default"
-                  size="icon"
-                  className="h-6 w-6 rounded-full shadow-lg bg-emerald-500 hover:bg-emerald-600"
-                >
-                  <Plus className="w-3 h-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="center" className="w-40">
-                {nodeTypes.map((node) => (
-                  <DropdownMenuItem
-                    key={node.type}
-                    onClick={() => {
-                      edgeData?.onInsertNode?.(node.type, { x: labelX, y: labelY });
-                    }}
-                  >
-                    <div className={`w-2 h-2 rounded-full ${node.color} mr-2`} />
-                    {node.label}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* Insert node button */}
+            <Button
+              variant="default"
+              size="icon"
+              className="h-7 w-7 rounded-full shadow-xl bg-emerald-500 hover:bg-emerald-600 border-2 border-white"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMenu(!showMenu);
+              }}
+            >
+              <Plus className="w-4 h-4" />
+            </Button>
+
+            {/* Block selection menu */}
+            {showMenu && (
+              <div className="absolute left-16 top-1/2 -translate-y-1/2 z-50">
+                <BlockSelectionMenu 
+                  onSelect={handleSelectBlock}
+                  onClose={() => {
+                    setShowMenu(false);
+                    setIsHovered(false);
+                  }}
+                />
+              </div>
+            )}
           </div>
         )}
       </EdgeLabelRenderer>

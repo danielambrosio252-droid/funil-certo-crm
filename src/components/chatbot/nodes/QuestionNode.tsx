@@ -4,6 +4,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { HelpCircle, Trash2, Plus, X } from "lucide-react";
+import { BlockSelectionMenu } from "../menus/BlockSelectionMenu";
+import { NodeType } from "@/hooks/useChatbotFlows";
 
 interface QuestionNodeData {
   question?: string;
@@ -11,13 +13,18 @@ interface QuestionNodeData {
   variable?: string;
   onUpdate?: (config: Record<string, unknown>) => void;
   onDelete?: () => void;
+  onAddNode?: (nodeType: NodeType, sourceNodeId: string, sourceHandle?: string) => void;
 }
 
-function QuestionNode({ data }: NodeProps) {
+function QuestionNode({ id, data }: NodeProps) {
   const nodeData = data as QuestionNodeData;
   const [editing, setEditing] = useState(false);
   const [localQuestion, setLocalQuestion] = useState(nodeData?.question || "");
   const options = nodeData?.options || [];
+  const [showMenu, setShowMenu] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const [hoveredOption, setHoveredOption] = useState<number | null>(null);
+  const [showOptionMenu, setShowOptionMenu] = useState<number | null>(null);
 
   const handleBlur = useCallback(() => {
     setEditing(false);
@@ -56,8 +63,14 @@ function QuestionNode({ data }: NodeProps) {
     });
   };
 
+  const handleSelectBlock = (type: NodeType, handleId?: string) => {
+    nodeData?.onAddNode?.(type, id, handleId);
+    setShowMenu(false);
+    setShowOptionMenu(null);
+  };
+
   return (
-    <Card className="w-[350px] bg-white border shadow-lg rounded-2xl overflow-hidden">
+    <Card className="w-[350px] bg-white border shadow-lg rounded-2xl overflow-visible">
       <Handle
         type="target"
         position={Position.Left}
@@ -109,11 +122,19 @@ function QuestionNode({ data }: NodeProps) {
         <div className="space-y-2">
           <p className="text-xs font-medium text-muted-foreground">Opções de resposta:</p>
           {options.map((opt, idx) => (
-            <div key={idx} className="relative flex items-center gap-2">
+            <div 
+              key={idx} 
+              className="relative flex items-center gap-2"
+              onMouseEnter={() => setHoveredOption(idx)}
+              onMouseLeave={() => {
+                setHoveredOption(null);
+                if (showOptionMenu !== idx) setShowOptionMenu(null);
+              }}
+            >
               <Input
                 value={opt}
                 onChange={(e) => handleUpdateOption(idx, e.target.value)}
-                className="flex-1 h-9 text-sm"
+                className="flex-1 h-9 text-sm pr-16"
                 placeholder={`Opção ${idx + 1}`}
               />
               <Button 
@@ -124,14 +145,44 @@ function QuestionNode({ data }: NodeProps) {
               >
                 <X className="w-3 h-3" />
               </Button>
-              {/* Option-specific output handle */}
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={`option-${idx}`}
-                className="!w-3 !h-3 !bg-purple-400 !border-2 !border-white hover:!scale-125 transition-transform"
-                style={{ top: 'auto', right: -6 }}
-              />
+              
+              {/* Option-specific output handle with + button */}
+              <div 
+                className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[calc(100%+8px)]"
+              >
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id={`option-${idx}`}
+                  className="!w-3 !h-3 !bg-purple-400 !border-2 !border-white transition-all"
+                  style={{ position: 'relative', transform: 'none' }}
+                />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowOptionMenu(showOptionMenu === idx ? null : idx);
+                  }}
+                  className={`
+                    absolute top-1/2 -translate-y-1/2 left-2
+                    w-5 h-5 rounded-full bg-purple-500 hover:bg-purple-600
+                    flex items-center justify-center
+                    text-white shadow-lg
+                    transition-all duration-200
+                    ${(hoveredOption === idx || showOptionMenu === idx) ? 'opacity-100 scale-100' : 'opacity-0 scale-75'}
+                    z-10
+                  `}
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+                {showOptionMenu === idx && (
+                  <div className="absolute top-1/2 -translate-y-1/2 left-9 z-50">
+                    <BlockSelectionMenu 
+                      onSelect={(type) => handleSelectBlock(type, `option-${idx}`)} 
+                      onClose={() => setShowOptionMenu(null)} 
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           ))}
           <Button
@@ -146,13 +197,49 @@ function QuestionNode({ data }: NodeProps) {
         </div>
       </CardContent>
 
-      {/* Default output (free text) */}
+      {/* Default output (free text) - only if no options */}
       {options.length === 0 && (
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!w-4 !h-4 !bg-purple-400 !border-2 !border-white hover:!scale-125 transition-transform"
-        />
+        <div 
+          className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2"
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => {
+            setIsHovered(false);
+            if (!showMenu) setShowMenu(false);
+          }}
+        >
+          <Handle
+            type="source"
+            position={Position.Right}
+            className="!w-4 !h-4 !bg-purple-400 !border-2 !border-white transition-all"
+          />
+          
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMenu(!showMenu);
+            }}
+            className={`
+              absolute top-1/2 -translate-y-1/2 left-3
+              w-6 h-6 rounded-full bg-purple-500 hover:bg-purple-600
+              flex items-center justify-center
+              text-white shadow-lg
+              transition-all duration-200
+              ${(isHovered || showMenu) ? 'opacity-100 scale-100' : 'opacity-0 scale-75'}
+              z-10
+            `}
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+
+          {showMenu && (
+            <div className="absolute top-1/2 -translate-y-1/2 left-12 z-50">
+              <BlockSelectionMenu 
+                onSelect={(type) => handleSelectBlock(type)} 
+                onClose={() => setShowMenu(false)} 
+              />
+            </div>
+          )}
+        </div>
       )}
     </Card>
   );

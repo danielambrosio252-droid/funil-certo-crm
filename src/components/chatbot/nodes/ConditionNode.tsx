@@ -4,7 +4,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { GitBranch, Trash2 } from "lucide-react";
+import { GitBranch, Trash2, Plus } from "lucide-react";
+import { BlockSelectionMenu } from "../menus/BlockSelectionMenu";
+import { NodeType } from "@/hooks/useChatbotFlows";
 
 interface ConditionNodeData {
   variable?: string;
@@ -12,6 +14,7 @@ interface ConditionNodeData {
   value?: string;
   onUpdate?: (config: Record<string, unknown>) => void;
   onDelete?: () => void;
+  onAddNode?: (nodeType: NodeType, sourceNodeId: string, sourceHandle?: string) => void;
 }
 
 const operators = [
@@ -25,18 +28,27 @@ const operators = [
   { value: "is_not_empty", label: "não está vazio" },
 ];
 
-function ConditionNode({ data }: NodeProps) {
+function ConditionNode({ id, data }: NodeProps) {
   const nodeData = data as ConditionNodeData;
   const [variable, setVariable] = useState(nodeData?.variable || "");
   const [operator, setOperator] = useState(nodeData?.operator || "equals");
   const [value, setValue] = useState(nodeData?.value || "");
+  const [showTrueMenu, setShowTrueMenu] = useState(false);
+  const [showFalseMenu, setShowFalseMenu] = useState(false);
+  const [hoveredHandle, setHoveredHandle] = useState<string | null>(null);
 
   const handleUpdate = () => {
     nodeData?.onUpdate?.({ variable, operator, value });
   };
 
+  const handleSelectBlock = (type: NodeType, handleId: string) => {
+    nodeData?.onAddNode?.(type, id, handleId);
+    setShowTrueMenu(false);
+    setShowFalseMenu(false);
+  };
+
   return (
-    <Card className="w-[320px] bg-white border shadow-lg rounded-2xl overflow-hidden">
+    <Card className="w-[320px] bg-white border shadow-lg rounded-2xl overflow-visible">
       <Handle
         type="target"
         position={Position.Left}
@@ -109,23 +121,91 @@ function ConditionNode({ data }: NodeProps) {
         </div>
       </CardContent>
 
-      {/* True output */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="true"
-        className="!w-4 !h-4 !bg-emerald-500 !border-2 !border-white hover:!scale-125 transition-transform"
+      {/* True output with + button */}
+      <div 
+        className="absolute right-0 translate-x-1/2"
         style={{ top: '60%' }}
-      />
+        onMouseEnter={() => setHoveredHandle('true')}
+        onMouseLeave={() => {
+          setHoveredHandle(null);
+          if (!showTrueMenu) setShowTrueMenu(false);
+        }}
+      >
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="true"
+          className="!w-4 !h-4 !bg-emerald-500 !border-2 !border-white transition-all"
+        />
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowTrueMenu(!showTrueMenu);
+          }}
+          className={`
+            absolute top-1/2 -translate-y-1/2 left-3
+            w-5 h-5 rounded-full bg-emerald-500 hover:bg-emerald-600
+            flex items-center justify-center
+            text-white shadow-lg
+            transition-all duration-200
+            ${(hoveredHandle === 'true' || showTrueMenu) ? 'opacity-100 scale-100' : 'opacity-0 scale-75'}
+            z-10
+          `}
+        >
+          <Plus className="w-3 h-3" />
+        </button>
+        {showTrueMenu && (
+          <div className="absolute top-1/2 -translate-y-1/2 left-10 z-50">
+            <BlockSelectionMenu 
+              onSelect={(type) => handleSelectBlock(type, 'true')} 
+              onClose={() => setShowTrueMenu(false)} 
+            />
+          </div>
+        )}
+      </div>
       
-      {/* False output */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="false"
-        className="!w-4 !h-4 !bg-rose-500 !border-2 !border-white hover:!scale-125 transition-transform"
+      {/* False output with + button */}
+      <div 
+        className="absolute right-0 translate-x-1/2"
         style={{ top: '85%' }}
-      />
+        onMouseEnter={() => setHoveredHandle('false')}
+        onMouseLeave={() => {
+          setHoveredHandle(null);
+          if (!showFalseMenu) setShowFalseMenu(false);
+        }}
+      >
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="false"
+          className="!w-4 !h-4 !bg-rose-500 !border-2 !border-white transition-all"
+        />
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowFalseMenu(!showFalseMenu);
+          }}
+          className={`
+            absolute top-1/2 -translate-y-1/2 left-3
+            w-5 h-5 rounded-full bg-rose-500 hover:bg-rose-600
+            flex items-center justify-center
+            text-white shadow-lg
+            transition-all duration-200
+            ${(hoveredHandle === 'false' || showFalseMenu) ? 'opacity-100 scale-100' : 'opacity-0 scale-75'}
+            z-10
+          `}
+        >
+          <Plus className="w-3 h-3" />
+        </button>
+        {showFalseMenu && (
+          <div className="absolute top-1/2 -translate-y-1/2 left-10 z-50">
+            <BlockSelectionMenu 
+              onSelect={(type) => handleSelectBlock(type, 'false')} 
+              onClose={() => setShowFalseMenu(false)} 
+            />
+          </div>
+        )}
+      </div>
     </Card>
   );
 }
