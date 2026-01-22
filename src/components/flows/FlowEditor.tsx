@@ -98,12 +98,35 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   const didAutoFixRef = useRef(false);
   const didEnsureStartRef = useRef(false);
-  const didFitViewRef = useRef(false);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const lastFitViewTsRef = useRef(0);
+
+  const requestFitView = useCallback(() => {
+    const inst = rfInstanceRef.current;
+    if (!inst) return;
+    const now = Date.now();
+    // throttle to avoid jitter / loops
+    if (now - lastFitViewTsRef.current < 500) return;
+    lastFitViewTsRef.current = now;
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        try {
+          inst.fitView({
+            padding: 0.3,
+            includeHiddenNodes: false,
+            minZoom: 0.5,
+            maxZoom: 1.5,
+          });
+        } catch (e) {
+          console.error("fitView failed:", e);
+        }
+      });
+    });
+  }, []);
   useEffect(() => {
     didAutoFixRef.current = false;
     didEnsureStartRef.current = false;
-    didFitViewRef.current = false;
     setRfInitTick(0);
   }, [flowId]);
 
@@ -255,33 +278,14 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     setNodes(mapped);
   }, [dbNodes, setNodes, createNodeData]);
 
-  // Safety: when nodes/edges load (or refetch) re-frame the viewport once.
-  // This prevents the "tela escura" / "sumiu" feeling when nodes exist but are off-screen.
+  // Keep viewport stable: fit on initial load AND after automatic re-layout.
   useEffect(() => {
     if (loadingNodes || loadingEdges) return;
     if (nodes.length === 0) return;
-    if (didFitViewRef.current) return;
-    const inst = rfInstanceRef.current;
-    if (!inst) return;
-
-    didFitViewRef.current = true;
-
-    // two frames: ensure nodes mounted before fit
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-      try {
-        inst.fitView({
-          padding: 0.3,
-          includeHiddenNodes: false,
-          minZoom: 0.5,
-          maxZoom: 1.5,
-        });
-      } catch (e) {
-        console.error("fitView failed:", e);
-      }
-      });
-    });
-  }, [loadingNodes, loadingEdges, nodes.length, rfInitTick]);
+    // rfInitTick ensures ReactFlow instance exists
+    if (rfInitTick === 0) return;
+    requestFitView();
+  }, [loadingNodes, loadingEdges, nodes.length, rfInitTick, requestFitView]);
 
   useEffect(() => {
     setEdges(
@@ -329,6 +333,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     }) as FlowEditorNode[];
 
     setNodes(organizedNodes);
+    // Important: viewport must be refit AFTER nodes are repositioned, otherwise it looks like it "disappeared".
+    requestFitView();
 
     const nodesToSave: FlowNode[] = organizedNodes.map((node) => ({
       id: node.id,
@@ -355,7 +361,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     saveFlow.mutateAsync({ nodes: nodesToSave, edges: edgesToSave }).then(() => {
       toast.success("Layout organizado!");
     });
-  }, [dbNodes, dbEdges, loadingNodes, loadingEdges, setNodes, flowId, saveFlow, createNodeData]);
+  }, [dbNodes, dbEdges, loadingNodes, loadingEdges, setNodes, flowId, saveFlow, createNodeData, requestFitView]);
 
   // Handle new connections
   const onConnect = useCallback(
@@ -487,6 +493,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         return pos ? { ...node, position: pos } : node;
       })
     );
+
+    requestFitView();
 
     toast.success("Layout reorganizado!");
   };
