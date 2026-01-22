@@ -18,7 +18,6 @@ import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
 import { 
   ArrowLeft, 
-  Save, 
   Plus, 
   MessageSquare, 
   HelpCircle, 
@@ -37,10 +36,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { useChatbotFlowEditor, NodeType, ChatbotFlowNode, ChatbotFlowEdge } from "@/hooks/useChatbotFlows";
+import { useChatbotFlowEditor, NodeType, ChatbotFlowNode } from "@/hooks/useChatbotFlows";
 
 // Node components
 import StartNode from "./nodes/StartNode";
@@ -87,7 +85,6 @@ interface FlowBuilderCanvasProps {
 function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvasProps) {
   const { nodes: dbNodes, edges: dbEdges, loadingNodes, loadingEdges, addNode, updateNode, deleteNode, addEdge: addDbEdge, deleteEdge, ensureStartNode } = useChatbotFlowEditor(flowId);
   const { fitView, zoomIn, zoomOut, getViewport } = useReactFlow();
-  const [saving, setSaving] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const hasEnsuredStartNode = useRef(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -143,6 +140,54 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
     await deleteEdge.mutateAsync(edgeId);
   }, [deleteEdge]);
 
+  // React Flow state (declared early so we can use setters in callbacks)
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
+  // Ref for handleInsertNodeOnEdge to break circular dependency
+  const handleInsertNodeOnEdgeRef = useRef<(
+    edgeId: string,
+    sourceId: string,
+    targetId: string,
+    nodeType: NodeType,
+    position: { x: number; y: number }
+  ) => Promise<void>>();
+
+  // handleInsertNodeOnEdge MUST be declared BEFORE handleAddNodeFromHandle
+  const handleInsertNodeOnEdge = useCallback(async (
+    edgeId: string,
+    sourceId: string,
+    targetId: string,
+    nodeType: NodeType,
+    position: { x: number; y: number }
+  ) => {
+    // Delete the original edge
+    await deleteEdge.mutateAsync(edgeId);
+    
+    // Create new node
+    const newNode = await addNode.mutateAsync({
+      node_type: nodeType,
+      position_x: Math.round(position.x),
+      position_y: Math.round(position.y),
+      config: {},
+    });
+
+    // Create edges: source -> new node -> target
+    await addDbEdge.mutateAsync({
+      source_node_id: sourceId,
+      target_node_id: newNode.id,
+    });
+    await addDbEdge.mutateAsync({
+      source_node_id: newNode.id,
+      target_node_id: targetId,
+    });
+
+    toast.success("Bloco inserido!");
+  }, [deleteEdge, addNode, addDbEdge]);
+
+  // Keep ref updated
+  handleInsertNodeOnEdgeRef.current = handleInsertNodeOnEdge;
+
   // Handle adding node from handle "+" button (ManyChat style)
   const handleAddNodeFromHandle = useCallback(async (
     nodeType: NodeType,
@@ -175,14 +220,14 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
       e => e.source_node_id === sourceNodeId && e.source_handle === (sourceHandle || null)
     );
     if (existingEdgesFromSource.length > 0) {
-      y = sourceNode.position_y + (existingEdgesFromSource.length * 150);
+      y = Number(sourceNode.position_y) + (existingEdgesFromSource.length * 150);
     }
 
     // Create the new node (DB) + optimistic render (STATE)
     const newNode = await addNode.mutateAsync({
       node_type: nodeType,
-      position_x: x,
-      position_y: y,
+      position_x: Math.round(x),
+      position_y: Math.round(y),
       config: {},
     });
 
@@ -225,8 +270,8 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
         animated: true,
         data: {
           onDelete: () => handleDeleteEdge(createdEdge.id),
-          onInsertNode: (t: NodeType, position: { x: number; y: number }) => {
-            handleInsertNodeOnEdge(createdEdge.id, createdEdge.source_node_id, createdEdge.target_node_id, t, position);
+          onInsertNode: (t: NodeType, pos: { x: number; y: number }) => {
+            handleInsertNodeOnEdgeRef.current?.(createdEdge.id, createdEdge.source_node_id, createdEdge.target_node_id, t, pos);
           },
         },
       });
@@ -243,42 +288,8 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
       }
     });
     toast.success("Bloco adicionado!");
-  }, [addNode, addDbEdge, fitView, getViewport, handleDeleteEdge, handleDeleteNode, handleInsertNodeOnEdge, handleUpdateNode]);
+  }, [addNode, addDbEdge, fitView, getViewport, handleDeleteEdge, handleDeleteNode, handleUpdateNode, setNodes, setEdges]);
 
-  const handleInsertNodeOnEdge = useCallback(async (
-    edgeId: string,
-    sourceId: string,
-    targetId: string,
-    nodeType: NodeType,
-    position: { x: number; y: number }
-  ) => {
-    // Delete the original edge
-    await deleteEdge.mutateAsync(edgeId);
-    
-    // Create new node
-    const newNode = await addNode.mutateAsync({
-      node_type: nodeType,
-      position_x: position.x,
-      position_y: position.y,
-      config: {},
-    });
-
-    // Create edges: source -> new node -> target
-    await addDbEdge.mutateAsync({
-      source_node_id: sourceId,
-      target_node_id: newNode.id,
-    });
-    await addDbEdge.mutateAsync({
-      source_node_id: newNode.id,
-      target_node_id: targetId,
-    });
-
-    toast.success("Bloco inserido!");
-  }, [deleteEdge, addNode, addDbEdge]);
-
-  // React Flow state
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   // Check if start node has connections
   const startNodeHasConnections = useMemo(() => {
