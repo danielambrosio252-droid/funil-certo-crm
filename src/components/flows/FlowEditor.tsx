@@ -9,7 +9,6 @@ import {
   Connection,
   Edge,
   Node,
-  ReactFlowInstance,
   BackgroundVariant,
   Panel,
   MarkerType,
@@ -22,28 +21,12 @@ import { useFlowEditor, FlowNode, FlowEdge, NodeType } from "@/hooks/useWhatsApp
 import { flowNodeTypes, availableNodeTypes } from "./FlowNodeTypes";
 import { NodeConfigDialog } from "./NodeConfigDialog";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-// Channel info type
-interface Channel {
-  id: string;
-  mode: 'cloud_api' | 'baileys';
-  phoneNumber: string | null;
-  displayName: string;
-  status?: string;
-}
-
-interface ChannelInfo {
-  channels: Channel[];
-  selectedChannelId: string | null;
-}
 
 type FlowEditorNode = {
   id: string;
@@ -55,9 +38,7 @@ type FlowEditorNode = {
     config: Record<string, unknown>;
     createdAt: string;
     nodeIndex: number;
-    channelInfo?: ChannelInfo;
     onConfigure: () => void;
-    onChannelChange?: (channelId: string) => void;
   };
 };
 
@@ -89,7 +70,6 @@ const LAYOUT = {
 };
 
 export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
-  const { profile } = useAuth();
   const { 
     nodes: dbNodes, 
     edges: dbEdges, 
@@ -105,88 +85,11 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [showConfigDialog, setShowConfigDialog] = useState(false);
-  const [channelInfo, setChannelInfo] = useState<ChannelInfo>({
-    channels: [],
-    selectedChannelId: null
-  });
-  
-  // Use ref to avoid re-triggering node creation when channelInfo updates
-  const channelInfoRef = useRef(channelInfo);
-  useEffect(() => {
-    channelInfoRef.current = channelInfo;
-  }, [channelInfo]);
-
-  // Fetch ALL available channels (both API and Baileys if configured)
-  useEffect(() => {
-    const fetchAllChannels = async () => {
-      if (!profile?.company_id) return;
-
-      try {
-        const channels: Channel[] = [];
-
-        // Get company WhatsApp config for Cloud API
-        const { data: company } = await supabase
-          .from('companies')
-          .select('whatsapp_mode, whatsapp_phone_number_id, whatsapp_waba_id')
-          .eq('id', profile.company_id)
-          .single();
-
-        // Check if Cloud API is configured
-        if (company?.whatsapp_phone_number_id) {
-          channels.push({
-            id: 'cloud_api',
-            mode: 'cloud_api',
-            phoneNumber: company.whatsapp_phone_number_id,
-            displayName: `API Oficial ...${company.whatsapp_phone_number_id.slice(-4)}`,
-            status: 'active'
-          });
-        }
-
-        // Check if Baileys session exists
-        const { data: session } = await supabase
-          .from('whatsapp_sessions')
-          .select('id, phone_number, status')
-          .eq('company_id', profile.company_id)
-          .single();
-
-        if (session) {
-          const phone = session.phone_number;
-          const displayPhone = phone ? `...${phone.slice(-4)}` : '';
-          channels.push({
-            id: 'baileys',
-            mode: 'baileys',
-            phoneNumber: phone,
-            displayName: `WhatsApp Web ${displayPhone}`,
-            status: session.status
-          });
-        }
-
-        // Set channels and auto-select based on current mode
-        setChannelInfo({
-          channels,
-          selectedChannelId: company?.whatsapp_mode === 'cloud_api' ? 'cloud_api' : 
-                            company?.whatsapp_mode === 'baileys' ? 'baileys' : 
-                            channels.length > 0 ? channels[0].id : null
-        });
-      } catch (error) {
-        console.error('Error fetching channels:', error);
-      }
-    };
-
-    fetchAllChannels();
-  }, [profile?.company_id]);
 
   // Track if we already auto-fixed the layout for this session
   const didAutoFixRef = useRef(false);
   useEffect(() => {
     didAutoFixRef.current = false;
-  }, [flowId]);
-
-  // Avoid viewport jitter/flicker: fit view only once after first real hydration
-  const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
-  const didInitialFitViewRef = useRef(false);
-  useEffect(() => {
-    didInitialFitViewRef.current = false;
   }, [flowId]);
 
   // Build node index map for numbering (excluding start node)
@@ -208,26 +111,6 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     return map;
   }, [dbNodes]);
 
-  // Handle channel selection change
-  const handleChannelChange = useCallback((nodeId: string, channelId: string) => {
-    // Update the node config to save selected channel
-    const node = dbNodes.find(n => n.id === nodeId);
-    if (node) {
-      updateNode.mutate({
-        id: nodeId,
-        config: {
-          ...node.config,
-          selected_channel: channelId
-        }
-      });
-    }
-    // Update local state
-    setChannelInfo(prev => ({
-      ...prev,
-      selectedChannelId: channelId
-    }));
-  }, [dbNodes, updateNode]);
-
   // Convert DB nodes to React Flow format
   const createNodeData = useCallback((node: typeof dbNodes[0]) => ({
     id: node.id,
@@ -239,7 +122,6 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       config: node.config,
       createdAt: node.created_at,
       nodeIndex: nodeIndexMap.get(node.id) || 0,
-      channelInfo: channelInfoRef.current,
       onConfigure: () => {
         setSelectedNode({
           id: node.id,
@@ -249,9 +131,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         });
         setShowConfigDialog(true);
       },
-      onChannelChange: (channelId: string) => handleChannelChange(node.id, channelId),
     },
-  }), [nodeIndexMap, handleChannelChange]);
+  }), [nodeIndexMap]);
 
   const initialNodes = useMemo(() => 
     dbNodes.map(createNodeData) as FlowEditorNode[], 
@@ -277,9 +158,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   // Sync with DB data
   useEffect(() => {
-    // Prevent wiping the canvas during transient empty states (e.g. auth/profile re-hydration)
-    if (dbNodes.length === 0) return;
-    setNodes(dbNodes.map(createNodeData) as FlowEditorNode[]);
+    const mapped = dbNodes.map(createNodeData) as FlowEditorNode[];
+    setNodes(mapped);
   }, [dbNodes, setNodes, createNodeData]);
 
   useEffect(() => {
@@ -312,9 +192,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       positions.some((p2, j) => i !== j && Math.abs(p1.x - p2.x) < 50 && Math.abs(p1.y - p2.y) < 50)
     );
     
-    // NOTE: In our horizontal Kommo-style layout it's normal for nodes to share the same Y.
-    // Only auto-fix when there's real overlap.
-    const needsReorganization = hasOverlap;
+    const allSameY = positions.every(p => Math.abs(p.y - positions[0].y) < 20);
+    const needsReorganization = hasOverlap || (dbNodes.length > 1 && allSameY);
 
     if (!needsReorganization) return;
 
@@ -359,16 +238,6 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       toast.success("Layout organizado automaticamente!");
     });
   }, [dbNodes, dbEdges, loadingNodes, loadingEdges, setNodes, flowId, saveFlow, createNodeData]);
-
-  // Fit view once when nodes are first rendered
-  useEffect(() => {
-    if (didInitialFitViewRef.current) return;
-    if (!reactFlowInstanceRef.current) return;
-    if (nodes.length === 0) return;
-
-    reactFlowInstanceRef.current.fitView({ padding: 0.2 });
-    didInitialFitViewRef.current = true;
-  }, [nodes.length]);
 
   // Handle new connections
   const onConnect = useCallback(
@@ -509,7 +378,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     toast.success("Layout reorganizado! Clique em 'Salvar' para persistir.");
   };
 
-  if (!profile?.company_id || loadingNodes) {
+  if (loadingNodes) {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
@@ -561,9 +430,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           onNodesDelete={onNodesDelete}
           onEdgesDelete={onEdgesDelete}
           nodeTypes={flowNodeTypes}
-          onInit={(instance) => {
-            reactFlowInstanceRef.current = instance;
-          }}
+          fitView
+          fitViewOptions={{ padding: 0.2 }}
           deleteKeyCode={["Backspace", "Delete"]}
           className="bg-slate-900"
           defaultEdgeOptions={{
