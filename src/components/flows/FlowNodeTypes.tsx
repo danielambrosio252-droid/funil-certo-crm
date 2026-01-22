@@ -9,9 +9,6 @@ import {
   Pause, 
   GitBranch, 
   CheckCircle,
-  Plus,
-  Trash2,
-  GripVertical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -81,7 +78,7 @@ const nodeStyles = {
   },
 };
 
-// Base node wrapper for non-message nodes
+// Base node wrapper component - Kommo-style professional design
 function BaseNode({ 
   type, 
   data, 
@@ -148,7 +145,7 @@ function BaseNode({
         </div>
       </div>
 
-      {/* Handles */}
+      {/* Handles - positioned for horizontal flow */}
       {showTargetHandle && type !== "start" && (
         <Handle
           type="target"
@@ -182,159 +179,6 @@ function BaseNode({
           />
         </>
       )}
-    </div>
-  );
-}
-
-// Kommo-style Message Node with inline editing and button handles
-function KommoMessageNode({ data, selected }: { data: BaseNodeData; selected?: boolean }) {
-  const config = data.config || {};
-  const message = config.message as string || "";
-  const buttons = (config.buttons as string[]) || [];
-  const useTemplate = config.use_template as boolean;
-  const templateName = config.template_name as string;
-  const nodeIndex = data.nodeIndex;
-
-  const hasButtons = buttons.length > 0 && buttons.some(b => b?.trim());
-  const validButtons = buttons.filter(b => b?.trim());
-
-  // Calculate handle positions for buttons
-  const getButtonHandleTop = (index: number, total: number) => {
-    // Distribute handles evenly in the buttons section
-    const baseOffset = 100; // Start after header + message area
-    const spacing = 32; // Spacing between button handles
-    return baseOffset + (index * spacing);
-  };
-
-  return (
-    <div
-      className={cn(
-        "relative min-w-[280px] max-w-[320px] rounded-lg border-2 bg-sky-50 dark:bg-sky-950/30 shadow-xl transition-all cursor-pointer",
-        "border-sky-200 dark:border-sky-800",
-        "hover:shadow-2xl",
-        selected && "ring-2 ring-primary ring-offset-2 ring-offset-background"
-      )}
-      onClick={data.onConfigure}
-    >
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-sky-100 dark:bg-sky-900/50 rounded-t-md border-b border-sky-200 dark:border-sky-800">
-        {nodeIndex !== undefined && nodeIndex > 0 && (
-          <span className="flex items-center justify-center w-5 h-5 rounded bg-sky-500 text-[10px] font-bold text-white">
-            {nodeIndex}
-          </span>
-        )}
-        <span className="text-xs font-medium text-sky-700 dark:text-sky-300">
-          Enviar m...
-        </span>
-      </div>
-
-      {/* Message Input Area - Kommo Style */}
-      <div className="p-3 space-y-2">
-        <div className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-card rounded-lg border border-sky-200 dark:border-sky-700 min-h-[40px]">
-          <MessageCircle className="w-4 h-4 text-sky-500 shrink-0" />
-          <span className="text-sm text-muted-foreground flex-1 truncate">
-            {useTemplate && templateName ? (
-              <span className="text-sky-600 dark:text-sky-400 font-medium">
-                📋 {templateName}
-              </span>
-            ) : message ? (
-              <span className="text-foreground">{message.slice(0, 40)}{message.length > 40 ? "..." : ""}</span>
-            ) : (
-              <span className="italic">Escreva algo ou escolha um <span className="underline text-sky-500">modelo</span></span>
-            )}
-          </span>
-        </div>
-
-        {/* Buttons Section - Each button is draggable with its own handle */}
-        {hasButtons && (
-          <div className="space-y-1">
-            {validButtons.map((btn, index) => (
-              <div 
-                key={index}
-                className="flex items-center gap-2 px-3 py-1.5 bg-sky-100 dark:bg-sky-900/50 rounded border border-dashed border-sky-300 dark:border-sky-700"
-              >
-                <GripVertical className="w-3 h-3 text-sky-400" />
-                <span className="text-xs font-medium text-sky-700 dark:text-sky-300 flex-1 truncate">
-                  {btn}
-                </span>
-                <div className="w-1.5 h-1.5 rounded-full bg-sky-400" />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Add Button hint */}
-        <button className="flex items-center gap-1 text-xs text-sky-500 hover:text-sky-600 transition-colors">
-          <Plus className="w-3 h-3" />
-          Botão de ação
-        </button>
-      </div>
-
-      {/* Bottom Output Options - Kommo style */}
-      <div className="border-t border-sky-200 dark:border-sky-800 text-[11px]">
-        <div className="flex items-center justify-between px-3 py-1.5 text-muted-foreground hover:bg-sky-50 dark:hover:bg-sky-900/30">
-          <span>Outra resposta</span>
-          <div className="w-2 h-2 rounded-full bg-sky-400" />
-        </div>
-        <div className="flex items-center justify-between px-3 py-1.5 text-muted-foreground hover:bg-sky-50 dark:hover:bg-sky-900/30 border-t border-sky-100 dark:border-sky-800">
-          <span>Sem resposta</span>
-          <div className="w-2 h-2 rounded-full bg-amber-400" />
-        </div>
-        <div className="flex items-center justify-between px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 border-t border-sky-100 dark:border-sky-800 rounded-b-lg">
-          <span>Falha ao enviar a mensagem</span>
-          <div className="w-2 h-2 rounded-full bg-red-400" />
-        </div>
-      </div>
-
-      {/* Input Handle (left) */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="!w-3 !h-3 !bg-sky-500 !border-2 !border-background !-left-1.5 !top-1/4"
-      />
-
-      {/* Main output handle (default) */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="default"
-        className="!w-3 !h-3 !bg-sky-500 !border-2 !border-background !-right-1.5 !top-[60px]"
-      />
-
-      {/* Button handles - one for each button */}
-      {validButtons.map((_, index) => (
-        <Handle
-          key={`btn-${index}`}
-          type="source"
-          position={Position.Right}
-          id={`button-${index}`}
-          style={{ top: `${100 + (index * 28)}px` }}
-          className="!w-2.5 !h-2.5 !bg-sky-400 !border-2 !border-background !-right-1"
-        />
-      ))}
-
-      {/* Special output handles */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="other_response"
-        className="!w-2.5 !h-2.5 !bg-sky-400 !border-2 !border-background !-right-1"
-        style={{ bottom: "60px", top: "auto" }}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="no_response"
-        className="!w-2.5 !h-2.5 !bg-amber-400 !border-2 !border-background !-right-1"
-        style={{ bottom: "36px", top: "auto" }}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="send_failed"
-        className="!w-2.5 !h-2.5 !bg-red-400 !border-2 !border-background !-right-1"
-        style={{ bottom: "12px", top: "auto" }}
-      />
     </div>
   );
 }
@@ -402,7 +246,7 @@ export const StartNode = memo(({ data, selected }: NodeProps) => (
 ));
 
 export const MessageNode = memo(({ data, selected }: NodeProps) => (
-  <KommoMessageNode data={data as BaseNodeData} selected={selected} />
+  <BaseNode type="message" data={data as BaseNodeData} selected={selected} />
 ));
 
 export const TemplateNode = memo(({ data, selected }: NodeProps) => (
@@ -441,7 +285,7 @@ export const flowNodeTypes = {
   end: EndNode,
 };
 
-// Export node info for toolbar
+// Export node info for toolbar (Kommo style menu)
 export const availableNodeTypes = [
   { type: "message", ...nodeStyles.message },
   { type: "template", ...nodeStyles.template },
