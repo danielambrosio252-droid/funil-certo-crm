@@ -9,6 +9,7 @@ import {
   Connection,
   Edge,
   Node,
+  ReactFlowInstance,
   BackgroundVariant,
   Panel,
   MarkerType,
@@ -181,6 +182,13 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     didAutoFixRef.current = false;
   }, [flowId]);
 
+  // Avoid viewport jitter/flicker: fit view only once after first real hydration
+  const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const didInitialFitViewRef = useRef(false);
+  useEffect(() => {
+    didInitialFitViewRef.current = false;
+  }, [flowId]);
+
   // Build node index map for numbering (excluding start node)
   const nodeIndexMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -269,8 +277,9 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   // Sync with DB data
   useEffect(() => {
-    const mapped = dbNodes.map(createNodeData) as FlowEditorNode[];
-    setNodes(mapped);
+    // Prevent wiping the canvas during transient empty states (e.g. auth/profile re-hydration)
+    if (dbNodes.length === 0) return;
+    setNodes(dbNodes.map(createNodeData) as FlowEditorNode[]);
   }, [dbNodes, setNodes, createNodeData]);
 
   useEffect(() => {
@@ -303,8 +312,9 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       positions.some((p2, j) => i !== j && Math.abs(p1.x - p2.x) < 50 && Math.abs(p1.y - p2.y) < 50)
     );
     
-    const allSameY = positions.every(p => Math.abs(p.y - positions[0].y) < 20);
-    const needsReorganization = hasOverlap || (dbNodes.length > 1 && allSameY);
+    // NOTE: In our horizontal Kommo-style layout it's normal for nodes to share the same Y.
+    // Only auto-fix when there's real overlap.
+    const needsReorganization = hasOverlap;
 
     if (!needsReorganization) return;
 
@@ -349,6 +359,16 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       toast.success("Layout organizado automaticamente!");
     });
   }, [dbNodes, dbEdges, loadingNodes, loadingEdges, setNodes, flowId, saveFlow, createNodeData]);
+
+  // Fit view once when nodes are first rendered
+  useEffect(() => {
+    if (didInitialFitViewRef.current) return;
+    if (!reactFlowInstanceRef.current) return;
+    if (nodes.length === 0) return;
+
+    reactFlowInstanceRef.current.fitView({ padding: 0.2 });
+    didInitialFitViewRef.current = true;
+  }, [nodes.length]);
 
   // Handle new connections
   const onConnect = useCallback(
@@ -489,7 +509,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     toast.success("Layout reorganizado! Clique em 'Salvar' para persistir.");
   };
 
-  if (loadingNodes) {
+  if (!profile?.company_id || loadingNodes) {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
@@ -541,8 +561,9 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           onNodesDelete={onNodesDelete}
           onEdgesDelete={onEdgesDelete}
           nodeTypes={flowNodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.2 }}
+          onInit={(instance) => {
+            reactFlowInstanceRef.current = instance;
+          }}
           deleteKeyCode={["Backspace", "Delete"]}
           className="bg-slate-900"
           defaultEdgeOptions={{
