@@ -12,8 +12,26 @@ import {
   Plus,
   X,
   Sparkles,
+  Smile,
+  Wand2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+
+// Common emojis for quick access
+const QUICK_EMOJIS = ["😊", "👍", "❤️", "🎉", "🔥", "✅", "💬", "📞", "💡", "⭐", "🚀", "💪"];
 
 interface BaseNodeData {
   label?: string;
@@ -39,7 +57,50 @@ function ChatMessageNode({
   const [localMessage, setLocalMessage] = useState(message);
   const [localButtons, setLocalButtons] = useState<string[]>(buttons);
   const [isEditing, setIsEditing] = useState(false);
+  const [isImproving, setIsImproving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Insert emoji at cursor position
+  const insertEmoji = (emoji: string) => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const newMessage = localMessage.slice(0, start) + emoji + localMessage.slice(end);
+      setLocalMessage(newMessage);
+      // Move cursor after emoji
+      setTimeout(() => {
+        textarea.selectionStart = textarea.selectionEnd = start + emoji.length;
+        textarea.focus();
+      }, 0);
+    } else {
+      setLocalMessage(localMessage + emoji);
+    }
+  };
+
+  // Text improvement using AI
+  const improveText = async (action: string) => {
+    if (!localMessage.trim()) {
+      toast.error("Digite uma mensagem primeiro");
+      return;
+    }
+    setIsImproving(true);
+    try {
+      const { data: result, error } = await supabase.functions.invoke("text-improve", {
+        body: { text: localMessage, action },
+      });
+      if (error) throw error;
+      if (result?.improved) {
+        setLocalMessage(result.improved);
+        toast.success("Texto melhorado!");
+      }
+    } catch (error) {
+      console.error("Error improving text:", error);
+      toast.error("Erro ao melhorar texto");
+    } finally {
+      setIsImproving(false);
+    }
+  };
 
   // Sync with external config
   useEffect(() => {
@@ -142,56 +203,122 @@ function ChatMessageNode({
           )}
         </div>
 
-        {/* Message content area - CLEAR TEXT */}
-        <div className="p-4 bg-white">
+        {/* Message content area - COMPACT */}
+        <div className="px-3 pt-2 pb-1 bg-white">
           {isEditing ? (
-            <textarea
-              ref={textareaRef}
-              value={localMessage}
-              onChange={(e) => setLocalMessage(e.target.value)}
-              onBlur={(e) => {
-                // Check if we're clicking on something inside the card - don't close if so
-                const relatedTarget = e.relatedTarget as HTMLElement | null;
-                if (relatedTarget && e.currentTarget.closest('.chat-bubble-card')?.contains(relatedTarget)) {
-                  return; // Don't close, we're clicking inside the card
-                }
-                saveChanges();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
+            <>
+              <textarea
+                ref={textareaRef}
+                value={localMessage}
+                onChange={(e) => setLocalMessage(e.target.value)}
+                onBlur={(e) => {
+                  const relatedTarget = e.relatedTarget as HTMLElement | null;
+                  if (relatedTarget && e.currentTarget.closest('.chat-bubble-card')?.contains(relatedTarget)) {
+                    return;
+                  }
                   saveChanges();
-                }
-              }}
-              placeholder="Digite sua mensagem..."
-              className="w-full bg-slate-50 text-slate-900 placeholder-slate-400 rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[60px] border-2 border-slate-300"
-              autoFocus
-            />
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    saveChanges();
+                  }
+                }}
+                placeholder="Digite sua mensagem..."
+                className="w-full bg-slate-50 text-slate-900 placeholder-slate-400 rounded-lg p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[44px] border border-slate-300"
+                autoFocus
+              />
+              {/* Toolbar: Emoji + AI Improve */}
+              <div className="flex items-center gap-1 mt-1">
+                {/* Emoji Picker */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                      className="p-1.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+                      title="Emojis"
+                    >
+                      <Smile className="w-4 h-4" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-2" align="start" side="bottom">
+                    <div className="grid grid-cols-6 gap-1">
+                      {QUICK_EMOJIS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => insertEmoji(emoji)}
+                          className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 rounded text-lg"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                {/* AI Text Improve */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                      disabled={isImproving}
+                      className={cn(
+                        "p-1.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors",
+                        isImproving && "opacity-50 cursor-wait"
+                      )}
+                      title="Melhorar texto"
+                    >
+                      <Wand2 className="w-4 h-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" side="bottom" className="w-40">
+                    <DropdownMenuItem onClick={() => improveText("correct")}>
+                      ✅ Corrigir
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => improveText("improve")}>
+                      ✨ Melhorar
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => improveText("formal")}>
+                      👔 Formal
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => improveText("friendly")}>
+                      😊 Amigável
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => improveText("shorten")}>
+                      📝 Resumir
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </>
           ) : (
             <p className={cn(
-              "text-sm text-slate-800 leading-relaxed min-h-[40px]",
+              "text-sm text-slate-800 leading-relaxed min-h-[32px] py-1",
               !localMessage && "italic text-slate-400"
             )}>
-              {localMessage || "Clique para escrever sua mensagem..."}
+              {localMessage || "Clique para escrever..."}
             </p>
           )}
         </div>
 
-        {/* Buttons Section - LIGHT THEME BUTTONS */}
-        <div className="px-4 pb-4 space-y-2 bg-white rounded-b-xl">
+        {/* Buttons Section - COMPACT */}
+        <div className="px-3 pb-3 space-y-1.5 bg-white rounded-b-xl">
           {/* Add button trigger */}
           {isEditing && localButtons.length < 3 && (
             <button
               onMouseDown={(e) => {
-                e.preventDefault(); // Prevent blur from firing
+                e.preventDefault();
                 e.stopPropagation();
               }}
               onClick={(e) => {
                 e.stopPropagation();
                 addButton();
               }}
-              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 rounded-lg px-3 py-2 text-xs text-center transition-colors flex items-center justify-center gap-2 border-2 border-dashed border-slate-300"
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 rounded-lg px-2 py-1.5 text-xs text-center transition-colors flex items-center justify-center gap-1.5 border border-dashed border-slate-300"
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3 h-3" />
               Adicionar botão
             </button>
           )}
