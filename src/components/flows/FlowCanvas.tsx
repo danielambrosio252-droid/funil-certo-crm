@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ReactFlow,
   Controls,
@@ -74,10 +74,33 @@ function FlowCanvasInner({ flowId, flowName, onBack }: FlowCanvasProps) {
 
   const { fitView } = useReactFlow();
   const [showAddMenu, setShowAddMenu] = useState(false);
+  // Stable refs for callbacks to avoid re-render loops
+  const dbEdgesRef = useRef(dbEdges);
+  const updateNodeRef = useRef(updateNode);
+  dbEdgesRef.current = dbEdges;
+  updateNodeRef.current = updateNode;
+  
+  const handleDeleteNode = useCallback(async (nodeId: string) => {
+    const connectedEdges = dbEdgesRef.current.filter(
+      (e) => e.source_node_id === nodeId || e.target_node_id === nodeId
+    );
+    for (const edge of connectedEdges) {
+      await deleteEdge.mutateAsync(edge.id);
+    }
+    await deleteNode.mutateAsync(nodeId);
+    toast.success("Bloco removido!");
+  }, [deleteEdge, deleteNode]);
 
-  // Convert DB nodes to React Flow nodes
-  const initialNodes: Node[] = useMemo(() => {
-    return dbNodes.map((node) => {
+  const handleUpdateNode = useCallback((nodeId: string, newConfig: Record<string, unknown>) => {
+    updateNodeRef.current.mutate({ id: nodeId, config: newConfig });
+  }, []);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
+  // Sync DB nodes to React Flow nodes
+  useEffect(() => {
+    const rfNodes: Node[] = dbNodes.map((node) => {
       const config = node.config as Record<string, unknown>;
       
       let nodeType = "message";
@@ -92,18 +115,17 @@ function FlowCanvasInner({ flowId, flowName, onBack }: FlowCanvasProps) {
         data: {
           ...config,
           trigger_type: config?.trigger_type,
-          onUpdate: (newConfig: Record<string, unknown>) => {
-            updateNode.mutate({ id: node.id, config: newConfig });
-          },
+          onUpdate: (newConfig: Record<string, unknown>) => handleUpdateNode(node.id, newConfig),
           onDelete: node.node_type !== "start" ? () => handleDeleteNode(node.id) : undefined,
         },
       };
     });
-  }, [dbNodes, updateNode]);
+    setNodes(rfNodes);
+  }, [dbNodes, setNodes, handleUpdateNode, handleDeleteNode]);
 
-  // Convert DB edges to React Flow edges
-  const initialEdges: Edge[] = useMemo(() => {
-    return dbEdges.map((edge) => ({
+  // Sync DB edges to React Flow edges
+  useEffect(() => {
+    const rfEdges: Edge[] = dbEdges.map((edge) => ({
       id: edge.id,
       source: edge.source_node_id,
       target: edge.target_node_id,
@@ -111,28 +133,9 @@ function FlowCanvasInner({ flowId, flowName, onBack }: FlowCanvasProps) {
       animated: true,
       style: { stroke: "#94a3b8", strokeWidth: 2 },
     }));
-  }, [dbEdges]);
+    setEdges(rfEdges);
+  }, [dbEdges, setEdges]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-
-  // Sync with DB when data changes
-  useMemo(() => {
-    setNodes(initialNodes);
-    setEdges(initialEdges);
-  }, [initialNodes, initialEdges, setNodes, setEdges]);
-
-  const handleDeleteNode = useCallback(async (nodeId: string) => {
-    // Delete connected edges first
-    const connectedEdges = dbEdges.filter(
-      (e) => e.source_node_id === nodeId || e.target_node_id === nodeId
-    );
-    for (const edge of connectedEdges) {
-      await deleteEdge.mutateAsync(edge.id);
-    }
-    await deleteNode.mutateAsync(nodeId);
-    toast.success("Bloco removido!");
-  }, [dbEdges, deleteEdge, deleteNode]);
 
   const onConnect = useCallback(
     async (params: Connection) => {
