@@ -22,6 +22,29 @@ import { flowNodeTypes, availableNodeTypes } from "./FlowNodeTypes";
 import { NodeConfigDialog } from "./NodeConfigDialog";
 import { cn } from "@/lib/utils";
 
+type FlowEditorNode = {
+  id: string;
+  type: NodeType;
+  position: { x: number; y: number };
+  draggable: boolean;
+  data: {
+    label: string;
+    config: Record<string, unknown>;
+    createdAt: string;
+    onConfigure: () => void;
+  };
+};
+
+type FlowEditorEdge = {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle: string | null;
+  label: string | null;
+  animated: boolean;
+  style: { stroke: string; strokeWidth: number };
+};
+
 interface FlowEditorProps {
   flowId: string;
   flowName: string;
@@ -33,6 +56,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     nodes: dbNodes, 
     edges: dbEdges, 
     loadingNodes,
+    loadingEdges,
     addNode,
     updateNode,
     deleteNode,
@@ -50,15 +74,24 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const lastPlacedRef = useRef<{ x: number; y: number } | null>(null);
   const NODE_GAP_Y = 140;
 
+  // Quando detectamos um layout inconsistente ao abrir, aplicamos uma correção automática (determinística)
+  // só 1x por abertura do editor.
+  const didAutoFixRef = useRef(false);
+  useEffect(() => {
+    didAutoFixRef.current = false;
+  }, [flowId]);
+
   // Convert DB nodes to React Flow format
   const initialNodes = useMemo(() => 
     dbNodes.map((node) => ({
       id: node.id,
-      type: node.node_type,
+      type: node.node_type as NodeType,
       position: { x: node.position_x, y: node.position_y },
+      draggable: node.node_type !== "start", // mantém o "Início" fixo (evita bagunça acidental)
       data: { 
         label: getNodeLabel(node.node_type),
         config: node.config,
+        createdAt: node.created_at,
         onConfigure: () => {
           setSelectedNode({
             id: node.id,
@@ -69,7 +102,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           setShowConfigDialog(true);
         },
       },
-    })), [dbNodes]);
+    })) as FlowEditorNode[], [dbNodes]);
 
   // Convert DB edges to React Flow format
   const initialEdges = useMemo(() => 
@@ -81,10 +114,10 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       label: edge.label,
       animated: true,
       style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
-    })), [dbEdges]);
+    })) as FlowEditorEdge[], [dbEdges]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState<FlowEditorNode>(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEditorEdge>(initialEdges);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -92,38 +125,44 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   // Sync with DB data
   useEffect(() => {
-    if (dbNodes.length > 0) {
-      setNodes(dbNodes.map((node) => ({
-        id: node.id,
-        type: node.node_type,
-        position: { x: node.position_x, y: node.position_y },
-        data: { 
-          label: getNodeLabel(node.node_type),
-          config: node.config,
-          onConfigure: () => {
-            setSelectedNode({
-              id: node.id,
-              type: node.node_type,
-              position: { x: node.position_x, y: node.position_y },
-              data: { config: node.config },
-            });
-            setShowConfigDialog(true);
-          },
+    const mapped = dbNodes.map((node) => ({
+      id: node.id,
+      type: node.node_type as NodeType,
+      position: { x: node.position_x, y: node.position_y },
+      draggable: node.node_type !== "start",
+      data: { 
+        label: getNodeLabel(node.node_type),
+        config: node.config,
+        createdAt: node.created_at,
+        onConfigure: () => {
+          setSelectedNode({
+            id: node.id,
+            type: node.node_type,
+            position: { x: node.position_x, y: node.position_y },
+            data: { config: node.config },
+          });
+          setShowConfigDialog(true);
         },
-      })));
+      },
+    })) as FlowEditorNode[];
 
-      // Keep lastPlacedRef in sync with persisted positions
+    setNodes(mapped);
+
+    // Keep lastPlacedRef in sync with persisted positions
+    if (dbNodes.length > 0) {
       const maxNode = dbNodes.reduce(
         (prev, curr) => (prev.position_y > curr.position_y ? prev : curr),
         dbNodes[0]
       );
       lastPlacedRef.current = { x: Math.round(maxNode.position_x), y: Math.round(maxNode.position_y) };
+    } else {
+      lastPlacedRef.current = null;
     }
   }, [dbNodes, setNodes]);
 
   useEffect(() => {
-    if (dbEdges.length > 0) {
-      setEdges(dbEdges.map((edge) => ({
+    setEdges(
+      (dbEdges.map((edge) => ({
         id: edge.id,
         source: edge.source_node_id,
         target: edge.target_node_id,
@@ -131,9 +170,86 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         label: edge.label,
         animated: true,
         style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
-      })));
-    }
+      })) as FlowEditorEdge[])
+    );
   }, [dbEdges, setEdges]);
+
+  // Auto-correção: se detectar que o "Início" não está no topo (ou nós sobrepostos), aplica um layout
+  // determinístico para abrir o fluxo sempre organizado.
+  useEffect(() => {
+    if (loadingNodes || loadingEdges) return;
+    if (didAutoFixRef.current) return;
+    if (dbNodes.length === 0) return;
+
+    const start = dbNodes.find((n) => n.node_type === "start");
+    if (!start) return;
+
+    const minY = Math.min(...dbNodes.map((n) => n.position_y));
+    const startNotTop = start.position_y > minY;
+
+    const positionKey = (x: number, y: number) => `${Math.round(x)}:${Math.round(y)}`;
+    const seen = new Set<string>();
+    let hasOverlap = false;
+    for (const n of dbNodes) {
+      const k = positionKey(n.position_x, n.position_y);
+      if (seen.has(k)) {
+        hasOverlap = true;
+        break;
+      }
+      seen.add(k);
+    }
+
+    if (!startNotTop && !hasOverlap) return;
+
+    const mappedNodes: FlowEditorNode[] = dbNodes.map((node) => ({
+      id: node.id,
+      type: node.node_type as NodeType,
+      position: { x: node.position_x, y: node.position_y },
+      draggable: node.node_type !== "start",
+      data: {
+        label: getNodeLabel(node.node_type),
+        config: node.config,
+        createdAt: node.created_at,
+        onConfigure: () => {
+          setSelectedNode({
+            id: node.id,
+            type: node.node_type,
+            position: { x: node.position_x, y: node.position_y },
+            data: { config: node.config },
+          });
+          setShowConfigDialog(true);
+        },
+      },
+    }));
+
+    const mappedEdges: FlowEditorEdge[] = dbEdges.map((edge) => ({
+      id: edge.id,
+      source: edge.source_node_id,
+      target: edge.target_node_id,
+      sourceHandle: edge.source_handle,
+      label: edge.label,
+      animated: true,
+      style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
+    }));
+
+    const newPositions = computeDeterministicLayout(mappedNodes, mappedEdges);
+    if (newPositions.size === 0) return;
+
+    didAutoFixRef.current = true;
+
+    setNodes(
+      mappedNodes.map((node) => {
+        const pos = newPositions.get(node.id);
+        return pos ? { ...node, position: pos } : node;
+      })
+    );
+    setEdges(mappedEdges);
+
+    const maxY = Math.max(...Array.from(newPositions.values()).map((p) => p.y));
+    lastPlacedRef.current = { x: 300, y: maxY };
+
+    toast.success("Layout ajustado automaticamente. Clique em 'Salvar Fluxo' para manter.");
+  }, [dbNodes, dbEdges, loadingNodes, loadingEdges, setNodes, setEdges]);
 
   // Handle new connections
   const onConnect = useCallback(
@@ -273,74 +389,15 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     const currentNodes = nodesRef.current;
     const currentEdges = edges;
 
+    const START_X = 300;
+
     if (currentNodes.length === 0) return;
 
-    // Find start node
-    const startNode = currentNodes.find((n) => n.type === "start");
-    if (!startNode) {
+    const newPositions = computeDeterministicLayout(currentNodes, currentEdges);
+    if (newPositions.size === 0) {
       toast.error("Nó de início não encontrado");
       return;
     }
-
-    // Build adjacency map: source -> targets[]
-    const adjacency = new Map<string, string[]>();
-    currentEdges.forEach((edge) => {
-      const targets = adjacency.get(edge.source) || [];
-      targets.push(edge.target);
-      adjacency.set(edge.source, targets);
-    });
-
-    // BFS to assign levels
-    const levels = new Map<string, number>();
-    const visited = new Set<string>();
-    const queue: { id: string; level: number }[] = [{ id: startNode.id, level: 0 }];
-    visited.add(startNode.id);
-    levels.set(startNode.id, 0);
-
-    while (queue.length > 0) {
-      const { id, level } = queue.shift()!;
-      const children = adjacency.get(id) || [];
-      children.forEach((childId) => {
-        if (!visited.has(childId)) {
-          visited.add(childId);
-          levels.set(childId, level + 1);
-          queue.push({ id: childId, level: level + 1 });
-        }
-      });
-    }
-
-    // Group nodes by level
-    const nodesByLevel = new Map<number, Node[]>();
-    currentNodes.forEach((node) => {
-      const lvl = levels.get(node.id) ?? 999; // unconnected nodes go to the end
-      const arr = nodesByLevel.get(lvl) || [];
-      arr.push(node);
-      nodesByLevel.set(lvl, arr);
-    });
-
-    // Layout constants
-    const NODE_WIDTH = 200;
-    const NODE_HEIGHT = 80;
-    const GAP_X = 60;
-    const GAP_Y = 120;
-    const START_X = 300;
-    const START_Y = 60;
-
-    // Compute new positions
-    const newPositions = new Map<string, { x: number; y: number }>();
-    const sortedLevels = Array.from(nodesByLevel.keys()).sort((a, b) => a - b);
-
-    sortedLevels.forEach((level) => {
-      const nodesAtLevel = nodesByLevel.get(level)!;
-      const totalWidth = nodesAtLevel.length * NODE_WIDTH + (nodesAtLevel.length - 1) * GAP_X;
-      let x = START_X - totalWidth / 2 + NODE_WIDTH / 2;
-      const y = START_Y + level * (NODE_HEIGHT + GAP_Y);
-
-      nodesAtLevel.forEach((node) => {
-        newPositions.set(node.id, { x: Math.round(x), y: Math.round(y) });
-        x += NODE_WIDTH + GAP_X;
-      });
-    });
 
     // Apply new positions to local state
     setNodes((prev) =>
@@ -465,6 +522,106 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       />
     </div>
   );
+}
+
+function compareNodesForLayout(a?: FlowEditorNode | Node, b?: FlowEditorNode | Node) {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+
+  if (a.type === "start" && b.type !== "start") return -1;
+  if (b.type === "start" && a.type !== "start") return 1;
+
+  const aCreated = (a.data as any)?.createdAt as string | undefined;
+  const bCreated = (b.data as any)?.createdAt as string | undefined;
+  if (aCreated && bCreated && aCreated !== bCreated) return aCreated.localeCompare(bCreated);
+  return a.id.localeCompare(b.id);
+}
+
+function computeDeterministicLayout(currentNodes: (FlowEditorNode | Node)[], currentEdges: (FlowEditorEdge | Edge)[]) {
+  if (currentNodes.length === 0) return new Map<string, { x: number; y: number }>();
+
+  const startNode = currentNodes.find((n) => (n as any).type === "start") as (FlowEditorNode | Node) | undefined;
+  if (!startNode) return new Map<string, { x: number; y: number }>();
+
+  const nodesById = new Map(currentNodes.map((n) => [n.id, n] as const));
+
+  // Build adjacency map: source -> targets[]
+  const adjacency = new Map<string, string[]>();
+  currentEdges.forEach((edge: any) => {
+    if (!edge?.source || !edge?.target) return;
+    const targets = adjacency.get(edge.source) || [];
+    targets.push(edge.target);
+    adjacency.set(edge.source, targets);
+  });
+
+  // Sort children deterministically
+  for (const [src, targets] of adjacency.entries()) {
+    targets.sort((aId, bId) => compareNodesForLayout(nodesById.get(aId), nodesById.get(bId)));
+    adjacency.set(src, targets);
+  }
+
+  // BFS to assign levels
+  const levels = new Map<string, number>();
+  const startId = startNode.id;
+  const queue: string[] = [startId];
+  levels.set(startId, 0);
+
+  for (let i = 0; i < queue.length; i++) {
+    const id = queue[i];
+    const level = levels.get(id) ?? 0;
+    const children = adjacency.get(id) || [];
+    for (const childId of children) {
+      if (!levels.has(childId)) {
+        levels.set(childId, level + 1);
+        queue.push(childId);
+      }
+    }
+  }
+
+  // Group nodes by level
+  const nodesByLevel = new Map<number, Node[]>();
+  currentNodes.forEach((node) => {
+    const lvl = levels.get(node.id) ?? 999; // unconnected nodes go to the end
+    const arr = nodesByLevel.get(lvl) || [];
+    arr.push(node);
+    nodesByLevel.set(lvl, arr);
+  });
+
+  // Layout constants
+  const NODE_WIDTH = 200;
+  const NODE_HEIGHT = 80;
+  const GAP_X = 60;
+  const GAP_Y = 120;
+  const START_X = 300;
+  const START_Y = 60;
+
+  // Compute new positions
+  const newPositions = new Map<string, { x: number; y: number }>();
+  const sortedLevels = Array.from(nodesByLevel.keys()).sort((a, b) => a - b);
+
+  sortedLevels.forEach((level) => {
+    const nodesAtLevel = nodesByLevel.get(level)!;
+    nodesAtLevel.sort(compareNodesForLayout);
+
+    // Garantia extra: o "Início" fica sozinho no nível 0, no topo.
+    const finalNodesAtLevel =
+      level === 0
+        ? nodesAtLevel.sort(compareNodesForLayout).filter((n) => n.type === "start")
+        : nodesAtLevel;
+
+    const totalWidth =
+      finalNodesAtLevel.length * NODE_WIDTH + (finalNodesAtLevel.length - 1) * GAP_X;
+    let x = START_X - totalWidth / 2 + NODE_WIDTH / 2;
+    const y = START_Y + level * (NODE_HEIGHT + GAP_Y);
+
+    finalNodesAtLevel.forEach((node) => {
+      newPositions.set(node.id, { x: Math.round(x), y: Math.round(y) });
+      x += NODE_WIDTH + GAP_X;
+    });
+  });
+
+  return newPositions;
 }
 
 function getNodeLabel(type: string): string {

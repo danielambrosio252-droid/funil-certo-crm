@@ -246,7 +246,9 @@ export function useFlowEditor(flowId: string | null) {
         .from("whatsapp_flow_nodes")
         .select("*")
         .eq("flow_id", flowId)
-        .eq("company_id", profile.company_id);
+        .eq("company_id", profile.company_id)
+        // Ordenação determinística para não "embaralhar" o editor entre aberturas
+        .order("created_at", { ascending: true });
       
       if (error) throw error;
       return (data || []).map(mapDbToNode);
@@ -263,7 +265,9 @@ export function useFlowEditor(flowId: string | null) {
         .from("whatsapp_flow_edges")
         .select("*")
         .eq("flow_id", flowId)
-        .eq("company_id", profile.company_id);
+        .eq("company_id", profile.company_id)
+        // Ordenação determinística para manter o layout estável
+        .order("created_at", { ascending: true });
       
       if (error) throw error;
       return (data || []).map(mapDbToEdge);
