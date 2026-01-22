@@ -14,6 +14,9 @@ import {
   Sparkles,
   Smile,
   Wand2,
+  MoreVertical,
+  Copy,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -38,7 +41,54 @@ interface BaseNodeData {
   config?: Record<string, unknown>;
   onConfigure?: () => void;
   onUpdateConfig?: (config: Record<string, unknown>) => void;
+  onDuplicate?: () => void;
+  onDelete?: () => void;
   nodeIndex?: number;
+}
+
+// Reusable node action menu (3 dots)
+function NodeActionMenu({ 
+  onDuplicate, 
+  onDelete,
+  canDelete = true,
+}: { 
+  onDuplicate?: () => void; 
+  onDelete?: () => void;
+  canDelete?: boolean;
+}) {
+  if (!onDuplicate && !onDelete) return null;
+  
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onClick={(e) => e.stopPropagation()}
+          className="p-1 rounded-md hover:bg-slate-200 text-slate-500 hover:text-slate-700 transition-colors"
+        >
+          <MoreVertical className="w-4 h-4" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" side="bottom" className="w-36">
+        {onDuplicate && (
+          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDuplicate(); }}>
+            <Copy className="w-4 h-4 mr-2" />
+            Duplicar
+          </DropdownMenuItem>
+        )}
+        {onDelete && canDelete && (
+          <DropdownMenuItem 
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="text-red-600 focus:text-red-600"
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Excluir
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 // ============================================
@@ -189,18 +239,19 @@ function ChatMessageNode({
         }}
       >
         {/* Header - Distinct colored bar */}
-        <div className="flex items-center gap-2 p-3 border-b border-slate-200 bg-emerald-50 rounded-t-xl">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500">
-            <MessageCircle className="w-4 h-4 text-white" />
+        <div className="flex items-center gap-2 p-2 border-b border-slate-200 bg-emerald-50 rounded-t-xl">
+          <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-500">
+            <MessageCircle className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="text-sm font-semibold text-slate-800">
+          <span className="text-sm font-semibold text-slate-800 flex-1">
             💬 Mensagem
           </span>
           {data.nodeIndex !== undefined && data.nodeIndex > 0 && (
-            <span className="ml-auto flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500 text-xs font-bold text-white">
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 text-xs font-bold text-white">
               {data.nodeIndex}
             </span>
           )}
+          <NodeActionMenu onDuplicate={data.onDuplicate} onDelete={data.onDelete} />
         </div>
 
         {/* Message content area - COMPACT */}
@@ -456,18 +507,19 @@ function TemplateNodeComponent({ data, selected }: { data: BaseNodeData; selecte
         onClick={data.onConfigure}
       >
         {/* Header */}
-        <div className="flex items-center gap-2 p-3 border-b border-slate-200 bg-violet-50">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-500">
-            <FileText className="w-4 h-4 text-white" />
+        <div className="flex items-center gap-2 p-2 border-b border-slate-200 bg-violet-50">
+          <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-violet-500">
+            <FileText className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="text-sm font-semibold text-slate-800">
+          <span className="text-sm font-semibold text-slate-800 flex-1">
             Template Meta
           </span>
           {data.nodeIndex !== undefined && data.nodeIndex > 0 && (
-            <span className="ml-auto flex items-center justify-center w-6 h-6 rounded-full bg-violet-500 text-xs font-bold text-white">
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-violet-500 text-xs font-bold text-white">
               {data.nodeIndex}
             </span>
           )}
+          <NodeActionMenu onDuplicate={data.onDuplicate} onDelete={data.onDelete} />
         </div>
         
         <div className="p-4 bg-white">
@@ -533,18 +585,19 @@ function MediaNodeComponent({ data, selected }: { data: BaseNodeData; selected?:
         onClick={data.onConfigure}
       >
         {/* Header */}
-        <div className="flex items-center gap-2 p-3 border-b border-slate-200 bg-orange-50">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-orange-500">
-            <Image className="w-4 h-4 text-white" />
+        <div className="flex items-center gap-2 p-2 border-b border-slate-200 bg-orange-50">
+          <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-orange-500">
+            <Image className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="text-sm font-semibold text-slate-800">
+          <span className="text-sm font-semibold text-slate-800 flex-1">
             Mídia
           </span>
           {data.nodeIndex !== undefined && data.nodeIndex > 0 && (
-            <span className="ml-auto flex items-center justify-center w-6 h-6 rounded-full bg-orange-500 text-xs font-bold text-white">
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-orange-500 text-xs font-bold text-white">
               {data.nodeIndex}
             </span>
           )}
+          <NodeActionMenu onDuplicate={data.onDuplicate} onDelete={data.onDelete} />
         </div>
         
         <div className="p-4 bg-white">
@@ -622,11 +675,12 @@ function DelayNodeComponent({ data, selected }: { data: BaseNodeData; selected?:
         onClick={data.onConfigure}
       >
         {/* Header */}
-        <div className="flex items-center justify-center gap-2 p-3 border-b border-slate-200 bg-amber-50">
-          <Clock className="w-5 h-5 text-amber-600" />
-          <span className="text-sm font-semibold text-slate-800">
+        <div className="flex items-center gap-2 p-2 border-b border-slate-200 bg-amber-50">
+          <Clock className="w-4 h-4 text-amber-600" />
+          <span className="text-sm font-semibold text-slate-800 flex-1">
             Pausar
           </span>
+          <NodeActionMenu onDuplicate={data.onDuplicate} onDelete={data.onDelete} />
         </div>
         
         <div className="p-4 bg-white text-center">
@@ -686,13 +740,14 @@ function WaitResponseNodeComponent({ data, selected }: { data: BaseNodeData; sel
         onClick={data.onConfigure}
       >
         {/* Header */}
-        <div className="flex items-center gap-2 p-3 border-b border-slate-200 bg-pink-50">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-pink-500">
-            <MessageSquare className="w-4 h-4 text-white" />
+        <div className="flex items-center gap-2 p-2 border-b border-slate-200 bg-pink-50">
+          <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-pink-500">
+            <MessageSquare className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="text-sm font-semibold text-slate-800">
+          <span className="text-sm font-semibold text-slate-800 flex-1">
             Aguardar Resposta
           </span>
+          <NodeActionMenu onDuplicate={data.onDuplicate} onDelete={data.onDelete} />
         </div>
         
         <div className="p-4 bg-white space-y-2">
@@ -767,13 +822,14 @@ function ConditionNodeComponent({ data, selected }: { data: BaseNodeData; select
         onClick={data.onConfigure}
       >
         {/* Header */}
-        <div className="flex items-center gap-2 p-3 border-b border-slate-200 bg-indigo-50">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-500">
-            <GitBranch className="w-4 h-4 text-white" />
+        <div className="flex items-center gap-2 p-2 border-b border-slate-200 bg-indigo-50">
+          <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-500">
+            <GitBranch className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="text-sm font-semibold text-slate-800">
+          <span className="text-sm font-semibold text-slate-800 flex-1">
             Condição
           </span>
+          <NodeActionMenu onDuplicate={data.onDuplicate} onDelete={data.onDelete} />
         </div>
         
         <div className="p-4 bg-white">
@@ -840,9 +896,10 @@ function EndNodeComponent({ data, selected }: { data: BaseNodeData; selected?: b
         onClick={data.onConfigure}
       >
         {/* Header */}
-        <div className="flex items-center justify-center gap-2 p-3 border-b border-slate-200 bg-slate-100">
-          <Flag className="w-5 h-5 text-slate-600" />
-          <span className="text-sm font-bold text-slate-700">Fim</span>
+        <div className="flex items-center gap-2 p-2 border-b border-slate-200 bg-slate-100">
+          <Flag className="w-4 h-4 text-slate-600" />
+          <span className="text-sm font-bold text-slate-700 flex-1">Fim</span>
+          <NodeActionMenu onDuplicate={data.onDuplicate} onDelete={data.onDelete} />
         </div>
         
         <div className="p-3 bg-white">

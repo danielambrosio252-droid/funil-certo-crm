@@ -154,6 +154,43 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     }
   }, []);
 
+  // Handle node duplication
+  const handleDuplicateNode = useCallback(async (node: typeof dbNodes[0]) => {
+    try {
+      // Find max Y position to place duplicate below
+      let maxY = node.position_y;
+      dbNodes.forEach((n) => {
+        if (n.position_y > maxY) maxY = n.position_y;
+      });
+
+      await addNode.mutateAsync({
+        node_type: node.node_type,
+        position_x: node.position_x,
+        position_y: maxY + LAYOUT.GAP_Y,
+        config: { ...node.config },
+      });
+      toast.success("Bloco duplicado!");
+    } catch (error) {
+      console.error("Error duplicating node:", error);
+      toast.error("Erro ao duplicar bloco");
+    }
+  }, [addNode, dbNodes]);
+
+  // Handle node deletion
+  const handleDeleteNodeById = useCallback(async (nodeId: string, nodeType: string) => {
+    if (nodeType === "start") {
+      toast.error("Não é possível excluir o bloco inicial");
+      return;
+    }
+    try {
+      await deleteNode.mutateAsync(nodeId);
+      toast.success("Bloco excluído!");
+    } catch (error) {
+      console.error("Error deleting node:", error);
+      toast.error("Erro ao excluir bloco");
+    }
+  }, [deleteNode]);
+
   // Convert DB nodes to React Flow format
   const createNodeData = useCallback((node: typeof dbNodes[0]) => ({
     id: node.id,
@@ -177,8 +214,10 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       onUpdateConfig: (config: Record<string, unknown>) => {
         handleInlineUpdate(node.id, config);
       },
+      onDuplicate: () => handleDuplicateNode(node),
+      onDelete: node.node_type !== "start" ? () => handleDeleteNodeById(node.id, node.node_type) : undefined,
     },
-  }), [nodeIndexMap, handleInlineUpdate]);
+  }), [nodeIndexMap, handleInlineUpdate, handleDuplicateNode, handleDeleteNodeById]);
 
   const initialNodes = useMemo(() => 
     dbNodes.map(createNodeData) as FlowEditorNode[], 
