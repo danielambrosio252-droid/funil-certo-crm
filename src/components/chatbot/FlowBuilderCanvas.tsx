@@ -38,7 +38,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { useChatbotFlowEditor, NodeType, ChatbotFlowNode } from "@/hooks/useChatbotFlows";
+import { useChatbotFlowEditor, useChatbotFlows, NodeType, ChatbotFlowNode } from "@/hooks/useChatbotFlows";
 
 // Node components
 import StartNode from "./nodes/StartNode";
@@ -84,10 +84,14 @@ interface FlowBuilderCanvasProps {
 
 function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvasProps) {
   const { nodes: dbNodes, edges: dbEdges, loadingNodes, loadingEdges, addNode, updateNode, deleteNode, addEdge: addDbEdge, deleteEdge, ensureStartNode } = useChatbotFlowEditor(flowId);
+  const { flows, updateFlow } = useChatbotFlows();
   const { fitView, zoomIn, zoomOut, getViewport } = useReactFlow();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const hasEnsuredStartNode = useRef(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  // Get current flow data for trigger configuration
+  const currentFlow = flows.find(f => f.id === flowId);
 
   // Stable refs
   const dbEdgesRef = useRef(dbEdges);
@@ -96,6 +100,16 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
   dbEdgesRef.current = dbEdges;
   updateNodeRef.current = updateNode;
   dbNodesRef.current = dbNodes;
+
+  // Handle updating flow triggers from StartNode
+  const handleUpdateTriggers = useCallback((keywords: string[], isDefault: boolean) => {
+    updateFlow.mutate({
+      id: flowId,
+      trigger_keywords: keywords,
+      is_active: isDefault ? true : undefined, // Default flows should be active
+    });
+    // Note: is_default is managed at flow level, but we store trigger config
+  }, [flowId, updateFlow]);
 
   // CRITICAL FAILSAFE: Ensure Start node always exists
   useEffect(() => {
@@ -331,6 +345,10 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
             data: {
               ...config,
               hasConnections: isStartNode ? startNodeHasConnections : undefined,
+              // Pass trigger config to StartNode
+              triggerKeywords: isStartNode ? (currentFlow?.trigger_keywords || []) : undefined,
+              isDefault: isStartNode ? (currentFlow?.is_default || false) : undefined,
+              onUpdateTriggers: isStartNode ? handleUpdateTriggers : undefined,
               onUpdate: (newConfig: Record<string, unknown>) => handleUpdateNode(node.id, newConfig),
               onDelete: node.node_type !== "start" ? () => handleDeleteNode(node.id) : undefined,
               onAddNode: handleAddNodeFromHandle,
@@ -353,6 +371,10 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
           data: {
             ...config,
             hasConnections: isStartNode ? startNodeHasConnections : undefined,
+            // Pass trigger config to StartNode
+            triggerKeywords: isStartNode ? (currentFlow?.trigger_keywords || []) : undefined,
+            isDefault: isStartNode ? (currentFlow?.is_default || false) : undefined,
+            onUpdateTriggers: isStartNode ? handleUpdateTriggers : undefined,
             onUpdate: (newConfig: Record<string, unknown>) => handleUpdateNode(dbNode.id, newConfig),
             onDelete: dbNode.node_type !== "start" ? () => handleDeleteNode(dbNode.id) : undefined,
             onAddNode: handleAddNodeFromHandle,
@@ -360,7 +382,7 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
         };
       });
     });
-  }, [dbNodes, selectedNodeId, setNodes, handleUpdateNode, handleDeleteNode, handleAddNodeFromHandle, startNodeHasConnections]);
+  }, [dbNodes, selectedNodeId, setNodes, handleUpdateNode, handleDeleteNode, handleAddNodeFromHandle, startNodeHasConnections, currentFlow, handleUpdateTriggers]);
 
   // Sync DB edges -> STATE (guarded)
   useEffect(() => {
