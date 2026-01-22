@@ -14,20 +14,33 @@ import {
   X,
   GripVertical,
   Paperclip,
+  ChevronDown,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// Channel types
+interface Channel {
+  id: string;
+  mode: 'cloud_api' | 'baileys';
+  phoneNumber: string | null;
+  displayName: string;
+  status?: string;
+}
+
+interface ChannelInfo {
+  channels: Channel[];
+  selectedChannelId: string | null;
+}
 
 interface BaseNodeData {
   label?: string;
   config?: Record<string, unknown>;
   onConfigure?: () => void;
   nodeIndex?: number;
-  // Channel info passed from FlowEditor
-  channelInfo?: {
-    mode: 'cloud_api' | 'baileys' | null;
-    phoneNumber: string | null;
-    displayName: string;
-  };
+  channelInfo?: ChannelInfo;
+  onChannelChange?: (channelId: string) => void;
 }
 
 const nodeStyles = {
@@ -204,6 +217,12 @@ function KommoMessageNode({ data, selected }: { data: BaseNodeData; selected?: b
   const nodeIndex = data.nodeIndex;
 
   const validButtons = buttons.filter(b => b?.trim());
+  const [showChannelDropdown, setShowChannelDropdown] = useState(false);
+
+  // Get channels and selected channel
+  const channels = data.channelInfo?.channels || [];
+  const selectedChannel = channels.find(c => c.id === data.channelInfo?.selectedChannelId);
+  const hasMultipleChannels = channels.length > 1;
 
   // Reference for measuring content height
   const contentRef = useRef<HTMLDivElement>(null);
@@ -218,7 +237,7 @@ function KommoMessageNode({ data, selected }: { data: BaseNodeData; selected?: b
       )}
       style={{ minWidth: 300, maxWidth: 380 }}
     >
-      {/* Header - Kommo style with real channel info */}
+      {/* Header - Kommo style with channel selector */}
       <div className="flex items-center gap-2 px-3 py-2 rounded-t-lg bg-[#0d1f29]/50 border-b border-[#2d5a6e]">
         {nodeIndex !== undefined && nodeIndex > 0 && (
           <span className="flex items-center justify-center w-5 h-5 rounded bg-[#2d5a6e] text-[10px] font-bold text-white">
@@ -228,21 +247,87 @@ function KommoMessageNode({ data, selected }: { data: BaseNodeData; selected?: b
         <span className="text-xs text-[#7eb8d0]">
           Enviar m...
         </span>
-        <span className="text-[10px] text-[#5a8fa8] ml-auto">
-          Canal: <span className="font-medium text-white">
-            {data.channelInfo?.displayName || 'Não configurado'}
-          </span>
-          {data.channelInfo?.mode && (
-            <span className={cn(
-              "ml-1 px-1.5 py-0.5 rounded text-[9px] font-medium",
-              data.channelInfo.mode === 'cloud_api' 
-                ? "bg-green-500/20 text-green-400" 
-                : "bg-blue-500/20 text-blue-400"
-            )}>
-              {data.channelInfo.mode === 'cloud_api' ? 'API' : 'Web'}
-            </span>
+        
+        {/* Channel Selector */}
+        <div className="ml-auto relative">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (hasMultipleChannels) {
+                setShowChannelDropdown(!showChannelDropdown);
+              }
+            }}
+            className={cn(
+              "flex items-center gap-1.5 px-2 py-1 rounded text-[10px]",
+              "bg-[#2d5a6e]/50 hover:bg-[#2d5a6e] transition-colors",
+              hasMultipleChannels && "cursor-pointer",
+              !hasMultipleChannels && "cursor-default"
+            )}
+          >
+            {selectedChannel ? (
+              <>
+                {selectedChannel.status === 'connected' || selectedChannel.status === 'active' ? (
+                  <Wifi className="w-3 h-3 text-green-400" />
+                ) : (
+                  <WifiOff className="w-3 h-3 text-amber-400" />
+                )}
+                <span className="font-medium text-white truncate max-w-[100px]">
+                  {selectedChannel.displayName}
+                </span>
+                <span className={cn(
+                  "px-1 py-0.5 rounded text-[8px] font-medium",
+                  selectedChannel.mode === 'cloud_api' 
+                    ? "bg-green-500/20 text-green-400" 
+                    : "bg-blue-500/20 text-blue-400"
+                )}>
+                  {selectedChannel.mode === 'cloud_api' ? 'API' : 'Web'}
+                </span>
+              </>
+            ) : (
+              <span className="text-amber-400">Nenhum canal</span>
+            )}
+            {hasMultipleChannels && (
+              <ChevronDown className="w-3 h-3 text-[#7eb8d0]" />
+            )}
+          </button>
+
+          {/* Dropdown Menu */}
+          {showChannelDropdown && hasMultipleChannels && (
+            <div 
+              className="absolute top-full right-0 mt-1 z-50 min-w-[180px] bg-[#1a3a4a] border border-[#2d5a6e] rounded-lg shadow-xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {channels.map((channel) => (
+                <button
+                  key={channel.id}
+                  onClick={() => {
+                    data.onChannelChange?.(channel.id);
+                    setShowChannelDropdown(false);
+                  }}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-2 text-left text-[11px] hover:bg-[#2d5a6e] transition-colors",
+                    channel.id === data.channelInfo?.selectedChannelId && "bg-[#2d5a6e]/50"
+                  )}
+                >
+                  {channel.status === 'connected' || channel.status === 'active' ? (
+                    <Wifi className="w-3 h-3 text-green-400 shrink-0" />
+                  ) : (
+                    <WifiOff className="w-3 h-3 text-amber-400 shrink-0" />
+                  )}
+                  <span className="text-white flex-1 truncate">{channel.displayName}</span>
+                  <span className={cn(
+                    "px-1 py-0.5 rounded text-[8px] font-medium shrink-0",
+                    channel.mode === 'cloud_api' 
+                      ? "bg-green-500/20 text-green-400" 
+                      : "bg-blue-500/20 text-blue-400"
+                  )}>
+                    {channel.mode === 'cloud_api' ? 'API' : 'Web'}
+                  </span>
+                </button>
+              ))}
+            </div>
           )}
-        </span>
+        </div>
       </div>
 
       {/* Main Content Area */}
