@@ -44,7 +44,10 @@ import { MediaUploadButton } from "./MediaUploadButton";
 import { AudioRecordButton } from "./AudioRecordButton";
 import { AudioPlayer } from "./AudioPlayer";
 import { TextImproveMenu } from "./TextImproveMenu";
+import { SlashCommandMenu } from "./SlashCommandMenu";
 import { processAndSendAudioAsync } from "@/lib/audioProcessor";
+import { useWhatsAppTemplates, WhatsAppTemplate } from "@/hooks/useWhatsAppTemplates";
+import { WhatsAppFlow } from "@/hooks/useWhatsAppFlows";
 
 interface Contact {
   id: string;
@@ -99,6 +102,10 @@ export function WhatsAppChat({ initialPhone, initialName }: WhatsAppChatProps = 
   
   // Audio processing counter for UI feedback
   const [audioProcessingCount, setAudioProcessingCount] = useState(0);
+  
+  // Slash command menu state
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const { sendTemplate } = useWhatsAppTemplates();
   
   // Estado para indicador de "digitando..."
   const [contactTyping, setContactTyping] = useState<{
@@ -368,10 +375,67 @@ export function WhatsAppChat({ initialPhone, initialName }: WhatsAppChatProps = 
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Detect "/" for slash commands
+    if (e.key === "/" && messageInput === "") {
+      e.preventDefault();
+      setSlashMenuOpen(true);
+      return;
+    }
+    
+    // Close slash menu on Escape
+    if (e.key === "Escape" && slashMenuOpen) {
+      e.preventDefault();
+      setSlashMenuOpen(false);
+      return;
+    }
+    
+    if (e.key === "Enter" && !e.shiftKey && !slashMenuOpen) {
       e.preventDefault();
       if ((e as any).repeat) return;
       handleSend();
+    }
+  };
+
+  // Handle template selection from slash menu
+  const handleSelectTemplate = async (template: WhatsAppTemplate) => {
+    if (!selectedContact) return;
+    
+    // Send the template
+    const success = await sendTemplate(
+      selectedContact.id,
+      template.name,
+      template.language
+    );
+    
+    if (success) {
+      // Refresh messages
+      const msgs = await fetchMessages(selectedContact.id);
+      setMessages(msgs);
+    }
+  };
+
+  // Handle flow selection from slash menu
+  const handleSelectFlow = async (flow: WhatsAppFlow) => {
+    if (!selectedContact || !profile?.company_id) return;
+    
+    try {
+      // Trigger the flow for this contact
+      const { error } = await supabase.functions.invoke("flow-executor", {
+        body: {
+          trigger_type: "manual",
+          company_id: profile.company_id,
+          contact_id: selectedContact.id,
+          phone: selectedContact.phone,
+          flow_id: flow.id,
+        },
+      });
+      
+      if (error) throw error;
+      
+      toast.success(`Fluxo "${flow.name}" iniciado!`);
+    } catch (error) {
+      console.error("Error triggering flow:", error);
+      toast.error("Erro ao iniciar fluxo");
     }
   };
 
@@ -850,11 +914,25 @@ export function WhatsAppChat({ initialPhone, initialName }: WhatsAppChatProps = 
                   disabled={sending}
                 />
                 <div className="flex-1 relative">
+                  {/* Slash Command Menu */}
+                  <SlashCommandMenu
+                    isOpen={slashMenuOpen}
+                    onClose={() => setSlashMenuOpen(false)}
+                    onSelectTemplate={handleSelectTemplate}
+                    onSelectFlow={handleSelectFlow}
+                    inputRef={textareaRef as React.RefObject<HTMLTextAreaElement>}
+                  />
                   <Textarea
                     ref={textareaRef}
-                    placeholder="Digite uma mensagem..."
+                    placeholder="Digite / para atalhos..."
                     value={messageInput}
-                    onChange={(e) => setMessageInput(e.target.value)}
+                    onChange={(e) => {
+                      setMessageInput(e.target.value);
+                      // Close menu if user clears input
+                      if (e.target.value === "" && slashMenuOpen) {
+                        setSlashMenuOpen(false);
+                      }
+                    }}
                     onKeyDown={handleKeyDown}
                     className="min-h-[36px] max-h-[120px] py-2 px-3 resize-none rounded-2xl bg-slate-100 border-0 focus-visible:ring-emerald-500 text-sm"
                     disabled={sending}
