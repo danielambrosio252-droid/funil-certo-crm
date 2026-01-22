@@ -21,12 +21,21 @@ import { useFlowEditor, FlowNode, FlowEdge, NodeType } from "@/hooks/useWhatsApp
 import { flowNodeTypes, availableNodeTypes } from "./FlowNodeTypes";
 import { NodeConfigDialog } from "./NodeConfigDialog";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+// Channel info type
+interface ChannelInfo {
+  mode: 'cloud_api' | 'baileys' | null;
+  phoneNumber: string | null;
+  displayName: string;
+}
 
 type FlowEditorNode = {
   id: string;
@@ -38,6 +47,7 @@ type FlowEditorNode = {
     config: Record<string, unknown>;
     createdAt: string;
     nodeIndex: number;
+    channelInfo?: ChannelInfo;
     onConfigure: () => void;
   };
 };
@@ -70,6 +80,7 @@ const LAYOUT = {
 };
 
 export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
+  const { profile } = useAuth();
   const { 
     nodes: dbNodes, 
     edges: dbEdges, 
@@ -85,6 +96,67 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [showConfigDialog, setShowConfigDialog] = useState(false);
+  const [channelInfo, setChannelInfo] = useState<ChannelInfo>({
+    mode: null,
+    phoneNumber: null,
+    displayName: 'Não configurado'
+  });
+
+  // Fetch channel info from company and session
+  useEffect(() => {
+    const fetchChannelInfo = async () => {
+      if (!profile?.company_id) return;
+
+      try {
+        // Get company WhatsApp mode
+        const { data: company } = await supabase
+          .from('companies')
+          .select('whatsapp_mode, whatsapp_phone_number_id')
+          .eq('id', profile.company_id)
+          .single();
+
+        if (!company) return;
+
+        const mode = company.whatsapp_mode as 'cloud_api' | 'baileys' | null;
+
+        if (mode === 'cloud_api' && company.whatsapp_phone_number_id) {
+          // Cloud API - show phone number ID
+          setChannelInfo({
+            mode: 'cloud_api',
+            phoneNumber: company.whatsapp_phone_number_id,
+            displayName: `API ${company.whatsapp_phone_number_id.slice(-4)}`
+          });
+        } else if (mode === 'baileys') {
+          // Baileys - get session phone number
+          const { data: session } = await supabase
+            .from('whatsapp_sessions')
+            .select('phone_number, status')
+            .eq('company_id', profile.company_id)
+            .single();
+
+          if (session?.phone_number) {
+            const phone = session.phone_number;
+            const displayPhone = phone.length > 4 ? `...${phone.slice(-4)}` : phone;
+            setChannelInfo({
+              mode: 'baileys',
+              phoneNumber: phone,
+              displayName: displayPhone
+            });
+          } else {
+            setChannelInfo({
+              mode: 'baileys',
+              phoneNumber: null,
+              displayName: session?.status === 'connected' ? 'Conectado' : 'Desconectado'
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching channel info:', error);
+      }
+    };
+
+    fetchChannelInfo();
+  }, [profile?.company_id]);
 
   // Track if we already auto-fixed the layout for this session
   const didAutoFixRef = useRef(false);
@@ -122,6 +194,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       config: node.config,
       createdAt: node.created_at,
       nodeIndex: nodeIndexMap.get(node.id) || 0,
+      channelInfo,
       onConfigure: () => {
         setSelectedNode({
           id: node.id,
@@ -132,7 +205,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         setShowConfigDialog(true);
       },
     },
-  }), [nodeIndexMap]);
+  }), [nodeIndexMap, channelInfo]);
 
   const initialNodes = useMemo(() => 
     dbNodes.map(createNodeData) as FlowEditorNode[], 
