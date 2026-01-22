@@ -521,16 +521,25 @@ async function continueExecution(
   executionId: string,
   userResponse?: string
 ) {
-  const { data: execution } = await supabase
+  console.log(`🔄 Continuing execution ${executionId} with response: "${userResponse}"`);
+  
+  const { data: execution, error: execError } = await supabase
     .from("chatbot_flow_executions")
     .select("*, chatbot_flows(*)")
     .eq("id", executionId)
     .single();
 
+  if (execError) {
+    console.error("Error fetching execution:", execError);
+    return;
+  }
+
   if (!execution || !execution.current_node_id) {
     console.log("Execution not found or no current node");
     return;
   }
+
+  console.log(`📍 Current node: ${execution.current_node_id}, Status: ${execution.status}`);
 
   // Get current node
   const { data: currentNode } = await supabase
@@ -539,7 +548,12 @@ async function continueExecution(
     .eq("id", execution.current_node_id)
     .single();
 
-  if (!currentNode) return;
+  if (!currentNode) {
+    console.log("Current node not found");
+    return;
+  }
+
+  console.log(`📦 Current node type: ${currentNode.node_type}`);
 
   // Get contact info
   const { data: contact } = await supabase
@@ -548,7 +562,10 @@ async function continueExecution(
     .eq("id", execution.contact_id)
     .single();
 
-  if (!contact) return;
+  if (!contact) {
+    console.log("Contact not found");
+    return;
+  }
 
   // Get company info
   const { data: company } = await supabase
@@ -557,7 +574,10 @@ async function continueExecution(
     .eq("id", execution.company_id)
     .single();
 
-  if (!company?.whatsapp_phone_number_id) return;
+  if (!company?.whatsapp_phone_number_id) {
+    console.log("Company phone_number_id not found");
+    return;
+  }
 
   const accessToken = Deno.env.get("WHATSAPP_CLOUD_ACCESS_TOKEN") || "";
 
@@ -566,34 +586,97 @@ async function continueExecution(
     const options = (currentNode.config?.options as string[]) || [];
     const responseLower = userResponse.toLowerCase().trim();
 
+    console.log(`🤔 Question options: ${JSON.stringify(options)}, Response: "${responseLower}"`);
+
     // Try to match by number (1, 2, 3...) or by content
     let matchedIndex = -1;
     const responseNum = parseInt(responseLower);
     
     if (!isNaN(responseNum) && responseNum >= 1 && responseNum <= options.length) {
       matchedIndex = responseNum - 1;
+      console.log(`✅ Matched by number: ${responseNum} -> index ${matchedIndex}`);
     } else {
       // Try to match by content
       matchedIndex = options.findIndex((opt: string) =>
         responseLower.includes(opt.toLowerCase())
       );
+      if (matchedIndex >= 0) {
+        console.log(`✅ Matched by content: "${options[matchedIndex]}" -> index ${matchedIndex}`);
+      }
     }
 
     if (matchedIndex >= 0) {
       const sourceHandle = `option-${matchedIndex}`;
+      console.log(`🔍 Looking for edge with source_handle: ${sourceHandle}`);
+      
       const nextNode = await getNextNode(supabase, currentNode.flow_id, currentNode.id, sourceHandle);
 
       if (nextNode) {
-        // Update execution status and continue
+        console.log(`➡️ Next node found: ${nextNode.node_type} (${nextNode.id})`);
+        
+        // Update execution status
         await supabase
           .from("chatbot_flow_executions")
           .update({ status: "running", current_node_id: nextNode.id })
           .eq("id", executionId);
 
-        // Continue processing from next node
-        console.log(`✅ Matched option ${matchedIndex + 1}, continuing to ${nextNode.node_type}`);
+        // IMPORTANT: Actually process the remaining nodes!
+        let currentProcessNode: FlowNode | null = nextNode;
+        let iterationCount = 0;
+        const maxIterations = 50;
+
+        while (currentProcessNode && iterationCount < maxIterations) {
+          iterationCount++;
+          console.log(`📦 Processing continued node: ${currentProcessNode.node_type}`);
+
+          // Log node execution
+          await supabase.from("chatbot_flow_logs").insert({
+            execution_id: executionId,
+            company_id: execution.company_id,
+            node_id: currentProcessNode.id,
+            node_type: currentProcessNode.node_type,
+            action: "executed",
+            details: { iteration: iterationCount, continued: true },
+          });
+
+          const result = await processNode(supabase, currentProcessNode, {
+            companyId: execution.company_id,
+            contactId: execution.contact_id,
+            contactPhone: contact.normalized_phone || contact.phone,
+            phoneNumberId: company.whatsapp_phone_number_id,
+            accessToken,
+            executionId,
+            lastUserMessage: userResponse,
+          });
+
+          if (!result.shouldContinue) {
+            console.log("⏸️ Execution paused or completed after continue");
+            break;
+          }
+
+          currentProcessNode = result.nextNode;
+
+          // Small delay between nodes
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+
+        console.log(`✅ Continued execution completed after ${iterationCount} nodes`);
+      } else {
+        console.log(`❌ No next node found for handle: ${sourceHandle}`);
+        
+        // Mark as completed if no next node
+        await supabase
+          .from("chatbot_flow_executions")
+          .update({ status: "completed", completed_at: new Date().toISOString() })
+          .eq("id", executionId);
       }
+    } else {
+      console.log(`❌ No matching option for response: "${userResponse}"`);
+      
+      // Could send a "didn't understand" message here in the future
     }
+  } else {
+    console.log(`⚠️ Not a question node or no user response`);
   }
 }
 
