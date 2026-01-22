@@ -86,6 +86,12 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [showConfigDialog, setShowConfigDialog] = useState(false);
 
+  // Guard against render loops: keep mutation fns in refs so callbacks/effects stay stable.
+  const updateNodeMutateRef = useRef(updateNode.mutateAsync);
+  useEffect(() => {
+    updateNodeMutateRef.current = updateNode.mutateAsync;
+  }, [updateNode.mutateAsync]);
+
   const didAutoFixRef = useRef(false);
   const didEnsureStartRef = useRef(false);
   useEffect(() => {
@@ -142,11 +148,11 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   // Inline update handler for chat nodes
   const handleInlineUpdate = useCallback(async (nodeId: string, config: Record<string, unknown>) => {
     try {
-      await updateNode.mutateAsync({ id: nodeId, config });
+      await updateNodeMutateRef.current({ id: nodeId, config });
     } catch (error) {
       console.error("Error updating node inline:", error);
     }
-  }, [updateNode]);
+  }, []);
 
   // Convert DB nodes to React Flow format
   const createNodeData = useCallback((node: typeof dbNodes[0]) => ({
