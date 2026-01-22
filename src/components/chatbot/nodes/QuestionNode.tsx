@@ -1,4 +1,4 @@
-import { memo, useState, useCallback } from "react";
+import { memo, useState, useCallback, useEffect } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,47 +20,60 @@ function QuestionNode({ id, data }: NodeProps) {
   const nodeData = data as QuestionNodeData;
   const [editing, setEditing] = useState(false);
   const [localQuestion, setLocalQuestion] = useState(nodeData?.question || "");
-  const options = nodeData?.options || [];
+  const [localOptions, setLocalOptions] = useState<string[]>(nodeData?.options || []);
   const [showMenu, setShowMenu] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [hoveredOption, setHoveredOption] = useState<number | null>(null);
   const [showOptionMenu, setShowOptionMenu] = useState<number | null>(null);
+  const [editingOptionIdx, setEditingOptionIdx] = useState<number | null>(null);
 
-  const handleBlur = useCallback(() => {
-    setEditing(false);
+  // Sync from props when not editing
+  useEffect(() => {
+    if (editingOptionIdx === null) {
+      setLocalOptions(nodeData?.options || []);
+    }
+  }, [nodeData?.options, editingOptionIdx]);
+
+  useEffect(() => {
+    if (!editing) {
+      setLocalQuestion(nodeData?.question || "");
+    }
+  }, [nodeData?.question, editing]);
+
+  const saveToDb = useCallback((question: string, options: string[]) => {
     nodeData?.onUpdate?.({ 
-      question: localQuestion, 
+      question, 
       options,
       variable: nodeData?.variable 
     });
-  }, [localQuestion, options, nodeData]);
+  }, [nodeData]);
+
+  const handleBlur = useCallback(() => {
+    setEditing(false);
+    saveToDb(localQuestion, localOptions);
+  }, [localQuestion, localOptions, saveToDb]);
 
   const handleAddOption = () => {
-    const newOptions = [...options, `Opção ${options.length + 1}`];
-    nodeData?.onUpdate?.({ 
-      question: localQuestion, 
-      options: newOptions,
-      variable: nodeData?.variable 
-    });
+    const newOptions = [...localOptions, `Opção ${localOptions.length + 1}`];
+    setLocalOptions(newOptions);
+    saveToDb(localQuestion, newOptions);
   };
 
   const handleRemoveOption = (index: number) => {
-    const newOptions = options.filter((_, i) => i !== index);
-    nodeData?.onUpdate?.({ 
-      question: localQuestion, 
-      options: newOptions,
-      variable: nodeData?.variable 
-    });
+    const newOptions = localOptions.filter((_, i) => i !== index);
+    setLocalOptions(newOptions);
+    saveToDb(localQuestion, newOptions);
   };
 
-  const handleUpdateOption = (index: number, value: string) => {
-    const newOptions = [...options];
+  const handleOptionChange = (index: number, value: string) => {
+    const newOptions = [...localOptions];
     newOptions[index] = value;
-    nodeData?.onUpdate?.({ 
-      question: localQuestion, 
-      options: newOptions,
-      variable: nodeData?.variable 
-    });
+    setLocalOptions(newOptions);
+  };
+
+  const handleOptionBlur = (index: number) => {
+    setEditingOptionIdx(null);
+    saveToDb(localQuestion, localOptions);
   };
 
   const handleSelectBlock = (type: NodeType, handleId?: string) => {
@@ -121,7 +134,7 @@ function QuestionNode({ id, data }: NodeProps) {
         {/* Options with individual handles */}
         <div className="space-y-2">
           <p className="text-xs font-medium text-muted-foreground">Opções de resposta:</p>
-          {options.map((opt, idx) => (
+          {localOptions.map((opt, idx) => (
             <div 
               key={idx} 
               className="relative flex items-center gap-2"
@@ -133,7 +146,9 @@ function QuestionNode({ id, data }: NodeProps) {
             >
               <Input
                 value={opt}
-                onChange={(e) => handleUpdateOption(idx, e.target.value)}
+                onChange={(e) => handleOptionChange(idx, e.target.value)}
+                onFocus={() => setEditingOptionIdx(idx)}
+                onBlur={() => handleOptionBlur(idx)}
                 className="flex-1 h-9 text-sm pr-16"
                 placeholder={`Opção ${idx + 1}`}
               />
@@ -198,7 +213,7 @@ function QuestionNode({ id, data }: NodeProps) {
       </CardContent>
 
       {/* Default output (free text) - only if no options */}
-      {options.length === 0 && (
+      {localOptions.length === 0 && (
         <div 
           className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2"
           onMouseEnter={() => setIsHovered(true)}
