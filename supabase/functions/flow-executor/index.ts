@@ -70,15 +70,30 @@ async function findMatchingFlow(
   companyId: string,
   messageContent: string
 ): Promise<ChatbotFlow | null> {
+  console.log(`🔍 Finding flow for company: ${companyId}, message: "${messageContent}"`);
+  
   // Get all active flows for the company
-  const { data: flows } = await supabase
+  const { data: flows, error } = await supabase
     .from("chatbot_flows")
     .select("*")
     .eq("company_id", companyId)
     .eq("is_active", true);
 
+  if (error) {
+    console.error("Error fetching flows:", error);
+    return null;
+  }
+
+  console.log(`📋 Found ${flows?.length || 0} active flows`);
+
   if (!flows || flows.length === 0) {
-    console.log("No active flows found");
+    // Also try without is_active filter to see if flows exist
+    const { data: allFlows } = await supabase
+      .from("chatbot_flows")
+      .select("id, name, is_active, is_default")
+      .eq("company_id", companyId);
+    
+    console.log(`📋 Total flows (any status): ${allFlows?.length || 0}`, allFlows);
     return null;
   }
 
@@ -87,6 +102,8 @@ async function findMatchingFlow(
   // First, check for keyword matches
   for (const flow of flows) {
     const f = flow as ChatbotFlow;
+    console.log(`  - Flow "${f.name}": is_default=${f.is_default}, keywords=${JSON.stringify(f.trigger_keywords)}`);
+    
     if (f.trigger_keywords && f.trigger_keywords.length > 0) {
       for (const keyword of f.trigger_keywords) {
         if (messageLower.includes(keyword.toLowerCase())) {
@@ -104,7 +121,13 @@ async function findMatchingFlow(
     return defaultFlow as ChatbotFlow;
   }
 
-  console.log("No matching flow found");
+  // FALLBACK: If no default, use the first active flow
+  if (flows.length > 0) {
+    console.log(`⚠️ No default flow, using first active: ${flows[0].name}`);
+    return flows[0] as ChatbotFlow;
+  }
+
+  console.log("❌ No matching flow found");
   return null;
 }
 
