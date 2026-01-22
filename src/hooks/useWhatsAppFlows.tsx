@@ -138,15 +138,15 @@ export function useWhatsAppFlows() {
       
       if (error) throw error;
 
-      // Create initial start node
+      // Create initial start node - positioned at center
       await supabase
         .from("whatsapp_flow_nodes")
         .insert({
           flow_id: data.id,
           company_id: profile.company_id,
           node_type: "start",
-          position_x: 250,
-          position_y: 50,
+          position_x: 400,
+          position_y: 80,
           config: {} as Json,
         });
 
