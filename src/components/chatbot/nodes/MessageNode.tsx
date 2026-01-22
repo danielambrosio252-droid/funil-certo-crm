@@ -58,13 +58,13 @@ function MessageNode({ id, data }: NodeProps) {
 
       <CardContent className="p-4">
         <div 
-          className="bg-slate-100 rounded-2xl rounded-tl-sm p-4 cursor-text min-h-[60px] transition-all hover:bg-slate-200/70"
+          className="bg-slate-200 rounded-2xl rounded-tl-sm p-4 cursor-text min-h-[60px] transition-all hover:bg-slate-300/80"
           onClick={() => setEditing(true)}
         >
           {editing ? (
             <textarea
               autoFocus
-              className="w-full bg-transparent border-none outline-none resize-none text-sm"
+              className="w-full bg-transparent border-none outline-none resize-none text-sm font-medium text-slate-800"
               placeholder="Digite a mensagem do bot..."
               value={localMessage}
               onChange={(e) => setLocalMessage(e.target.value)}
@@ -72,8 +72,8 @@ function MessageNode({ id, data }: NodeProps) {
               rows={3}
             />
           ) : (
-            <p className="text-sm whitespace-pre-wrap">
-              {localMessage || <span className="text-muted-foreground">Clique para adicionar texto...</span>}
+            <p className="text-sm font-medium text-slate-800 whitespace-pre-wrap">
+              {localMessage || <span className="text-slate-500">Clique para adicionar texto...</span>}
             </p>
           )}
         </div>

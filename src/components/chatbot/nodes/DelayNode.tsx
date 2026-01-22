@@ -59,7 +59,7 @@ function DelayNode({ id, data }: NodeProps) {
       </div>
 
       <CardContent className="p-4">
-        <p className="text-xs text-muted-foreground mb-2">Aguardar:</p>
+        <p className="text-xs font-medium text-slate-600 mb-2">Aguardar:</p>
         <div className="flex gap-2">
           <Input
             type="number"
@@ -67,10 +67,10 @@ function DelayNode({ id, data }: NodeProps) {
             value={delayValue}
             onChange={(e) => setDelayValue(parseInt(e.target.value) || 1)}
             onBlur={handleUpdate}
-            className="h-9 text-sm w-20"
+            className="h-9 text-sm font-medium text-slate-800 w-20 bg-slate-100 border-slate-300"
           />
           <Select value={delayUnit} onValueChange={(v) => { setDelayUnit(v); setTimeout(handleUpdate, 0); }}>
-            <SelectTrigger className="h-9 text-sm flex-1">
+            <SelectTrigger className="h-9 text-sm font-medium text-slate-800 flex-1 bg-slate-100 border-slate-300">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
