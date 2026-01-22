@@ -1,68 +1,59 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { AlertTriangle, ArrowLeft } from "lucide-react";
 
-type Props = {
+interface Props {
   children: React.ReactNode;
-  title?: string;
-  onBack?: () => void;
-};
+  onBack: () => void;
+}
 
-type State = {
+interface State {
   hasError: boolean;
-  error?: Error;
-};
+  error: Error | null;
+}
 
-/**
- * Evita o cenário “tela vazia” caso o editor quebre por algum erro runtime.
- * Mantém o usuário com um caminho claro de volta.
- */
 export class FlowEditorErrorBoundary extends React.Component<Props, State> {
-  state: State = { hasError: false };
+  constructor(props: Props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
 
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error) {
-    // eslint-disable-next-line no-console
-    console.error("FlowEditor crashed:", error);
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("FlowEditor Error:", error, errorInfo);
   }
 
   render() {
-    if (!this.state.hasError) return this.props.children;
-
-    return (
-      <div className="w-full rounded-xl border border-border bg-card p-6">
-        <div className="space-y-2">
-          <h2 className="text-base font-semibold text-foreground">
-            O editor não conseguiu carregar
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Ocorreu um erro inesperado ao renderizar o canvas. Você pode voltar e abrir o
-            fluxo novamente.
-          </p>
-          {this.state.error?.message && (
-            <pre className="mt-3 whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs text-foreground">
-              {this.state.error.message}
-            </pre>
-          )}
+    if (this.state.hasError) {
+      return (
+        <div className="h-full flex items-center justify-center p-8">
+          <Card className="max-w-md">
+            <CardContent className="flex flex-col items-center text-center p-6">
+              <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+                <AlertTriangle className="w-8 h-8 text-destructive" />
+              </div>
+              <h3 className="text-lg font-semibold mb-2">Erro no Editor</h3>
+              <p className="text-muted-foreground mb-4">
+                Ocorreu um erro ao carregar o editor de fluxos. 
+                Por favor, volte e tente novamente.
+              </p>
+              <pre className="text-xs text-left bg-muted p-2 rounded mb-4 max-w-full overflow-auto">
+                {this.state.error?.message}
+              </pre>
+              <Button onClick={this.props.onBack}>
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Voltar
+              </Button>
+            </CardContent>
+          </Card>
         </div>
+      );
+    }
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {this.props.onBack && (
-            <Button variant="outline" onClick={this.props.onBack}>
-              Voltar para Fluxos
-            </Button>
-          )}
-          <Button
-            onClick={() => {
-              this.setState({ hasError: false, error: undefined });
-            }}
-          >
-            Tentar novamente
-          </Button>
-        </div>
-      </div>
-    );
+    return this.props.children;
   }
 }
