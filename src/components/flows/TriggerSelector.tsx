@@ -25,6 +25,7 @@ import {
   GitBranch,
   X,
   Zap,
+  Edit,
 } from "lucide-react";
 import { FlowNode, TriggerType, useWhatsAppFlows } from "@/hooks/useWhatsAppFlows";
 import { useFunnels, useFunnelStages } from "@/hooks/useFunnels";
@@ -192,59 +193,90 @@ export function TriggerSelector({ flowId, startNode, onTriggerSelect }: TriggerS
 
   return (
     <>
-      <Card className="border-2 border-dashed border-cyan-400 bg-white hover:border-cyan-500 transition-colors">
-        <CardContent className="p-6">
-          {hasTrigger && currentTrigger ? (
-            // Trigger configured - show it
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${currentTrigger.color}`}>
-                  <currentTrigger.icon className="w-5 h-5 text-white" />
+      {/* Trigger Card - Compact with connection point */}
+      <div className="relative inline-block">
+        <Card className="w-80 bg-white border border-slate-200 shadow-lg rounded-xl overflow-visible">
+          <CardContent className="p-4">
+            {hasTrigger && currentTrigger ? (
+              // Trigger configured - show it
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-amber-500" />
+                  <span className="font-semibold text-slate-700">Quando...</span>
                 </div>
-                <div>
-                  <p className="font-medium">{currentTrigger.label}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {currentTriggerType === "keyword" && (
-                      <>Palavras: {((currentConfig?.keywords || []) as string[]).join(", ")}</>
-                    )}
-                    {(currentTriggerType === "new_lead" || currentTriggerType === "stage_change") && (
-                      <>Funil selecionado</>
-                    )}
-                  </p>
+                <div className="flex items-center justify-between bg-slate-50 rounded-lg p-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-lg ${currentTrigger.color}`}>
+                      <currentTrigger.icon className="w-4 h-4 text-white" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm">{currentTrigger.label}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {currentTriggerType === "keyword" && (
+                          <>Palavras: {((currentConfig?.keywords || []) as string[]).slice(0, 2).join(", ")}{((currentConfig?.keywords || []) as string[]).length > 2 ? "..." : ""}</>
+                        )}
+                        {(currentTriggerType === "new_lead" || currentTriggerType === "stage_change") && (
+                          <>Funil selecionado</>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowTriggerDialog(true)}>
+                      <Edit className="w-3 h-3" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRemoveTrigger}>
+                      <X className="w-3 h-3" />
+                    </Button>
+                  </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => setShowTriggerDialog(true)}>
-                  Editar
-                </Button>
-                <Button variant="ghost" size="icon" onClick={handleRemoveTrigger}>
-                  <X className="w-4 h-4" />
-                </Button>
+            ) : (
+              // No trigger - show add button
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-amber-500" />
+                  <span className="font-semibold text-slate-700">Quando...</span>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  O gatilho é responsável por acionar a automação.<br />
+                  Clique para adicionar um gatilho.
+                </p>
+                <div 
+                  className="border-2 border-dashed border-cyan-400 rounded-lg p-3 text-center cursor-pointer hover:bg-cyan-50 transition-colors"
+                  onClick={() => setShowTriggerDialog(true)}
+                >
+                  <span className="text-cyan-600 font-medium text-sm">+ Novo Gatilho</span>
+                </div>
               </div>
-            </div>
-          ) : (
-            // No trigger - show add button
-            <div className="text-center">
-              <div className="flex items-center justify-center gap-2 mb-3">
-                <Zap className="w-5 h-5 text-amber-500" />
-                <p className="font-medium">Quando...</p>
-              </div>
-              <p className="text-sm text-muted-foreground mb-4">
-                O gatilho é responsável por acionar a automação.<br />
-                Clique para adicionar um gatilho.
-              </p>
-              <Button
-                variant="outline"
-                className="border-cyan-400 text-cyan-600 hover:bg-cyan-50"
-                onClick={() => setShowTriggerDialog(true)}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Novo Gatilho
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Connection point - "Então" with dot */}
+        <div className="absolute -bottom-8 right-4 flex items-center gap-2">
+          <span className="text-sm text-slate-500 font-medium">Então</span>
+          <div className="w-3 h-3 rounded-full bg-slate-400 border-2 border-white shadow cursor-pointer hover:bg-primary hover:scale-110 transition-all" />
+        </div>
+
+        {/* Connection line going down */}
+        <svg 
+          className="absolute -bottom-8 right-[22px] pointer-events-none"
+          width="2" 
+          height="40" 
+          style={{ transform: 'translateY(12px)' }}
+        >
+          <line 
+            x1="1" 
+            y1="0" 
+            x2="1" 
+            y2="40" 
+            stroke="#94a3b8" 
+            strokeWidth="2" 
+            strokeDasharray="4 4"
+          />
+        </svg>
+      </div>
 
       {/* Trigger Selection Dialog */}
       <Dialog open={showTriggerDialog} onOpenChange={setShowTriggerDialog}>
