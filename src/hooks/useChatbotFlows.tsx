@@ -93,6 +93,8 @@ export function useChatbotFlows() {
           description: input.description || null,
           trigger_keywords: input.trigger_keywords || [],
           is_default: input.is_default || false,
+          // Default flow must be active so the editor never loads without an active flow.
+          is_active: input.is_default ? true : false,
         })
         .select()
         .single();
@@ -107,7 +109,7 @@ export function useChatbotFlows() {
           node_type: "start",
           position_x: 400,
           position_y: 200,
-          config: { label: "Início do Fluxo" },
+          config: { label: "Quando o contato iniciar conversa" },
         });
 
       if (nodeError) throw nodeError;
