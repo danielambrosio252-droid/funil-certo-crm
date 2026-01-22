@@ -117,7 +117,7 @@ function ChatMessageNode({
       {/* Chat bubble container - LIGHT ON DARK - HIGH CONTRAST */}
       <div 
         className={cn(
-          "relative rounded-xl overflow-visible",
+          "chat-bubble-card relative rounded-xl overflow-visible",
           "bg-white border-2 border-slate-300",
           "shadow-[0_4px_20px_rgba(0,0,0,0.25)]",
           selected && "ring-2 ring-emerald-500 ring-offset-2 ring-offset-slate-800"
@@ -149,10 +149,17 @@ function ChatMessageNode({
               ref={textareaRef}
               value={localMessage}
               onChange={(e) => setLocalMessage(e.target.value)}
-              onBlur={saveChanges}
+              onBlur={(e) => {
+                // Check if we're clicking on something inside the card - don't close if so
+                const relatedTarget = e.relatedTarget as HTMLElement | null;
+                if (relatedTarget && e.currentTarget.closest('.chat-bubble-card')?.contains(relatedTarget)) {
+                  return; // Don't close, we're clicking inside the card
+                }
+                saveChanges();
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
-                  setIsEditing(false);
+                  saveChanges();
                 }
               }}
               placeholder="Digite sua mensagem..."
@@ -174,6 +181,10 @@ function ChatMessageNode({
           {/* Add button trigger */}
           {isEditing && localButtons.length < 3 && (
             <button
+              onMouseDown={(e) => {
+                e.preventDefault(); // Prevent blur from firing
+                e.stopPropagation();
+              }}
               onClick={(e) => {
                 e.stopPropagation();
                 addButton();
@@ -197,12 +208,17 @@ function ChatMessageNode({
                       value={btn}
                       onChange={(e) => updateButton(index, e.target.value)}
                       onBlur={saveChanges}
+                      onMouseDown={(e) => e.stopPropagation()}
                       placeholder={`Botão ${index + 1}`}
                       maxLength={20}
                       className="flex-1 bg-transparent text-slate-800 placeholder-slate-400 px-3 py-2 text-sm focus:outline-none"
                     />
                   </div>
                   <button
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
                     onClick={(e) => {
                       e.stopPropagation();
                       removeButton(index);
