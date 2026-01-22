@@ -124,7 +124,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     if (!inst) return;
     const now = Date.now();
     // throttle to avoid jitter / loops
-    if (now - lastFitViewTsRef.current < 500) return;
+    if (now - lastFitViewTsRef.current < 300) return;
     lastFitViewTsRef.current = now;
 
     requestAnimationFrame(() => {
@@ -567,6 +567,14 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={requestFitView}
+            className="border-slate-500 bg-slate-700 text-white hover:bg-slate-600 hover:text-white"
+          >
+            Centralizar
+          </Button>
           <Button 
             variant="outline" 
             size="sm" 
@@ -622,6 +630,15 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           onInit={(instance) => {
             rfInstanceRef.current = instance;
             setRfInitTick((t) => t + 1);
+            // Ensure we frame nodes immediately on mount.
+            requestAnimationFrame(() => requestFitView());
+          }}
+          fitView
+          fitViewOptions={{
+            padding: 0.3,
+            includeHiddenNodes: false,
+            minZoom: 0.5,
+            maxZoom: 1.5,
           }}
           minZoom={0.2}
           maxZoom={2}
