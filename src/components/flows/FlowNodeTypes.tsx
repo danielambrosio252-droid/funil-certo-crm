@@ -86,45 +86,46 @@ function ChatMessageNode({
 
   return (
     <div className={cn(
-      "relative min-w-[320px] max-w-[360px] transition-all",
-      selected && "scale-[1.02]"
+      "relative min-w-[320px] max-w-[380px] transition-all",
+      selected && "scale-[1.01]"
     )}>
-      {/* Target handle - top center */}
+      {/* Target handle - top center - VISIBLE */}
       <Handle
         type="target"
         position={Position.Top}
-        className="!w-3 !h-3 !bg-slate-500 !border-2 !border-slate-900 !-top-1.5"
+        className="!w-4 !h-4 !bg-white !border-2 !border-emerald-500 !-top-2"
       />
 
-      {/* Chat bubble container */}
+      {/* Chat bubble container - LIGHT ON DARK - HIGH CONTRAST */}
       <div 
         className={cn(
-          "relative rounded-2xl shadow-xl transition-all overflow-visible",
-          "bg-slate-800 border border-slate-700",
-          selected && "ring-2 ring-primary/50 ring-offset-2 ring-offset-slate-900"
+          "relative rounded-xl overflow-visible",
+          "bg-white border-2 border-slate-300",
+          "shadow-[0_4px_20px_rgba(0,0,0,0.25)]",
+          selected && "ring-2 ring-emerald-500 ring-offset-2 ring-offset-slate-800"
         )}
         onClick={(e) => {
           e.stopPropagation();
           setIsEditing(true);
         }}
       >
-        {/* Header */}
-        <div className="flex items-center gap-2 p-3 border-b border-slate-700 bg-slate-800/80">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/20">
-            <MessageCircle className="w-4 h-4 text-emerald-400" />
+        {/* Header - Distinct colored bar */}
+        <div className="flex items-center gap-2 p-3 border-b border-slate-200 bg-emerald-50 rounded-t-xl">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500">
+            <MessageCircle className="w-4 h-4 text-white" />
           </div>
-          <span className="text-sm font-medium text-slate-200">
+          <span className="text-sm font-semibold text-slate-800">
             💬 Mensagem
           </span>
           {data.nodeIndex !== undefined && data.nodeIndex > 0 && (
-            <span className="ml-auto flex items-center justify-center w-5 h-5 rounded-full bg-primary/20 text-[10px] font-bold text-primary">
+            <span className="ml-auto flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500 text-xs font-bold text-white">
               {data.nodeIndex}
             </span>
           )}
         </div>
 
-        {/* Message content area */}
-        <div className="p-4">
+        {/* Message content area - CLEAR TEXT */}
+        <div className="p-4 bg-white">
           {isEditing ? (
             <textarea
               ref={textareaRef}
@@ -137,12 +138,12 @@ function ChatMessageNode({
                 }
               }}
               placeholder="Digite sua mensagem..."
-              className="w-full bg-slate-700/50 text-slate-100 placeholder-slate-400 rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/50 min-h-[60px] border border-slate-600"
+              className="w-full bg-slate-50 text-slate-900 placeholder-slate-400 rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[60px] border-2 border-slate-300"
               autoFocus
             />
           ) : (
             <p className={cn(
-              "text-sm text-slate-200 leading-relaxed min-h-[40px]",
+              "text-sm text-slate-800 leading-relaxed min-h-[40px]",
               !localMessage && "italic text-slate-400"
             )}>
               {localMessage || "Clique para escrever sua mensagem..."}
@@ -150,8 +151,8 @@ function ChatMessageNode({
           )}
         </div>
 
-        {/* Buttons Section - Inside the box with right-side handles */}
-        <div className="px-4 pb-4 space-y-2">
+        {/* Buttons Section - LIGHT THEME BUTTONS */}
+        <div className="px-4 pb-4 space-y-2 bg-white rounded-b-xl">
           {/* Add button trigger */}
           {isEditing && localButtons.length < 3 && (
             <button
@@ -159,7 +160,7 @@ function ChatMessageNode({
                 e.stopPropagation();
                 addButton();
               }}
-              className="w-full bg-slate-700/50 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded-lg px-3 py-2 text-xs text-center transition-colors flex items-center justify-center gap-2 border border-dashed border-slate-600"
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 rounded-lg px-3 py-2 text-xs text-center transition-colors flex items-center justify-center gap-2 border-2 border-dashed border-slate-300"
             >
               <Plus className="w-3.5 h-3.5" />
               Adicionar botão
@@ -171,8 +172,8 @@ function ChatMessageNode({
             <div key={index} className="relative">
               {isEditing ? (
                 <div className="flex items-center gap-2">
-                  <div className="flex-1 flex items-center bg-slate-700 rounded-lg border border-slate-600 overflow-hidden">
-                    <span className="px-3 py-2 bg-slate-600 text-slate-400 text-xs">⬜</span>
+                  <div className="flex-1 flex items-center bg-slate-100 rounded-lg border-2 border-slate-300 overflow-hidden">
+                    <span className="px-3 py-2 bg-slate-200 text-slate-500 text-xs">⬜</span>
                     <input
                       type="text"
                       value={btn}
@@ -180,7 +181,7 @@ function ChatMessageNode({
                       onBlur={saveChanges}
                       placeholder={`Botão ${index + 1}`}
                       maxLength={20}
-                      className="flex-1 bg-transparent text-slate-200 placeholder-slate-500 px-3 py-2 text-sm focus:outline-none"
+                      className="flex-1 bg-transparent text-slate-800 placeholder-slate-400 px-3 py-2 text-sm focus:outline-none"
                     />
                   </div>
                   <button
@@ -188,29 +189,29 @@ function ChatMessageNode({
                       e.stopPropagation();
                       removeButton(index);
                     }}
-                    className="p-1.5 rounded-md bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+                    className="p-1.5 rounded-md bg-red-100 text-red-500 hover:bg-red-200 transition-colors"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
               ) : (
                 <div className="relative flex items-center">
-                  {/* Button visual */}
-                  <div className="flex-1 flex items-center bg-slate-700/80 hover:bg-slate-700 rounded-lg border border-slate-600 transition-colors cursor-pointer">
-                    <span className="px-3 py-2.5 text-slate-400 text-sm">⬜</span>
-                    <span className="flex-1 text-sm text-slate-200 pr-8">
+                  {/* Button visual - CLEAR AND VISIBLE */}
+                  <div className="flex-1 flex items-center bg-slate-100 hover:bg-slate-200 rounded-lg border-2 border-slate-300 transition-colors cursor-pointer">
+                    <span className="px-3 py-2.5 text-slate-500 text-sm">⬜</span>
+                    <span className="flex-1 text-sm text-slate-700 font-medium pr-10">
                       {btn || `Botão ${index + 1}`}
                     </span>
                   </div>
                   
-                  {/* Connection point on the right */}
+                  {/* Connection point on the right - VISIBLE HANDLE */}
                   <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
-                    <div className="w-4 h-px bg-slate-500" />
+                    <div className="w-6 h-0.5 bg-emerald-400" />
                     <Handle
                       type="source"
                       position={Position.Right}
                       id={`btn-${index}`}
-                      className="!relative !transform-none !w-3 !h-3 !bg-emerald-500 !border-2 !border-slate-800 !right-0"
+                      className="!relative !transform-none !w-4 !h-4 !bg-emerald-500 !border-2 !border-white !right-0 !shadow-md"
                       style={{ position: 'relative', right: 0, top: 0, transform: 'none' }}
                     />
                   </div>
@@ -226,7 +227,7 @@ function ChatMessageNode({
         <Handle
           type="source"
           position={Position.Bottom}
-          className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-slate-900 !-bottom-1.5"
+          className="!w-4 !h-4 !bg-emerald-500 !border-2 !border-white !-bottom-2 !shadow-md"
         />
       )}
     </div>
@@ -239,28 +240,28 @@ function ChatMessageNode({
 function StartNodeComponent({ data, selected }: { data: BaseNodeData; selected?: boolean }) {
   return (
     <div className={cn(
-      "relative w-[180px] transition-all",
-      selected && "scale-[1.02]"
+      "relative w-[200px] transition-all",
+      selected && "scale-[1.01]"
     )}>
       <div className={cn(
-        "flex items-center gap-3 px-5 py-4 rounded-2xl",
-        "bg-gradient-to-r from-emerald-500 to-teal-500",
-        "shadow-lg shadow-emerald-500/25",
-        selected && "ring-2 ring-white/30 ring-offset-2 ring-offset-slate-900"
+        "flex items-center gap-3 px-5 py-4 rounded-xl",
+        "bg-white border-2 border-emerald-400",
+        "shadow-[0_4px_20px_rgba(0,0,0,0.25)]",
+        selected && "ring-2 ring-emerald-500 ring-offset-2 ring-offset-slate-800"
       )}>
-        <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20 backdrop-blur-sm">
+        <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-emerald-500">
           <Play className="w-5 h-5 text-white" />
         </div>
         <div>
-          <span className="text-sm font-semibold text-white">Início</span>
-          <p className="text-xs text-white/70">Gatilho</p>
+          <span className="text-base font-bold text-slate-800">Início</span>
+          <p className="text-xs text-slate-500">Gatilho</p>
         </div>
       </div>
       
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!w-3 !h-3 !bg-emerald-400 !border-2 !border-slate-900 !-bottom-1.5"
+        className="!w-4 !h-4 !bg-emerald-500 !border-2 !border-white !-bottom-2 !shadow-md"
       />
     </div>
   );
@@ -275,47 +276,49 @@ function TemplateNodeComponent({ data, selected }: { data: BaseNodeData; selecte
 
   return (
     <div className={cn(
-      "relative min-w-[280px] transition-all",
-      selected && "scale-[1.02]"
+      "relative min-w-[300px] transition-all",
+      selected && "scale-[1.01]"
     )}>
       <Handle
         type="target"
         position={Position.Top}
-        className="!w-3 !h-3 !bg-slate-500 !border-2 !border-slate-900 !-top-1.5"
+        className="!w-4 !h-4 !bg-violet-500 !border-2 !border-white !-top-2 !shadow-md"
       />
 
       <div 
         className={cn(
-          "rounded-2xl overflow-hidden shadow-xl cursor-pointer",
-          "bg-gradient-to-br from-violet-500 to-purple-600",
-          selected && "ring-2 ring-white/30 ring-offset-2 ring-offset-slate-900"
+          "rounded-xl overflow-hidden cursor-pointer",
+          "bg-white border-2 border-violet-400",
+          "shadow-[0_4px_20px_rgba(0,0,0,0.25)]",
+          selected && "ring-2 ring-violet-500 ring-offset-2 ring-offset-slate-800"
         )}
         onClick={data.onConfigure}
       >
-        <div className="p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/20">
-              <FileText className="w-4 h-4 text-white" />
-            </div>
-            <span className="text-xs font-medium text-white/80 uppercase tracking-wide">
-              Template Meta
-            </span>
-            {data.nodeIndex !== undefined && data.nodeIndex > 0 && (
-              <span className="ml-auto flex items-center justify-center w-5 h-5 rounded-full bg-white/20 text-[10px] font-bold text-white">
-                {data.nodeIndex}
-              </span>
-            )}
+        {/* Header */}
+        <div className="flex items-center gap-2 p-3 border-b border-slate-200 bg-violet-50">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-500">
+            <FileText className="w-4 h-4 text-white" />
           </div>
-          
+          <span className="text-sm font-semibold text-slate-800">
+            Template Meta
+          </span>
+          {data.nodeIndex !== undefined && data.nodeIndex > 0 && (
+            <span className="ml-auto flex items-center justify-center w-6 h-6 rounded-full bg-violet-500 text-xs font-bold text-white">
+              {data.nodeIndex}
+            </span>
+          )}
+        </div>
+        
+        <div className="p-4 bg-white">
           {templateName ? (
-            <div className="bg-white/10 rounded-xl px-4 py-3">
-              <p className="text-sm text-white font-medium">{templateName}</p>
-              <p className="text-xs text-white/60 mt-1">Template aprovado</p>
+            <div className="bg-violet-50 rounded-lg px-4 py-3 border border-violet-200">
+              <p className="text-sm text-slate-800 font-medium">{templateName}</p>
+              <p className="text-xs text-slate-500 mt-1">✓ Template aprovado</p>
             </div>
           ) : (
-            <div className="bg-white/10 rounded-xl px-4 py-3 text-center">
-              <Sparkles className="w-5 h-5 text-white/60 mx-auto mb-1" />
-              <p className="text-xs text-white/60">Clique para selecionar</p>
+            <div className="bg-slate-50 rounded-lg px-4 py-3 text-center border border-slate-200">
+              <Sparkles className="w-5 h-5 text-violet-400 mx-auto mb-1" />
+              <p className="text-xs text-slate-500">Clique para selecionar</p>
             </div>
           )}
         </div>
@@ -324,7 +327,7 @@ function TemplateNodeComponent({ data, selected }: { data: BaseNodeData; selecte
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!w-3 !h-3 !bg-violet-400 !border-2 !border-slate-900 !-bottom-1.5"
+        className="!w-4 !h-4 !bg-violet-500 !border-2 !border-white !-bottom-2 !shadow-md"
       />
     </div>
   );
@@ -350,40 +353,42 @@ function MediaNodeComponent({ data, selected }: { data: BaseNodeData; selected?:
 
   return (
     <div className={cn(
-      "relative min-w-[280px] transition-all",
-      selected && "scale-[1.02]"
+      "relative min-w-[300px] transition-all",
+      selected && "scale-[1.01]"
     )}>
       <Handle
         type="target"
         position={Position.Top}
-        className="!w-3 !h-3 !bg-slate-500 !border-2 !border-slate-900 !-top-1.5"
+        className="!w-4 !h-4 !bg-orange-500 !border-2 !border-white !-top-2 !shadow-md"
       />
 
       <div 
         className={cn(
-          "rounded-2xl overflow-hidden shadow-xl cursor-pointer",
-          "bg-gradient-to-br from-orange-500 to-amber-600",
-          selected && "ring-2 ring-white/30 ring-offset-2 ring-offset-slate-900"
+          "rounded-xl overflow-hidden cursor-pointer",
+          "bg-white border-2 border-orange-400",
+          "shadow-[0_4px_20px_rgba(0,0,0,0.25)]",
+          selected && "ring-2 ring-orange-500 ring-offset-2 ring-offset-slate-800"
         )}
         onClick={data.onConfigure}
       >
-        <div className="p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/20">
-              <Image className="w-4 h-4 text-white" />
-            </div>
-            <span className="text-xs font-medium text-white/80 uppercase tracking-wide">
-              Mídia
-            </span>
-            {data.nodeIndex !== undefined && data.nodeIndex > 0 && (
-              <span className="ml-auto flex items-center justify-center w-5 h-5 rounded-full bg-white/20 text-[10px] font-bold text-white">
-                {data.nodeIndex}
-              </span>
-            )}
+        {/* Header */}
+        <div className="flex items-center gap-2 p-3 border-b border-slate-200 bg-orange-50">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-orange-500">
+            <Image className="w-4 h-4 text-white" />
           </div>
-          
+          <span className="text-sm font-semibold text-slate-800">
+            Mídia
+          </span>
+          {data.nodeIndex !== undefined && data.nodeIndex > 0 && (
+            <span className="ml-auto flex items-center justify-center w-6 h-6 rounded-full bg-orange-500 text-xs font-bold text-white">
+              {data.nodeIndex}
+            </span>
+          )}
+        </div>
+        
+        <div className="p-4 bg-white">
           {mediaUrl ? (
-            <div className="bg-white/10 rounded-xl p-3">
+            <div className="bg-orange-50 rounded-lg p-3 border border-orange-200">
               {mediaType === "image" && (
                 <img 
                   src={mediaUrl} 
@@ -393,18 +398,18 @@ function MediaNodeComponent({ data, selected }: { data: BaseNodeData; selected?:
               )}
               {mediaType !== "image" && (
                 <div className="flex items-center gap-3">
-                  <MediaIcon className="w-8 h-8 text-white/80" />
+                  <MediaIcon className="w-8 h-8 text-orange-500" />
                   <div>
-                    <p className="text-sm text-white font-medium capitalize">{mediaType}</p>
-                    <p className="text-xs text-white/60">Arquivo configurado</p>
+                    <p className="text-sm text-slate-800 font-medium capitalize">{mediaType}</p>
+                    <p className="text-xs text-slate-500">✓ Arquivo configurado</p>
                   </div>
                 </div>
               )}
             </div>
           ) : (
-            <div className="bg-white/10 rounded-xl px-4 py-6 text-center">
-              <MediaIcon className="w-8 h-8 text-white/40 mx-auto mb-2" />
-              <p className="text-xs text-white/60">Clique para enviar mídia</p>
+            <div className="bg-slate-50 rounded-lg px-4 py-6 text-center border border-slate-200">
+              <MediaIcon className="w-8 h-8 text-orange-400 mx-auto mb-2" />
+              <p className="text-xs text-slate-500">Clique para enviar mídia</p>
             </div>
           )}
         </div>
@@ -413,7 +418,7 @@ function MediaNodeComponent({ data, selected }: { data: BaseNodeData; selected?:
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!w-3 !h-3 !bg-orange-400 !border-2 !border-slate-900 !-bottom-1.5"
+        className="!w-4 !h-4 !bg-orange-500 !border-2 !border-white !-bottom-2 !shadow-md"
       />
     </div>
   );
@@ -437,43 +442,45 @@ function DelayNodeComponent({ data, selected }: { data: BaseNodeData; selected?:
 
   return (
     <div className={cn(
-      "relative min-w-[200px] transition-all",
-      selected && "scale-[1.02]"
+      "relative min-w-[220px] transition-all",
+      selected && "scale-[1.01]"
     )}>
       <Handle
         type="target"
         position={Position.Top}
-        className="!w-3 !h-3 !bg-slate-500 !border-2 !border-slate-900 !-top-1.5"
+        className="!w-4 !h-4 !bg-amber-500 !border-2 !border-white !-top-2 !shadow-md"
       />
 
       <div 
         className={cn(
-          "rounded-2xl overflow-hidden shadow-xl cursor-pointer",
-          "bg-gradient-to-br from-amber-500 to-yellow-600",
-          selected && "ring-2 ring-white/30 ring-offset-2 ring-offset-slate-900"
+          "rounded-xl overflow-hidden cursor-pointer",
+          "bg-white border-2 border-amber-400",
+          "shadow-[0_4px_20px_rgba(0,0,0,0.25)]",
+          selected && "ring-2 ring-amber-500 ring-offset-2 ring-offset-slate-800"
         )}
         onClick={data.onConfigure}
       >
-        <div className="p-4 text-center">
-          <div className="flex items-center justify-center gap-2 mb-3">
-            <Clock className="w-5 h-5 text-white/80" />
-            <span className="text-xs font-medium text-white/80 uppercase tracking-wide">
-              Pausar
-            </span>
-          </div>
-          
+        {/* Header */}
+        <div className="flex items-center justify-center gap-2 p-3 border-b border-slate-200 bg-amber-50">
+          <Clock className="w-5 h-5 text-amber-600" />
+          <span className="text-sm font-semibold text-slate-800">
+            Pausar
+          </span>
+        </div>
+        
+        <div className="p-4 bg-white text-center">
           {delayValue ? (
-            <div className="bg-white/20 rounded-xl px-4 py-3">
-              <p className="text-2xl font-bold text-white">
-                {delayValue} <span className="text-sm">{unitLabels[delayUnit] || delayUnit}</span>
+            <div className="bg-amber-50 rounded-lg px-4 py-3 border border-amber-200">
+              <p className="text-2xl font-bold text-slate-800">
+                {delayValue} <span className="text-sm text-slate-600">{unitLabels[delayUnit] || delayUnit}</span>
               </p>
               {smartDelay && (
-                <p className="text-xs text-white/70 mt-1">⚡ Intervalo inteligente</p>
+                <p className="text-xs text-amber-600 mt-1">⚡ Intervalo inteligente</p>
               )}
             </div>
           ) : (
-            <div className="bg-white/10 rounded-xl px-4 py-3">
-              <p className="text-xs text-white/60">Definir tempo</p>
+            <div className="bg-slate-50 rounded-lg px-4 py-3 border border-slate-200">
+              <p className="text-sm text-slate-500">Definir tempo</p>
             </div>
           )}
         </div>
@@ -482,7 +489,7 @@ function DelayNodeComponent({ data, selected }: { data: BaseNodeData; selected?:
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!w-3 !h-3 !bg-amber-400 !border-2 !border-slate-900 !-bottom-1.5"
+        className="!w-4 !h-4 !bg-amber-500 !border-2 !border-white !-bottom-2 !shadow-md"
       />
     </div>
   );
@@ -499,51 +506,57 @@ function WaitResponseNodeComponent({ data, selected }: { data: BaseNodeData; sel
 
   return (
     <div className={cn(
-      "relative min-w-[240px] transition-all",
-      selected && "scale-[1.02]"
+      "relative min-w-[260px] transition-all",
+      selected && "scale-[1.01]"
     )}>
       <Handle
         type="target"
         position={Position.Top}
-        className="!w-3 !h-3 !bg-slate-500 !border-2 !border-slate-900 !-top-1.5"
+        className="!w-4 !h-4 !bg-pink-500 !border-2 !border-white !-top-2 !shadow-md"
       />
 
       <div 
         className={cn(
-          "rounded-2xl overflow-hidden shadow-xl cursor-pointer",
-          "bg-gradient-to-br from-pink-500 to-rose-600",
-          selected && "ring-2 ring-white/30 ring-offset-2 ring-offset-slate-900"
+          "rounded-xl overflow-hidden cursor-pointer",
+          "bg-white border-2 border-pink-400",
+          "shadow-[0_4px_20px_rgba(0,0,0,0.25)]",
+          selected && "ring-2 ring-pink-500 ring-offset-2 ring-offset-slate-800"
         )}
         onClick={data.onConfigure}
       >
-        <div className="p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/20">
-              <MessageSquare className="w-4 h-4 text-white" />
+        {/* Header */}
+        <div className="flex items-center gap-2 p-3 border-b border-slate-200 bg-pink-50">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-pink-500">
+            <MessageSquare className="w-4 h-4 text-white" />
+          </div>
+          <span className="text-sm font-semibold text-slate-800">
+            Aguardar Resposta
+          </span>
+        </div>
+        
+        <div className="p-4 bg-white space-y-2">
+          {keywords && (
+            <div className="bg-pink-50 rounded-lg px-3 py-2 border border-pink-200">
+              <p className="text-xs text-slate-500">Palavras-chave:</p>
+              <p className="text-sm text-slate-800 font-medium truncate">{keywords}</p>
             </div>
-            <span className="text-xs font-medium text-white/80 uppercase tracking-wide">
-              Aguardar Resposta
-            </span>
-          </div>
-          
-          <div className="space-y-2">
-            {keywords && (
-              <div className="bg-white/10 rounded-xl px-3 py-2">
-                <p className="text-xs text-white/60">Palavras-chave:</p>
-                <p className="text-sm text-white truncate">{keywords}</p>
-              </div>
-            )}
-            {hasTimeout && timeout && (
-              <div className="bg-white/10 rounded-xl px-3 py-2">
-                <p className="text-xs text-white/60">Timeout: {timeout}h</p>
-              </div>
-            )}
-            {!keywords && !hasTimeout && (
-              <div className="bg-white/10 rounded-xl px-3 py-2 text-center">
-                <p className="text-xs text-white/60">Aguardar qualquer resposta</p>
-              </div>
-            )}
-          </div>
+          )}
+          {hasTimeout && timeout && (
+            <div className="bg-pink-50 rounded-lg px-3 py-2 border border-pink-200">
+              <p className="text-sm text-slate-700">⏱ Timeout: {timeout}h</p>
+            </div>
+          )}
+          {!keywords && !hasTimeout && (
+            <div className="bg-slate-50 rounded-lg px-3 py-2 text-center border border-slate-200">
+              <p className="text-xs text-slate-500">Aguardar qualquer resposta</p>
+            </div>
+          )}
+        </div>
+
+        {/* Output labels */}
+        <div className="flex justify-between px-4 pb-3 bg-white">
+          <span className="text-xs font-semibold text-emerald-600">✓ Resposta</span>
+          <span className="text-xs font-semibold text-slate-500">⏱ Timeout</span>
         </div>
       </div>
 
@@ -552,13 +565,13 @@ function WaitResponseNodeComponent({ data, selected }: { data: BaseNodeData; sel
         type="source"
         position={Position.Bottom}
         id="response"
-        className="!w-3 !h-3 !bg-pink-400 !border-2 !border-slate-900 !-bottom-1.5 !left-[30%]"
+        className="!w-4 !h-4 !bg-emerald-500 !border-2 !border-white !-bottom-2 !left-[30%] !shadow-md"
       />
       <Handle
         type="source"
         position={Position.Bottom}
         id="timeout"
-        className="!w-3 !h-3 !bg-slate-400 !border-2 !border-slate-900 !-bottom-1.5 !left-[70%]"
+        className="!w-4 !h-4 !bg-slate-400 !border-2 !border-white !-bottom-2 !left-[70%] !shadow-md"
       />
     </div>
   );
@@ -574,48 +587,50 @@ function ConditionNodeComponent({ data, selected }: { data: BaseNodeData; select
 
   return (
     <div className={cn(
-      "relative min-w-[220px] transition-all",
-      selected && "scale-[1.02]"
+      "relative min-w-[240px] transition-all",
+      selected && "scale-[1.01]"
     )}>
       <Handle
         type="target"
         position={Position.Top}
-        className="!w-3 !h-3 !bg-slate-500 !border-2 !border-slate-900 !-top-1.5"
+        className="!w-4 !h-4 !bg-indigo-500 !border-2 !border-white !-top-2 !shadow-md"
       />
 
       <div 
         className={cn(
-          "rounded-2xl overflow-hidden shadow-xl cursor-pointer",
-          "bg-gradient-to-br from-indigo-500 to-blue-600",
-          selected && "ring-2 ring-white/30 ring-offset-2 ring-offset-slate-900"
+          "rounded-xl overflow-hidden cursor-pointer",
+          "bg-white border-2 border-indigo-400",
+          "shadow-[0_4px_20px_rgba(0,0,0,0.25)]",
+          selected && "ring-2 ring-indigo-500 ring-offset-2 ring-offset-slate-800"
         )}
         onClick={data.onConfigure}
       >
-        <div className="p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/20">
-              <GitBranch className="w-4 h-4 text-white" />
-            </div>
-            <span className="text-xs font-medium text-white/80 uppercase tracking-wide">
-              Condição
-            </span>
+        {/* Header */}
+        <div className="flex items-center gap-2 p-3 border-b border-slate-200 bg-indigo-50">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-500">
+            <GitBranch className="w-4 h-4 text-white" />
           </div>
-          
+          <span className="text-sm font-semibold text-slate-800">
+            Condição
+          </span>
+        </div>
+        
+        <div className="p-4 bg-white">
           {field && operator ? (
-            <div className="bg-white/10 rounded-xl px-4 py-3 text-center">
-              <p className="text-sm text-white">Se <strong>{field}</strong> {operator}</p>
+            <div className="bg-indigo-50 rounded-lg px-4 py-3 text-center border border-indigo-200">
+              <p className="text-sm text-slate-800 font-medium">Se <strong>{field}</strong> {operator}</p>
             </div>
           ) : (
-            <div className="bg-white/10 rounded-xl px-4 py-3 text-center">
-              <p className="text-xs text-white/60">Definir condição</p>
+            <div className="bg-slate-50 rounded-lg px-4 py-3 text-center border border-slate-200">
+              <p className="text-sm text-slate-500">Definir condição</p>
             </div>
           )}
         </div>
 
         {/* Yes/No labels */}
-        <div className="flex justify-between px-6 pb-3">
-          <span className="text-xs font-medium text-emerald-300">✓ Sim</span>
-          <span className="text-xs font-medium text-red-300">✗ Não</span>
+        <div className="flex justify-between px-6 pb-3 bg-white">
+          <span className="text-xs font-bold text-emerald-600">✓ Sim</span>
+          <span className="text-xs font-bold text-red-500">✗ Não</span>
         </div>
       </div>
 
@@ -623,13 +638,13 @@ function ConditionNodeComponent({ data, selected }: { data: BaseNodeData; select
         type="source"
         position={Position.Bottom}
         id="yes"
-        className="!w-3 !h-3 !bg-emerald-400 !border-2 !border-slate-900 !-bottom-1.5 !left-[25%]"
+        className="!w-4 !h-4 !bg-emerald-500 !border-2 !border-white !-bottom-2 !left-[25%] !shadow-md"
       />
       <Handle
         type="source"
         position={Position.Bottom}
         id="no"
-        className="!w-3 !h-3 !bg-red-400 !border-2 !border-slate-900 !-bottom-1.5 !left-[75%]"
+        className="!w-4 !h-4 !bg-red-500 !border-2 !border-white !-bottom-2 !left-[75%] !shadow-md"
       />
     </div>
   );
@@ -646,31 +661,33 @@ function EndNodeComponent({ data, selected }: { data: BaseNodeData; selected?: b
   return (
     <div className={cn(
       "relative min-w-[180px] transition-all",
-      selected && "scale-[1.02]"
+      selected && "scale-[1.01]"
     )}>
       <Handle
         type="target"
         position={Position.Top}
-        className="!w-3 !h-3 !bg-slate-500 !border-2 !border-slate-900 !-top-1.5"
+        className="!w-4 !h-4 !bg-slate-500 !border-2 !border-white !-top-2 !shadow-md"
       />
 
       <div 
         className={cn(
-          "rounded-2xl overflow-hidden shadow-xl cursor-pointer",
-          "bg-gradient-to-br from-slate-600 to-slate-700",
-          selected && "ring-2 ring-white/30 ring-offset-2 ring-offset-slate-900"
+          "rounded-xl overflow-hidden cursor-pointer",
+          "bg-white border-2 border-slate-400",
+          "shadow-[0_4px_20px_rgba(0,0,0,0.25)]",
+          selected && "ring-2 ring-slate-500 ring-offset-2 ring-offset-slate-800"
         )}
         onClick={data.onConfigure}
       >
-        <div className="p-4 text-center">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <Flag className="w-5 h-5 text-white/80" />
-            <span className="text-sm font-medium text-white">Fim</span>
-          </div>
-          
+        {/* Header */}
+        <div className="flex items-center justify-center gap-2 p-3 border-b border-slate-200 bg-slate-100">
+          <Flag className="w-5 h-5 text-slate-600" />
+          <span className="text-sm font-bold text-slate-700">Fim</span>
+        </div>
+        
+        <div className="p-3 bg-white">
           {addTag && tagName && (
-            <div className="bg-white/10 rounded-lg px-3 py-1.5 mt-2">
-              <p className="text-xs text-white/70">Tag: {tagName}</p>
+            <div className="bg-slate-50 rounded-lg px-3 py-2 border border-slate-200">
+              <p className="text-xs text-slate-600">🏷 Tag: {tagName}</p>
             </div>
           )}
         </div>
