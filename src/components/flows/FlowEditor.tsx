@@ -4,7 +4,6 @@ import {
   Background,
   Controls,
   MiniMap,
-  addEdge,
   useNodesState,
   useEdgesState,
   Connection,
@@ -12,15 +11,22 @@ import {
   Node,
   BackgroundVariant,
   Panel,
+  MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
-import { Save, ArrowLeft, LayoutGrid } from "lucide-react";
+import { Save, ArrowLeft, LayoutGrid, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { useFlowEditor, FlowNode, FlowEdge, NodeType } from "@/hooks/useWhatsAppFlows";
 import { flowNodeTypes, availableNodeTypes } from "./FlowNodeTypes";
 import { NodeConfigDialog } from "./NodeConfigDialog";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type FlowEditorNode = {
   id: string;
@@ -31,6 +37,7 @@ type FlowEditorNode = {
     label: string;
     config: Record<string, unknown>;
     createdAt: string;
+    nodeIndex: number;
     onConfigure: () => void;
   };
 };
@@ -42,6 +49,8 @@ type FlowEditorEdge = {
   sourceHandle: string | null;
   label: string | null;
   animated: boolean;
+  type: string;
+  markerEnd: { type: MarkerType; color: string };
   style: { stroke: string; strokeWidth: number };
 };
 
@@ -50,6 +59,15 @@ interface FlowEditorProps {
   flowName: string;
   onBack: () => void;
 }
+
+// Constants for HORIZONTAL layout (Kommo-style)
+const LAYOUT = {
+  START_X: 100,
+  START_Y: 200,
+  GAP_X: 300, // Horizontal spacing between nodes
+  GAP_Y: 150, // Vertical spacing for branches
+  NODE_WIDTH: 220,
+};
 
 export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const { 
@@ -68,41 +86,60 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [showConfigDialog, setShowConfigDialog] = useState(false);
 
-  // Placement helpers
-  const nodesRef = useRef<Node[]>([]);
-  const lastPlacedRef = useRef<{ x: number; y: number } | null>(null);
-
-  // Quando detectamos um layout inconsistente ao abrir, aplicamos uma correção automática (determinística)
-  // só 1x por abertura do editor.
+  // Track if we already auto-fixed the layout for this session
   const didAutoFixRef = useRef(false);
   useEffect(() => {
     didAutoFixRef.current = false;
   }, [flowId]);
 
-  // Convert DB nodes to React Flow format
-  const initialNodes = useMemo(() => 
-    dbNodes.map((node) => ({
-      id: node.id,
-      type: node.node_type as NodeType,
-      position: { x: node.position_x, y: node.position_y },
-      draggable: node.node_type !== "start", // mantém o "Início" fixo (evita bagunça acidental)
-      data: { 
-        label: getNodeLabel(node.node_type),
-        config: node.config,
-        createdAt: node.created_at,
-        onConfigure: () => {
-          setSelectedNode({
-            id: node.id,
-            type: node.node_type,
-            position: { x: node.position_x, y: node.position_y },
-            data: { config: node.config },
-          });
-          setShowConfigDialog(true);
-        },
-      },
-    })) as FlowEditorNode[], [dbNodes]);
+  // Build node index map for numbering (excluding start node)
+  const nodeIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    const sortedNodes = [...dbNodes].sort((a, b) => {
+      if (a.node_type === "start") return -1;
+      if (b.node_type === "start") return 1;
+      return a.created_at.localeCompare(b.created_at);
+    });
+    
+    let index = 0;
+    sortedNodes.forEach((node) => {
+      if (node.node_type !== "start") {
+        index++;
+        map.set(node.id, index);
+      }
+    });
+    return map;
+  }, [dbNodes]);
 
-  // Convert DB edges to React Flow format
+  // Convert DB nodes to React Flow format
+  const createNodeData = useCallback((node: typeof dbNodes[0]) => ({
+    id: node.id,
+    type: node.node_type as NodeType,
+    position: { x: node.position_x, y: node.position_y },
+    draggable: node.node_type !== "start",
+    data: { 
+      label: getNodeLabel(node.node_type),
+      config: node.config,
+      createdAt: node.created_at,
+      nodeIndex: nodeIndexMap.get(node.id) || 0,
+      onConfigure: () => {
+        setSelectedNode({
+          id: node.id,
+          type: node.node_type,
+          position: { x: node.position_x, y: node.position_y },
+          data: { config: node.config },
+        });
+        setShowConfigDialog(true);
+      },
+    },
+  }), [nodeIndexMap]);
+
+  const initialNodes = useMemo(() => 
+    dbNodes.map(createNodeData) as FlowEditorNode[], 
+    [dbNodes, createNodeData]
+  );
+
+  // Convert DB edges to React Flow format with Kommo-style edges
   const initialEdges = useMemo(() => 
     dbEdges.map((edge) => ({
       id: edge.id,
@@ -110,53 +147,20 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       target: edge.target_node_id,
       sourceHandle: edge.source_handle,
       label: edge.label,
-      animated: true,
+      animated: false,
+      type: "smoothstep",
+      markerEnd: { type: MarkerType.ArrowClosed, color: "hsl(var(--primary))" },
       style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
     })) as FlowEditorEdge[], [dbEdges]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowEditorNode>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEditorEdge>(initialEdges);
 
-  useEffect(() => {
-    nodesRef.current = nodes;
-  }, [nodes]);
-
   // Sync with DB data
   useEffect(() => {
-    const mapped = dbNodes.map((node) => ({
-      id: node.id,
-      type: node.node_type as NodeType,
-      position: { x: node.position_x, y: node.position_y },
-      draggable: node.node_type !== "start",
-      data: { 
-        label: getNodeLabel(node.node_type),
-        config: node.config,
-        createdAt: node.created_at,
-        onConfigure: () => {
-          setSelectedNode({
-            id: node.id,
-            type: node.node_type,
-            position: { x: node.position_x, y: node.position_y },
-            data: { config: node.config },
-          });
-          setShowConfigDialog(true);
-        },
-      },
-    })) as FlowEditorNode[];
-
+    const mapped = dbNodes.map(createNodeData) as FlowEditorNode[];
     setNodes(mapped);
-
-    // Keep lastPlacedRef in sync with persisted positions
-    if (dbNodes.length > 0) {
-      const maxNode = dbNodes.reduce(
-        (prev, curr) => (prev.position_y > curr.position_y ? prev : curr),
-        dbNodes[0]
-      );
-      lastPlacedRef.current = { x: Math.round(maxNode.position_x), y: Math.round(maxNode.position_y) };
-    } else {
-      lastPlacedRef.current = null;
-    }
-  }, [dbNodes, setNodes]);
+  }, [dbNodes, setNodes, createNodeData]);
 
   useEffect(() => {
     setEdges(
@@ -166,13 +170,15 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         target: edge.target_node_id,
         sourceHandle: edge.source_handle,
         label: edge.label,
-        animated: true,
+        animated: false,
+        type: "smoothstep",
+        markerEnd: { type: MarkerType.ArrowClosed, color: "hsl(var(--primary))" },
         style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
       })) as FlowEditorEdge[])
     );
   }, [dbEdges, setEdges]);
 
-  // Auto-correção: Aplica layout sequencial ao abrir e SALVA automaticamente
+  // Auto-fix layout on load if needed
   useEffect(() => {
     if (loadingNodes || loadingEdges) return;
     if (didAutoFixRef.current) return;
@@ -180,60 +186,32 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
     didAutoFixRef.current = true;
 
-    const mappedNodes: FlowEditorNode[] = dbNodes.map((node) => ({
-      id: node.id,
-      type: node.node_type as NodeType,
-      position: { x: node.position_x, y: node.position_y },
-      draggable: node.node_type !== "start",
-      data: {
-        label: getNodeLabel(node.node_type),
-        config: node.config,
-        createdAt: node.created_at,
-        onConfigure: () => {
-          setSelectedNode({
-            id: node.id,
-            type: node.node_type,
-            position: { x: node.position_x, y: node.position_y },
-            data: { config: node.config },
-          });
-          setShowConfigDialog(true);
-        },
-      },
-    }));
-
-    // Verifica se já está organizado (todos em X=300 e Y sequencial)
-    const CENTER_X = 300;
-    const isAlreadyOrganized = mappedNodes.every((node, index) => {
-      const expectedY = 60 + index * 140;
-      return Math.abs(node.position.x - CENTER_X) < 10 && Math.abs(node.position.y - expectedY) < 10;
-    });
-
-    if (isAlreadyOrganized) {
-      // Já está organizado, apenas atualiza a referência
-      if (mappedNodes.length > 0) {
-        const lastNode = mappedNodes[mappedNodes.length - 1];
-        lastPlacedRef.current = { x: lastNode.position.x, y: lastNode.position.y };
-      }
-      return;
-    }
-
-    // Aplica layout sequencial limpo
-    const newPositions = computeSequentialLayout(mappedNodes);
+    // Check if layout is messy (nodes at same position or all at Y=0/default)
+    const positions = dbNodes.map(n => ({ x: n.position_x, y: n.position_y }));
+    const hasOverlap = positions.some((p1, i) => 
+      positions.some((p2, j) => i !== j && Math.abs(p1.x - p2.x) < 50 && Math.abs(p1.y - p2.y) < 50)
+    );
     
-    const organizedNodes = mappedNodes.map((node) => {
+    const allSameY = positions.every(p => Math.abs(p.y - positions[0].y) < 20);
+    const needsReorganization = hasOverlap || (dbNodes.length > 1 && allSameY);
+
+    if (!needsReorganization) return;
+
+    // Apply horizontal layout
+    const newPositions = computeHorizontalLayout(dbNodes);
+    
+    const organizedNodes = dbNodes.map(node => {
       const pos = newPositions.get(node.id);
-      return pos ? { ...node, position: pos } : node;
-    });
+      return createNodeData({
+        ...node,
+        position_x: pos?.x ?? node.position_x,
+        position_y: pos?.y ?? node.position_y,
+      });
+    }) as FlowEditorNode[];
 
     setNodes(organizedNodes);
 
-    // Atualiza referência para próximo nó
-    if (organizedNodes.length > 0) {
-      const lastNode = organizedNodes[organizedNodes.length - 1];
-      lastPlacedRef.current = { x: lastNode.position.x, y: lastNode.position.y };
-    }
-
-    // Salva automaticamente as posições corrigidas
+    // Save the fixed layout
     const nodesToSave: FlowNode[] = organizedNodes.map((node) => ({
       id: node.id,
       flow_id: flowId,
@@ -259,7 +237,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     saveFlow.mutateAsync({ nodes: nodesToSave, edges: edgesToSave }).then(() => {
       toast.success("Layout organizado automaticamente!");
     });
-  }, [dbNodes, dbEdges, loadingNodes, loadingEdges, setNodes, flowId, saveFlow]);
+  }, [dbNodes, dbEdges, loadingNodes, loadingEdges, setNodes, flowId, saveFlow, createNodeData]);
 
   // Handle new connections
   const onConnect = useCallback(
@@ -297,7 +275,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const onNodesDelete = useCallback(
     async (nodesToDelete: Node[]) => {
       for (const node of nodesToDelete) {
-        if (node.type === "start") continue; // Don't delete start node
+        if (node.type === "start") continue;
         try {
           await deleteNode.mutateAsync(node.id);
         } catch (error) {
@@ -308,31 +286,26 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     [deleteNode]
   );
 
-  // Add new node - SEMPRE adiciona abaixo do último nó na sequência
+  // Add new node - HORIZONTAL layout
   const handleAddNode = async (type: NodeType) => {
-    const currentNodes = nodesRef.current;
-    const CENTER_X = 300;
-    const NODE_GAP_Y = 140;
-    const START_Y = 60;
-
-    // Encontra o Y mais baixo atual (posição real, não quantidade de nós)
-    let maxY = START_Y - NODE_GAP_Y;
+    const currentNodes = nodes;
+    
+    // Find rightmost X position
+    let maxX = LAYOUT.START_X;
     currentNodes.forEach((node) => {
-      if (node.position.y > maxY) {
-        maxY = node.position.y;
+      if (node.position.x > maxX) {
+        maxX = node.position.x;
       }
     });
 
-    // Próximo nó vai abaixo do último
-    const nextY = maxY + NODE_GAP_Y;
-
-    // Reserva slot imediatamente (previne sobreposição em cliques rápidos)
-    lastPlacedRef.current = { x: CENTER_X, y: nextY };
+    // New node goes to the right
+    const nextX = maxX + LAYOUT.GAP_X;
+    const nextY = LAYOUT.START_Y;
 
     try {
       await addNode.mutateAsync({
         node_type: type,
-        position_x: CENTER_X,
+        position_x: nextX,
         position_y: nextY,
       });
     } catch (error) {
@@ -378,19 +351,23 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     }
   };
 
-  // Auto-organize layout - sequência vertical simples
+  // Auto-organize layout - horizontal
   const handleAutoOrganize = () => {
-    const currentNodes = nodesRef.current;
+    if (nodes.length === 0) return;
 
-    if (currentNodes.length === 0) return;
+    const newPositions = computeHorizontalLayout(
+      nodes.map(n => ({
+        id: n.id,
+        node_type: n.type,
+        position_x: n.position.x,
+        position_y: n.position.y,
+        created_at: n.data.createdAt,
+        config: n.data.config,
+        company_id: "",
+        flow_id: flowId,
+      }))
+    );
 
-    const newPositions = computeSequentialLayout(currentNodes);
-    if (newPositions.size === 0) {
-      toast.error("Nenhum nó encontrado");
-      return;
-    }
-
-    // Aplica novas posições
     setNodes((prev) =>
       prev.map((node) => {
         const pos = newPositions.get(node.id);
@@ -398,13 +375,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       })
     );
 
-    // Atualiza lastPlacedRef
-    const lastPos = Array.from(newPositions.values()).pop();
-    if (lastPos) {
-      lastPlacedRef.current = lastPos;
-    }
-
-    toast.success("Layout reorganizado! Clique em 'Salvar Fluxo' para persistir.");
+    toast.success("Layout reorganizado! Clique em 'Salvar' para persistir.");
   };
 
   if (loadingNodes) {
@@ -416,28 +387,39 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   }
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b bg-background">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={onBack}>
-            <ArrowLeft className="w-5 h-5" />
+    <div className="h-full flex flex-col bg-slate-900">
+      {/* Kommo-style Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700 bg-slate-800">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="sm" onClick={onBack} className="text-slate-300 hover:text-white hover:bg-slate-700">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Voltar
           </Button>
-          <h2 className="text-lg font-semibold">{flowName}</h2>
+          <div className="h-6 w-px bg-slate-600" />
+          <h2 className="text-lg font-semibold text-white">{flowName}</h2>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={handleAutoOrganize}>
+        <div className="flex items-center gap-3">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleAutoOrganize}
+            className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
+          >
             <LayoutGrid className="w-4 h-4 mr-2" />
-            Auto-organizar
+            Organizar
           </Button>
-          <Button onClick={handleSave} disabled={saveFlow.isPending}>
+          <Button 
+            onClick={handleSave} 
+            disabled={saveFlow.isPending}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+          >
             <Save className="w-4 h-4 mr-2" />
-            Salvar Fluxo
+            Salvar e Continuar
           </Button>
         </div>
       </div>
 
-      {/* Flow Editor */}
+      {/* Flow Editor Canvas */}
       <div className="flex-1 relative">
         <ReactFlow
           nodes={nodes}
@@ -449,52 +431,78 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           onEdgesDelete={onEdgesDelete}
           nodeTypes={flowNodeTypes}
           fitView
+          fitViewOptions={{ padding: 0.2 }}
           deleteKeyCode={["Backspace", "Delete"]}
-          className="bg-muted/30"
+          className="bg-slate-900"
+          defaultEdgeOptions={{
+            type: "smoothstep",
+            animated: false,
+            markerEnd: { type: MarkerType.ArrowClosed, color: "hsl(var(--primary))" },
+            style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
+          }}
         >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-          <Controls className="!bg-background !border-border !shadow-lg" />
+          <Background 
+            variant={BackgroundVariant.Dots} 
+            gap={24} 
+            size={1.5} 
+            color="rgba(255,255,255,0.08)"
+          />
+          <Controls className="!bg-slate-800 !border-slate-700 !shadow-lg [&_button]:!bg-slate-700 [&_button]:!border-slate-600 [&_button]:hover:!bg-slate-600 [&_button_svg]:!fill-slate-300" />
           <MiniMap 
-            className="!bg-background !border-border !shadow-lg"
+            className="!bg-slate-800 !border-slate-700 !shadow-lg"
+            maskColor="rgba(0,0,0,0.7)"
             nodeColor={(node) => {
               switch (node.type) {
                 case "start": return "#10b981";
-                case "message": return "#3b82f6";
+                case "message": return "#0ea5e9";
                 case "template": return "#8b5cf6";
                 case "media": return "#f97316";
                 case "delay": return "#f59e0b";
                 case "wait_response": return "#ec4899";
                 case "condition": return "#6366f1";
-                case "end": return "#6b7280";
-                default: return "#6b7280";
+                case "end": return "#64748b";
+                default: return "#64748b";
               }
             }}
           />
 
-          {/* Toolbar */}
-          <Panel position="top-left" className="!m-4">
-            <div className="bg-background border rounded-xl shadow-lg p-3">
-              <p className="text-xs font-medium text-muted-foreground mb-3">Adicionar Bloco</p>
-              <div className="grid grid-cols-2 gap-2">
-                {availableNodeTypes.map((nodeType) => {
-                  const Icon = nodeType.icon;
-                  return (
-                    <button
-                      key={nodeType.type}
-                      onClick={() => handleAddNode(nodeType.type as NodeType)}
-                      className={cn(
-                        "flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-colors",
-                        "hover:bg-muted text-sm"
-                      )}
-                    >
-                      <div className={cn("p-1.5 rounded", nodeType.color)}>
-                        <Icon className="w-3 h-3 text-white" />
-                      </div>
-                      <span className="text-xs font-medium">{nodeType.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
+          {/* Kommo-style floating Add Step menu */}
+          <Panel position="top-right" className="!m-4">
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button 
+                    size="sm" 
+                    className="bg-sky-600 hover:bg-sky-700 text-white shadow-lg"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Adicionar próximo passo
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent 
+                  align="end" 
+                  className="w-64 bg-slate-800 border-slate-700 shadow-2xl"
+                >
+                  <div className="px-3 py-2 border-b border-slate-700">
+                    <p className="text-xs font-medium text-slate-400">Adicionar próximo passo</p>
+                  </div>
+                  {availableNodeTypes.map((nodeType) => {
+                    const Icon = nodeType.icon;
+                    return (
+                      <DropdownMenuItem
+                        key={nodeType.type}
+                        onClick={() => handleAddNode(nodeType.type as NodeType)}
+                        className="flex items-center gap-3 px-3 py-2.5 cursor-pointer text-slate-200 hover:bg-slate-700 focus:bg-slate-700"
+                      >
+                        <div className={cn("p-1.5 rounded-md", nodeType.bgColor)}>
+                          <Icon className="w-3.5 h-3.5 text-white" />
+                        </div>
+                        <span className="font-medium">{nodeType.label}</span>
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </Panel>
         </ReactFlow>
@@ -512,46 +520,29 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 }
 
 /**
- * Sistema de layout sequencial simples e determinístico:
- * - Ordena todos os nós pela data de criação (mais antigo primeiro)
- * - "Início" sempre fica primeiro
- * - Posiciona em uma única coluna vertical
+ * Horizontal layout algorithm (Kommo-style: left to right)
+ * - Start node on the left
+ * - Other nodes ordered by creation date, placed horizontally
  */
-function computeSequentialLayout(
-  currentNodes: (FlowEditorNode | Node)[]
+function computeHorizontalLayout(
+  nodes: Array<{ id: string; node_type: string; created_at: string; position_x: number; position_y: number }>
 ): Map<string, { x: number; y: number }> {
   const newPositions = new Map<string, { x: number; y: number }>();
   
-  if (currentNodes.length === 0) return newPositions;
+  if (nodes.length === 0) return newPositions;
 
-  // Constantes de layout
-  const CENTER_X = 300;
-  const START_Y = 60;
-  const GAP_Y = 140;
-
-  // Ordena: "start" sempre primeiro, depois por data de criação
-  const sortedNodes = [...currentNodes].sort((a, b) => {
-    // Start node sempre primeiro
-    if ((a as any).type === "start" && (b as any).type !== "start") return -1;
-    if ((b as any).type === "start" && (a as any).type !== "start") return 1;
-
-    // Ordenar por data de criação
-    const aCreated = (a.data as any)?.createdAt as string | undefined;
-    const bCreated = (b.data as any)?.createdAt as string | undefined;
-    
-    if (aCreated && bCreated) {
-      return aCreated.localeCompare(bCreated);
-    }
-    
-    // Fallback para ID
-    return a.id.localeCompare(b.id);
+  // Sort: start first, then by creation date
+  const sortedNodes = [...nodes].sort((a, b) => {
+    if (a.node_type === "start") return -1;
+    if (b.node_type === "start") return 1;
+    return a.created_at.localeCompare(b.created_at);
   });
 
-  // Posiciona cada nó em sequência vertical
+  // Position horizontally
   sortedNodes.forEach((node, index) => {
     newPositions.set(node.id, {
-      x: CENTER_X,
-      y: START_Y + index * GAP_Y,
+      x: LAYOUT.START_X + index * LAYOUT.GAP_X,
+      y: LAYOUT.START_Y,
     });
   });
 
@@ -560,12 +551,12 @@ function computeSequentialLayout(
 
 function getNodeLabel(type: string): string {
   const labels: Record<string, string> = {
-    start: "Início",
-    message: "Mensagem",
+    start: "Iniciar robô",
+    message: "Enviar mensagem",
     template: "Template Meta",
-    media: "Mídia",
-    delay: "Aguardar",
-    wait_response: "Aguardar Resposta",
+    media: "Enviar mídia",
+    delay: "Pausar",
+    wait_response: "Aguardar resposta",
     condition: "Condição",
     end: "Fim",
   };
