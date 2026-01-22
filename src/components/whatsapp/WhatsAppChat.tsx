@@ -397,21 +397,22 @@ export function WhatsAppChat({ initialPhone, initialName }: WhatsAppChatProps = 
   };
 
   // Handle template selection from slash menu
-  const handleSelectTemplate = async (template: WhatsAppTemplate) => {
+  const handleSelectTemplate = (template: WhatsAppTemplate) => {
     if (!selectedContact) return;
     
-    // Send the template
-    const success = await sendTemplate(
-      selectedContact.id,
-      template.name,
-      template.language
-    );
+    // Extract the BODY text from the template components
+    const bodyComponent = template.components.find(c => c.type === "BODY");
+    const templateText = bodyComponent?.text || "";
     
-    if (success) {
-      // Refresh messages
-      const msgs = await fetchMessages(selectedContact.id);
-      setMessages(msgs);
-    }
+    // Insert the template text into the input field instead of sending
+    setMessageInput(templateText);
+    
+    // Focus on the textarea
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 100);
+    
+    toast.info(`Template "${template.name}" carregado`);
   };
 
   // Handle flow selection from slash menu
