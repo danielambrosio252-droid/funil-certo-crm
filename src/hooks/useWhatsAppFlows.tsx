@@ -287,14 +287,19 @@ export function useFlowEditor(flowId: string | null) {
     }) => {
       if (!profile?.company_id || !flowId) throw new Error("Sem empresa ou fluxo");
 
+      // IMPORTANT: DB stores positions as integers.
+      // React Flow can produce floating points during drag/zoom.
+      const position_x = Math.round(node.position_x);
+      const position_y = Math.round(node.position_y);
+
       const { data, error } = await supabase
         .from("whatsapp_flow_nodes")
         .insert({
           flow_id: flowId,
           company_id: profile.company_id,
           node_type: node.node_type,
-          position_x: node.position_x,
-          position_y: node.position_y,
+          position_x,
+          position_y,
           config: (node.config || {}) as Json,
         })
         .select()
@@ -312,8 +317,8 @@ export function useFlowEditor(flowId: string | null) {
   const updateNode = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<FlowNode> & { id: string }) => {
       const dbUpdates: Record<string, unknown> = {};
-      if (updates.position_x !== undefined) dbUpdates.position_x = updates.position_x;
-      if (updates.position_y !== undefined) dbUpdates.position_y = updates.position_y;
+      if (updates.position_x !== undefined) dbUpdates.position_x = Math.round(updates.position_x);
+      if (updates.position_y !== undefined) dbUpdates.position_y = Math.round(updates.position_y);
       if (updates.config !== undefined) dbUpdates.config = updates.config as Json;
 
       const { data, error } = await supabase
