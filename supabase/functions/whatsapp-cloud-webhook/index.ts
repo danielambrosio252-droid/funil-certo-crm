@@ -443,12 +443,11 @@ Deno.serve(async (req) => {
         // ===== VERIFICAR SE HÁ FLUXO AGUARDANDO RESPOSTA =====
         try {
           const { data: waitingExecution } = await supabase
-            .from("whatsapp_flow_executions")
+            .from("chatbot_flow_executions")
             .select("id")
             .eq("company_id", companyId)
             .eq("contact_id", contact.id)
-            .eq("status", "waiting")
-            .is("next_action_at", null)
+            .eq("status", "waiting_response")
             .maybeSingle();
           
           if (waitingExecution) {
