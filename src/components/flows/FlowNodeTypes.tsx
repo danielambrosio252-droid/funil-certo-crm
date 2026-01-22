@@ -60,7 +60,7 @@ function ChatMessageNode({
       data.onUpdateConfig({
         ...config,
         message: localMessage,
-        buttons: localButtons.filter(b => b.trim()),
+        buttons: localButtons, // Keep all buttons (even empty) so they don't vanish
       });
     }
     setIsEditing(false);
@@ -68,7 +68,16 @@ function ChatMessageNode({
 
   const addButton = () => {
     if (localButtons.length < 3) {
-      setLocalButtons([...localButtons, ""]);
+      const newButtons = [...localButtons, ""];
+      setLocalButtons(newButtons);
+      // Persist immediately so blur doesn't lose the new button
+      if (data.onUpdateConfig) {
+        data.onUpdateConfig({
+          ...config,
+          message: localMessage,
+          buttons: newButtons,
+        });
+      }
     }
   };
 
@@ -79,7 +88,16 @@ function ChatMessageNode({
   };
 
   const removeButton = (index: number) => {
-    setLocalButtons(localButtons.filter((_, i) => i !== index));
+    const newButtons = localButtons.filter((_, i) => i !== index);
+    setLocalButtons(newButtons);
+    // Persist immediately
+    if (data.onUpdateConfig) {
+      data.onUpdateConfig({
+        ...config,
+        message: localMessage,
+        buttons: newButtons,
+      });
+    }
   };
 
   const hasButtons = localButtons.length > 0;
