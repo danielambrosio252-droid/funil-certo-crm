@@ -47,7 +47,7 @@ import { TextImproveMenu } from "./TextImproveMenu";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import { processAndSendAudioAsync } from "@/lib/audioProcessor";
 import { useWhatsAppTemplates, WhatsAppTemplate } from "@/hooks/useWhatsAppTemplates";
-import { WhatsAppFlow } from "@/hooks/useWhatsAppFlows";
+
 
 interface Contact {
   id: string;
@@ -414,32 +414,6 @@ export function WhatsAppChat({ initialPhone, initialName }: WhatsAppChatProps = 
     
     toast.info(`Template "${template.name}" carregado`);
   };
-
-  // Handle flow selection from slash menu
-  const handleSelectFlow = async (flow: WhatsAppFlow) => {
-    if (!selectedContact || !profile?.company_id) return;
-    
-    try {
-      // Trigger the flow for this contact
-      const { error } = await supabase.functions.invoke("flow-executor", {
-        body: {
-          trigger_type: "manual",
-          company_id: profile.company_id,
-          contact_id: selectedContact.id,
-          phone: selectedContact.phone,
-          flow_id: flow.id,
-        },
-      });
-      
-      if (error) throw error;
-      
-      toast.success(`Fluxo "${flow.name}" iniciado!`);
-    } catch (error) {
-      console.error("Error triggering flow:", error);
-      toast.error("Erro ao iniciar fluxo");
-    }
-  };
-
   const filteredContacts = contacts.filter((c) =>
     (c.name || c.phone).toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -920,7 +894,6 @@ export function WhatsAppChat({ initialPhone, initialName }: WhatsAppChatProps = 
                     isOpen={slashMenuOpen}
                     onClose={() => setSlashMenuOpen(false)}
                     onSelectTemplate={handleSelectTemplate}
-                    onSelectFlow={handleSelectFlow}
                     inputRef={textareaRef as React.RefObject<HTMLTextAreaElement>}
                   />
                   <Textarea

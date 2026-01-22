@@ -10,7 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import Funnels from "./pages/Funnels";
 import Leads from "./pages/Leads";
 import WhatsApp from "./pages/WhatsApp";
-import Flows from "./pages/Flows";
+
 import EmailMarketing from "./pages/EmailMarketing";
 import MetaAds from "./pages/MetaAds";
 import Reports from "./pages/Reports";
@@ -60,14 +60,6 @@ const App = () => (
               </ProtectedRoute>
             }
           />
-            <Route
-              path="/flows"
-              element={
-                <ProtectedRoute>
-                  <Flows />
-                </ProtectedRoute>
-              }
-            />
             <Route
               path="/email"
               element={
