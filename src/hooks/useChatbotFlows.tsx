@@ -82,7 +82,7 @@ export function useChatbotFlows() {
   });
 
   const createFlow = useMutation({
-    mutationFn: async (input: { name: string; description?: string; trigger_keywords?: string[] }) => {
+    mutationFn: async (input: { name: string; description?: string; trigger_keywords?: string[]; is_default?: boolean }) => {
       if (!profile?.company_id) throw new Error("No company");
       
       // Create flow
@@ -92,21 +92,22 @@ export function useChatbotFlows() {
           name: input.name,
           description: input.description || null,
           trigger_keywords: input.trigger_keywords || [],
+          is_default: input.is_default || false,
         })
         .select()
         .single();
       
       if (flowError) throw flowError;
 
-      // Create initial start node
+      // Create initial start node - centered on canvas
       const { error: nodeError } = await getNodesTable()
         .insert({
           flow_id: flow.id,
           company_id: profile.company_id,
           node_type: "start",
-          position_x: 100,
+          position_x: 400,
           position_y: 200,
-          config: { label: "Início" },
+          config: { label: "Início do Fluxo" },
         });
 
       if (nodeError) throw nodeError;
