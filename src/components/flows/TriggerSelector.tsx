@@ -85,6 +85,9 @@ export function TriggerSelector({ flowId, startNode, onTriggerSelect, onAddNextS
   const [selectedTriggerType, setSelectedTriggerType] = useState<TriggerType | null>(null);
   const [configuring, setConfiguring] = useState(false);
   const [showNextStepMenu, setShowNextStepMenu] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 });
+  const [dotPosition, setDotPosition] = useState({ x: 0, y: 0 });
   
   // Config state
   const [keywords, setKeywords] = useState<string[]>([]);
@@ -98,8 +101,32 @@ export function TriggerSelector({ flowId, startNode, onTriggerSelect, onAddNextS
 
   const handleAddNextStep = (type: string) => {
     setShowNextStepMenu(false);
+    setIsDragging(false);
     onAddNextStep?.(type);
     toast.success(`Bloco "${type}" será adicionado!`);
+  };
+
+  // Handle drag start from the connection dot
+  const handleDotMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    setDotPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    setDragPosition({ x: e.clientX, y: e.clientY });
+    setIsDragging(true);
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      setDragPosition({ x: moveEvent.clientX, y: moveEvent.clientY });
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      setIsDragging(false);
+      setShowNextStepMenu(true);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
   };
 
   // Check current trigger config
@@ -270,14 +297,17 @@ export function TriggerSelector({ flowId, startNode, onTriggerSelect, onAddNextS
           </CardContent>
         </Card>
 
-        {/* Connection point - "Então" with dot and menu */}
+        {/* Connection point - "Então" with draggable dot */}
         <div className="absolute -bottom-8 right-4 flex items-center gap-2">
           <span className="text-sm text-slate-500 font-medium">Então</span>
           
-          {/* Connection dot with dropdown menu */}
+          {/* Draggable connection dot */}
           <DropdownMenu open={showNextStepMenu} onOpenChange={setShowNextStepMenu}>
             <DropdownMenuTrigger asChild>
-              <div className="w-4 h-4 rounded-full bg-slate-400 border-2 border-white shadow cursor-pointer hover:bg-primary hover:scale-125 transition-all flex items-center justify-center" />
+              <div 
+                className="w-4 h-4 rounded-full bg-slate-400 border-2 border-white shadow cursor-grab hover:bg-primary hover:scale-125 transition-all flex items-center justify-center active:cursor-grabbing"
+                onMouseDown={handleDotMouseDown}
+              />
             </DropdownMenuTrigger>
             <DropdownMenuContent 
               align="start" 
@@ -342,22 +372,38 @@ export function TriggerSelector({ flowId, startNode, onTriggerSelect, onAddNextS
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+      </div>
 
-        {/* Connection line curving to the right */}
+      {/* Dragging line overlay - follows cursor */}
+      {isDragging && (
         <svg 
-          className="absolute -bottom-6 right-0 pointer-events-none"
-          width="80" 
-          height="60" 
-          style={{ transform: 'translate(60px, 8px)' }}
+          className="fixed inset-0 pointer-events-none z-50"
+          style={{ width: '100vw', height: '100vh' }}
         >
+          <defs>
+            <marker
+              id="arrowhead"
+              markerWidth="10"
+              markerHeight="7"
+              refX="9"
+              refY="3.5"
+              orient="auto"
+            >
+              <polygon
+                points="0 0, 10 3.5, 0 7"
+                fill="#94a3b8"
+              />
+            </marker>
+          </defs>
           <path 
-            d="M 0 0 Q 40 0 60 30" 
+            d={`M ${dotPosition.x} ${dotPosition.y} Q ${dotPosition.x + (dragPosition.x - dotPosition.x) / 2} ${dotPosition.y} ${dragPosition.x} ${dragPosition.y}`}
             fill="none"
             stroke="#94a3b8" 
-            strokeWidth="2" 
+            strokeWidth="2"
+            markerEnd="url(#arrowhead)"
           />
         </svg>
-      </div>
+      )}
 
       {/* Trigger Selection Dialog */}
       <Dialog open={showTriggerDialog} onOpenChange={setShowTriggerDialog}>
