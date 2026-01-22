@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -304,14 +305,29 @@ export function useChatbotFlowEditor(flowId: string | null) {
   });
 
   // CRITICAL FAILSAFE: Ensure Start node exists
-  const ensureStartNode = async () => {
+  const ensureStartNode = useCallback(async () => {
     if (!flowId || !profile?.company_id) return;
     
-    // Check if start node already exists
-    const hasStart = nodes.some(n => n.node_type === "start");
-    if (hasStart) return;
+    // Query directly from DB to avoid stale state
+    const { data: existingNodes, error: fetchError } = await getNodesTable()
+      .select("id, node_type")
+      .eq("flow_id", flowId)
+      .eq("node_type", "start")
+      .limit(1);
+    
+    if (fetchError) {
+      console.error("Error checking for start node:", fetchError);
+      throw fetchError;
+    }
+    
+    // If start node exists, do nothing
+    if (existingNodes && existingNodes.length > 0) {
+      console.log("[ensureStartNode] Start node already exists");
+      return;
+    }
     
     // Create start node centered on canvas
+    console.log("[ensureStartNode] Creating start node...");
     const { error } = await getNodesTable()
       .insert({
         flow_id: flowId,
@@ -326,7 +342,7 @@ export function useChatbotFlowEditor(flowId: string | null) {
     
     queryClient.invalidateQueries({ queryKey: ["chatbot-flow-nodes", flowId] });
     toast.success("Nó inicial criado!");
-  };
+  }, [flowId, profile?.company_id, queryClient]);
 
   return {
     nodes,
