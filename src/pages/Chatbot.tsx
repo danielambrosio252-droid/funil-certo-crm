@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { FlowBuilderCanvas } from "@/components/chatbot/FlowBuilderCanvas";
 import { useChatbotFlows } from "@/hooks/useChatbotFlows";
@@ -32,30 +32,45 @@ import { ptBR } from "date-fns/locale";
 export default function Chatbot() {
   const [editingFlowId, setEditingFlowId] = useState<string | null>(null);
   const [isCreatingDefault, setIsCreatingDefault] = useState(false);
+  const hasTriedCreating = useRef(false);
   const { flows, loadingFlows, createFlow, toggleFlow, deleteFlow } = useChatbotFlows();
 
-  // Auto-create default flow if none exists
+  // CRITICAL: Auto-create default flow if none exists - MUST ALWAYS RUN
   useEffect(() => {
     const createDefaultFlow = async () => {
-      if (!loadingFlows && flows.length === 0 && !isCreatingDefault) {
-        setIsCreatingDefault(true);
-        try {
-          const flow = await createFlow.mutateAsync({ 
-            name: "Fluxo Principal", 
-            description: "Fluxo padrão de atendimento",
-            is_default: true 
-          });
-          // Automatically open the editor for the new flow
-          setEditingFlowId(flow.id);
-        } catch (error) {
-          console.error("Error creating default flow:", error);
-        } finally {
-          setIsCreatingDefault(false);
-        }
+      // Guard: Only try once per session
+      if (loadingFlows || flows.length > 0 || isCreatingDefault || hasTriedCreating.current) {
+        return;
+      }
+      
+      hasTriedCreating.current = true;
+      setIsCreatingDefault(true);
+      
+      try {
+        const flow = await createFlow.mutateAsync({ 
+          name: "Fluxo Principal", 
+          description: "Fluxo padrão de atendimento",
+          is_default: true 
+        });
+        // Automatically open the editor for the new flow
+        setEditingFlowId(flow.id);
+      } catch (error) {
+        console.error("Error creating default flow:", error);
+        hasTriedCreating.current = false; // Allow retry on error
+      } finally {
+        setIsCreatingDefault(false);
       }
     };
+    
     createDefaultFlow();
-  }, [loadingFlows, flows.length, createFlow, isCreatingDefault]);
+  }, [loadingFlows, flows.length, isCreatingDefault]);
+
+  // Auto-open editor if there's exactly one flow and user just landed
+  useEffect(() => {
+    if (!loadingFlows && flows.length === 1 && !editingFlowId && !isCreatingDefault) {
+      setEditingFlowId(flows[0].id);
+    }
+  }, [loadingFlows, flows, editingFlowId, isCreatingDefault]);
 
   const handleEditFlow = (flowId: string) => {
     setEditingFlowId(flowId);
