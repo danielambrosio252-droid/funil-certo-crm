@@ -10,7 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import Funnels from "./pages/Funnels";
 import Leads from "./pages/Leads";
 import WhatsApp from "./pages/WhatsApp";
-
+import Chatbot from "./pages/Chatbot";
 import EmailMarketing from "./pages/EmailMarketing";
 import MetaAds from "./pages/MetaAds";
 import Reports from "./pages/Reports";
@@ -57,9 +57,17 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <WhatsApp />
-              </ProtectedRoute>
-            }
-          />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/chatbot"
+              element={
+                <ProtectedRoute>
+                  <Chatbot />
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="/email"
               element={

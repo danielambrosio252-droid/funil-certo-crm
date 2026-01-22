@@ -15,6 +15,7 @@ import {
   Target,
   Menu,
   X,
+  Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ const menuItems = [
   { icon: Kanban, label: "Funis", path: "/funnels" },
   { icon: Users, label: "Leads", path: "/leads" },
   { icon: MessageCircle, label: "WhatsApp", path: "/whatsapp" },
+  { icon: Bot, label: "Fluxos", path: "/chatbot" },
   { icon: Mail, label: "E-mail Marketing", path: "/email" },
   { icon: BarChart3, label: "Meta Ads", path: "/meta-ads" },
   { icon: Settings, label: "Configurações", path: "/settings" },
