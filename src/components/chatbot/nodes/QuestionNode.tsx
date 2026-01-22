@@ -111,13 +111,13 @@ function QuestionNode({ id, data }: NodeProps) {
       <CardContent className="p-4 space-y-3">
         {/* Question */}
         <div 
-          className="bg-purple-50 rounded-xl p-3 cursor-text min-h-[50px]"
+          className="bg-purple-100 rounded-xl p-3 cursor-text min-h-[50px]"
           onClick={() => setEditing(true)}
         >
           {editing ? (
             <textarea
               autoFocus
-              className="w-full bg-transparent border-none outline-none resize-none text-sm"
+              className="w-full bg-transparent border-none outline-none resize-none text-sm font-medium text-slate-800"
               placeholder="Digite sua pergunta..."
               value={localQuestion}
               onChange={(e) => setLocalQuestion(e.target.value)}
@@ -125,15 +125,15 @@ function QuestionNode({ id, data }: NodeProps) {
               rows={2}
             />
           ) : (
-            <p className="text-sm">
-              {localQuestion || <span className="text-muted-foreground">Clique para adicionar pergunta...</span>}
+            <p className="text-sm font-medium text-slate-800">
+              {localQuestion || <span className="text-slate-500">Clique para adicionar pergunta...</span>}
             </p>
           )}
         </div>
 
         {/* Options with individual handles */}
         <div className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground">Opções de resposta:</p>
+          <p className="text-xs font-semibold text-slate-600">Opções de resposta:</p>
           {localOptions.map((opt, idx) => (
             <div 
               key={idx} 
@@ -149,7 +149,7 @@ function QuestionNode({ id, data }: NodeProps) {
                 onChange={(e) => handleOptionChange(idx, e.target.value)}
                 onFocus={() => setEditingOptionIdx(idx)}
                 onBlur={() => handleOptionBlur(idx)}
-                className="flex-1 h-9 text-sm pr-16"
+                className="flex-1 h-9 text-sm font-medium text-slate-800 pr-16 bg-slate-100 border-slate-300"
                 placeholder={`Opção ${idx + 1}`}
               />
               <Button 
