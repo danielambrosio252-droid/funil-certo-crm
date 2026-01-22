@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useState, useRef, useEffect } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
 import { 
   Play, 
@@ -10,8 +10,10 @@ import {
   GitBranch, 
   CheckCircle,
   Plus,
-  Trash2,
+  Minus,
+  X,
   GripVertical,
+  Paperclip,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -186,7 +188,7 @@ function BaseNode({
   );
 }
 
-// Kommo-style Message Node with inline editing and button handles
+// Kommo-style Message Node - exact replica of Kommo CRM style
 function KommoMessageNode({ data, selected }: { data: BaseNodeData; selected?: boolean }) {
   const config = data.config || {};
   const message = config.message as string || "";
@@ -195,145 +197,186 @@ function KommoMessageNode({ data, selected }: { data: BaseNodeData; selected?: b
   const templateName = config.template_name as string;
   const nodeIndex = data.nodeIndex;
 
-  const hasButtons = buttons.length > 0 && buttons.some(b => b?.trim());
   const validButtons = buttons.filter(b => b?.trim());
 
-  // Calculate handle positions for buttons
-  const getButtonHandleTop = (index: number, total: number) => {
-    // Distribute handles evenly in the buttons section
-    const baseOffset = 100; // Start after header + message area
-    const spacing = 32; // Spacing between button handles
-    return baseOffset + (index * spacing);
-  };
+  // Reference for measuring content height
+  const contentRef = useRef<HTMLDivElement>(null);
 
   return (
     <div
       className={cn(
-        "relative min-w-[280px] max-w-[320px] rounded-lg border-2 bg-sky-50 dark:bg-sky-950/30 shadow-xl transition-all cursor-pointer",
-        "border-sky-200 dark:border-sky-800",
-        "hover:shadow-2xl",
-        selected && "ring-2 ring-primary ring-offset-2 ring-offset-background"
+        "relative rounded-lg shadow-lg transition-all cursor-pointer",
+        "bg-[#1a3a4a] dark:bg-[#1a3a4a] border border-[#2d5a6e]",
+        "hover:shadow-xl",
+        selected && "ring-2 ring-sky-400 ring-offset-2 ring-offset-[#0d1f29]"
       )}
-      onClick={data.onConfigure}
+      style={{ minWidth: 300, maxWidth: 380 }}
     >
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-sky-100 dark:bg-sky-900/50 rounded-t-md border-b border-sky-200 dark:border-sky-800">
+      {/* Header - Kommo style */}
+      <div className="flex items-center gap-2 px-3 py-2 rounded-t-lg bg-[#0d1f29]/50 border-b border-[#2d5a6e]">
         {nodeIndex !== undefined && nodeIndex > 0 && (
-          <span className="flex items-center justify-center w-5 h-5 rounded bg-sky-500 text-[10px] font-bold text-white">
+          <span className="flex items-center justify-center w-5 h-5 rounded bg-[#2d5a6e] text-[10px] font-bold text-white">
             {nodeIndex}
           </span>
         )}
-        <span className="text-xs font-medium text-sky-700 dark:text-sky-300">
+        <span className="text-xs text-[#7eb8d0] flex-1">
           Enviar m...
+        </span>
+        <span className="text-[10px] text-[#5a8fa8]">
+          (para): <span className="underline">Todos os contatos</span>
+        </span>
+        <span className="text-[10px] text-[#5a8fa8]">
+          Canais: <span className="font-medium text-white">Todos</span>
         </span>
       </div>
 
-      {/* Message Input Area - Kommo Style */}
-      <div className="p-3 space-y-2">
-        <div className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-card rounded-lg border border-sky-200 dark:border-sky-700 min-h-[40px]">
-          <MessageCircle className="w-4 h-4 text-sky-500 shrink-0" />
-          <span className="text-sm text-muted-foreground flex-1 truncate">
-            {useTemplate && templateName ? (
-              <span className="text-sky-600 dark:text-sky-400 font-medium">
-                📋 {templateName}
-              </span>
-            ) : message ? (
-              <span className="text-foreground">{message.slice(0, 40)}{message.length > 40 ? "..." : ""}</span>
-            ) : (
-              <span className="italic">Escreva algo ou escolha um <span className="underline text-sky-500">modelo</span></span>
-            )}
-          </span>
+      {/* Main Content Area */}
+      <div 
+        ref={contentRef}
+        className="p-3 bg-[#2a5a6a]/30"
+        onClick={data.onConfigure}
+      >
+        {/* Message input - Kommo style with icon and clip */}
+        <div className="flex items-start gap-2 mb-2">
+          <div className="flex items-center justify-center w-7 h-7 rounded-full bg-[#3d7a8a] shrink-0 mt-0.5">
+            <MessageCircle className="w-3.5 h-3.5 text-white" />
+          </div>
+          <div className="flex-1 relative">
+            <div 
+              className={cn(
+                "w-full px-3 py-2 rounded-lg bg-white/95 dark:bg-white text-sm text-slate-700",
+                "min-h-[36px] break-words whitespace-pre-wrap",
+                "focus:ring-2 focus:ring-sky-400"
+              )}
+              style={{
+                // Auto-height based on content
+                height: message.length > 60 ? 'auto' : undefined,
+              }}
+            >
+              {useTemplate && templateName ? (
+                <span className="text-sky-600 font-medium">
+                  📋 {templateName}
+                </span>
+              ) : message ? (
+                message
+              ) : (
+                <span className="text-slate-400 italic">
+                  Escreva algo ou escolha um <span className="underline text-sky-500 cursor-pointer">modelo</span>
+                </span>
+              )}
+            </div>
+            <button className="absolute top-2 right-2 text-slate-400 hover:text-slate-600">
+              <Paperclip className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        {/* Buttons Section - Each button is draggable with its own handle */}
-        {hasButtons && (
-          <div className="space-y-1">
-            {validButtons.map((btn, index) => (
-              <div 
-                key={index}
-                className="flex items-center gap-2 px-3 py-1.5 bg-sky-100 dark:bg-sky-900/50 rounded border border-dashed border-sky-300 dark:border-sky-700"
-              >
-                <GripVertical className="w-3 h-3 text-sky-400" />
-                <span className="text-xs font-medium text-sky-700 dark:text-sky-300 flex-1 truncate">
+        {/* Buttons Section - Kommo style with drag handles and delete */}
+        <div className="space-y-1.5 ml-9">
+          {validButtons.map((btn, index) => (
+            <div 
+              key={index}
+              className="flex items-center gap-1 group"
+            >
+              <GripVertical className="w-3 h-3 text-[#5a8fa8] cursor-grab" />
+              <div className="flex-1 flex items-center gap-2 px-3 py-1.5 rounded bg-[#3d7a8a] border border-dashed border-[#5a9fb8]">
+                <span className="text-xs font-medium text-white flex-1">
                   {btn}
                 </span>
-                <div className="w-1.5 h-1.5 rounded-full bg-sky-400" />
               </div>
-            ))}
-          </div>
-        )}
-
-        {/* Add Button hint */}
-        <button className="flex items-center gap-1 text-xs text-sky-500 hover:text-sky-600 transition-colors">
-          <Plus className="w-3 h-3" />
-          Botão de ação
-        </button>
+              {/* Delete button */}
+              <button 
+                className="p-1 text-[#5a8fa8] hover:text-red-400 transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Delete logic would go here
+                }}
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+              {/* + sinônimo text */}
+              <span className="text-[10px] text-[#5a8fa8] whitespace-nowrap">+ sinônimo</span>
+            </div>
+          ))}
+          
+          {/* Add button action */}
+          <button 
+            className="flex items-center gap-1 text-xs text-[#5ab8d8] hover:text-sky-300 transition-colors py-1"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Plus className="w-3 h-3" />
+            Botão de ação
+          </button>
+        </div>
       </div>
 
-      {/* Bottom Output Options - Kommo style */}
-      <div className="border-t border-sky-200 dark:border-sky-800 text-[11px]">
-        <div className="flex items-center justify-between px-3 py-1.5 text-muted-foreground hover:bg-sky-50 dark:hover:bg-sky-900/30">
+      {/* Bottom Output Options - Kommo style with +/- icons */}
+      <div className="border-t border-[#2d5a6e] bg-[#1a3a4a] rounded-b-lg">
+        <div className="flex items-center justify-end gap-3 px-3 py-1.5 text-[11px] text-[#7eb8d0] border-b border-[#2d5a6e]/50">
           <span>Outra resposta</span>
-          <div className="w-2 h-2 rounded-full bg-sky-400" />
+          <button className="w-4 h-4 rounded-full border border-[#5a8fa8] flex items-center justify-center hover:bg-[#2d5a6e] transition-colors">
+            <Minus className="w-2.5 h-2.5 text-[#5a8fa8]" />
+          </button>
         </div>
-        <div className="flex items-center justify-between px-3 py-1.5 text-muted-foreground hover:bg-sky-50 dark:hover:bg-sky-900/30 border-t border-sky-100 dark:border-sky-800">
+        <div className="flex items-center justify-end gap-3 px-3 py-1.5 text-[11px] text-[#7eb8d0] border-b border-[#2d5a6e]/50">
           <span>Sem resposta</span>
-          <div className="w-2 h-2 rounded-full bg-amber-400" />
+          <button className="w-4 h-4 rounded-full border border-[#5a8fa8] flex items-center justify-center hover:bg-[#2d5a6e] transition-colors">
+            <Minus className="w-2.5 h-2.5 text-[#5a8fa8]" />
+          </button>
         </div>
-        <div className="flex items-center justify-between px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 border-t border-sky-100 dark:border-sky-800 rounded-b-lg">
+        <div className="flex items-center justify-end gap-3 px-3 py-1.5 text-[11px] text-red-400 rounded-b-lg">
           <span>Falha ao enviar a mensagem</span>
-          <div className="w-2 h-2 rounded-full bg-red-400" />
+          <button className="w-4 h-4 rounded-full border border-red-400/50 flex items-center justify-center hover:bg-red-900/30 transition-colors">
+            <Plus className="w-2.5 h-2.5 text-red-400" />
+          </button>
         </div>
       </div>
 
-      {/* Input Handle (left) */}
+      {/* Input Handle (left) - centered vertically on content */}
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-3 !h-3 !bg-sky-500 !border-2 !border-background !-left-1.5 !top-1/4"
+        className="!w-3 !h-3 !bg-[#5a8fa8] !border-2 !border-[#0d1f29] !-left-1.5"
+        style={{ top: '50%', transform: 'translateY(-50%)' }}
       />
 
-      {/* Main output handle (default) */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="default"
-        className="!w-3 !h-3 !bg-sky-500 !border-2 !border-background !-right-1.5 !top-[60px]"
-      />
+      {/* Button handles - aligned with each button row */}
+      {validButtons.map((_, index) => {
+        // Calculate position: header (40px) + message area (60px) + buttons offset
+        const topOffset = 110 + (index * 32);
+        return (
+          <Handle
+            key={`btn-${index}`}
+            type="source"
+            position={Position.Right}
+            id={`button-${index}`}
+            className="!w-3 !h-3 !bg-[#5ab8d8] !border-2 !border-[#0d1f29] !-right-1.5"
+            style={{ top: topOffset }}
+          />
+        );
+      })}
 
-      {/* Button handles - one for each button */}
-      {validButtons.map((_, index) => (
-        <Handle
-          key={`btn-${index}`}
-          type="source"
-          position={Position.Right}
-          id={`button-${index}`}
-          style={{ top: `${100 + (index * 28)}px` }}
-          className="!w-2.5 !h-2.5 !bg-sky-400 !border-2 !border-background !-right-1"
-        />
-      ))}
-
-      {/* Special output handles */}
+      {/* Special output handles - aligned with bottom options */}
       <Handle
         type="source"
         position={Position.Right}
         id="other_response"
-        className="!w-2.5 !h-2.5 !bg-sky-400 !border-2 !border-background !-right-1"
-        style={{ bottom: "60px", top: "auto" }}
+        className="!w-3 !h-3 !bg-[#5a8fa8] !border-2 !border-[#0d1f29] !-right-1.5"
+        style={{ bottom: 56, top: 'auto' }}
       />
       <Handle
         type="source"
         position={Position.Right}
         id="no_response"
-        className="!w-2.5 !h-2.5 !bg-amber-400 !border-2 !border-background !-right-1"
-        style={{ bottom: "36px", top: "auto" }}
+        className="!w-3 !h-3 !bg-amber-500 !border-2 !border-[#0d1f29] !-right-1.5"
+        style={{ bottom: 32, top: 'auto' }}
       />
       <Handle
         type="source"
         position={Position.Right}
         id="send_failed"
-        className="!w-2.5 !h-2.5 !bg-red-400 !border-2 !border-background !-right-1"
-        style={{ bottom: "12px", top: "auto" }}
+        className="!w-3 !h-3 !bg-red-500 !border-2 !border-[#0d1f29] !-right-1.5"
+        style={{ bottom: 8, top: 'auto' }}
       />
     </div>
   );
