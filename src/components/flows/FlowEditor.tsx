@@ -365,17 +365,37 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   );
 
   // Add new node
+  const getDefaultConfig = useCallback((type: NodeType): Record<string, unknown> => {
+    // Keep nodes renderable even if UI expects certain fields.
+    if (type === "message") return { message: "", buttons: [] };
+    return {};
+  }, []);
+
   const handleAddNode = async (type: NodeType) => {
-    const maxY = Math.max(...nodes.map((n) => n.position.y), LAYOUT.START_Y - LAYOUT.GAP_Y);
+    // IMPORTANT: node.position.y can be float due to zoom/pan math.
+    // Always compute using integer coordinates.
+    const maxY = Math.max(
+      ...nodes.map((n) => Math.round(n.position.y)),
+      LAYOUT.START_Y - LAYOUT.GAP_Y
+    );
     try {
       await addNode.mutateAsync({
         node_type: type,
         // IMPORTANT: DB expects integer coordinates.
         position_x: Math.round(LAYOUT.CENTER_X),
         position_y: Math.round(maxY + LAYOUT.GAP_Y),
+        config: getDefaultConfig(type),
       });
+
+      // User-action: center after creation so it never "seems" to not add.
+      requestAnimationFrame(() => {
+        setTimeout(() => handleCenterView(), 50);
+      });
+
+      toast.success("Etapa adicionada!");
     } catch (e) {
       console.error("Add node failed:", e);
+      toast.error("Não consegui adicionar a etapa. Tente novamente.");
     }
   };
 
