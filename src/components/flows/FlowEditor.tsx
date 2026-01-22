@@ -390,23 +390,23 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   }
 
   return (
-    <div className="h-full flex flex-col bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-      {/* Professional Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800/50 bg-slate-900/80 backdrop-blur-sm">
+    <div className="h-full flex flex-col" style={{ backgroundColor: '#1e293b' }}>
+      {/* Professional Header - Stripe-style */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-600 bg-slate-800">
         <div className="flex items-center gap-4">
           <Button 
             variant="ghost" 
             size="sm" 
             onClick={onBack} 
-            className="text-slate-400 hover:text-white hover:bg-slate-800"
+            className="text-white hover:text-white hover:bg-slate-700"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Voltar
           </Button>
-          <div className="h-6 w-px bg-slate-700" />
+          <div className="h-6 w-px bg-slate-500" />
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-emerald-400" />
-            <h2 className="text-lg font-semibold text-white">{flowName}</h2>
+            <h2 className="text-lg font-bold text-white">{flowName}</h2>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -414,7 +414,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
             variant="outline" 
             size="sm" 
             onClick={handleAutoOrganize}
-            className="border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white"
+            className="border-slate-500 bg-slate-700 text-white hover:bg-slate-600 hover:text-white"
           >
             <LayoutGrid className="w-4 h-4 mr-2" />
             Organizar
@@ -422,7 +422,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           <Button 
             onClick={handleSave} 
             disabled={saveFlow.isPending}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/25"
+            className="bg-emerald-500 hover:bg-emerald-400 text-white font-semibold shadow-lg"
           >
             <Save className="w-4 h-4 mr-2" />
             Salvar Fluxo
@@ -430,8 +430,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         </div>
       </div>
 
-      {/* Flow Editor Canvas */}
-      <div className="flex-1 relative">
+      {/* Flow Editor Canvas - Professional dark graphite */}
+      <div className="flex-1 relative" style={{ backgroundColor: '#1e293b' }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -444,21 +444,21 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           fitView
           fitViewOptions={{ padding: 0.4 }}
           deleteKeyCode={["Backspace", "Delete"]}
-          className="bg-transparent"
+          style={{ backgroundColor: '#1e293b' }}
           defaultEdgeOptions={{
             type: "smoothstep",
             animated: false,
-            markerEnd: { type: MarkerType.ArrowClosed, color: "#64748b" },
-            style: { stroke: "#64748b", strokeWidth: 2 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: "#94a3b8" },
+            style: { stroke: "#94a3b8", strokeWidth: 2 },
           }}
         >
           <Background 
             variant={BackgroundVariant.Dots} 
-            gap={40} 
-            size={1} 
-            color="rgba(255,255,255,0.03)"
+            gap={20} 
+            size={1.5} 
+            color="#475569"
           />
-          <Controls className="!bg-slate-800/80 !backdrop-blur-sm !border-slate-700/50 !shadow-xl !rounded-xl [&_button]:!bg-slate-700/50 [&_button]:!border-slate-600/50 [&_button]:hover:!bg-slate-600 [&_button_svg]:!fill-slate-300 [&_button]:!rounded-lg" />
+          <Controls className="!bg-slate-700 !border-slate-500 !shadow-xl !rounded-lg [&_button]:!bg-slate-600 [&_button]:!border-slate-400 [&_button]:hover:!bg-slate-500 [&_button_svg]:!fill-white [&_button]:!rounded-md" />
           <MiniMap 
             className="!bg-slate-800/80 !backdrop-blur-sm !border-slate-700/50 !shadow-xl !rounded-xl"
             maskColor="rgba(0,0,0,0.85)"
