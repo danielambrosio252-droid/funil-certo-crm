@@ -25,6 +25,7 @@ import { flowNodeTypes, availableNodeTypes } from "./FlowNodeTypes";
 import { NodeConfigDialog } from "./NodeConfigDialog";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { ConnectionAddMenu } from "./ConnectionAddMenu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -97,6 +98,22 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [showConfigDialog, setShowConfigDialog] = useState(false);
+
+  const [connectMenu, setConnectMenu] = useState<{
+    open: boolean;
+    x: number;
+    y: number;
+    sourceNodeId: string | null;
+    sourceHandle: string | null;
+  }>({ open: false, x: 0, y: 0, sourceNodeId: null, sourceHandle: null });
+
+  const pendingConnectRef = useRef<{ sourceNodeId: string; sourceHandle: string | null } | null>(null);
+
+  // Defaults mínimos por tipo para nunca criar um nó “inválido”
+  const getDefaultConfig = useCallback((type: NodeType): Record<string, unknown> => {
+    if (type === "message") return { message: "", buttons: [] };
+    return {};
+  }, []);
 
   // Refs for stability - prevent re-renders from causing instability
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
@@ -289,17 +306,15 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   // STABLE node change handler - only handle position changes, no auto-layout
   const handleNodesChange = useCallback(
     (changes: NodeChange<FlowEditorNode>[]) => {
-      // Filter out any automatic dimension changes that could cause instability
+      // Whitelist: evita que o ReactFlow dispare um RESET inesperado e “suma” com nós.
+      // Também permite dimensions (necessário quando o nó muda de tamanho ao editar).
       const safeChanges = changes.filter((change) => {
-        // Allow position changes (drag)
-        if (change.type === "position") return true;
-        // Allow selection changes
-        if (change.type === "select") return true;
-        // Allow removal
-        if (change.type === "remove") return true;
-        // Block dimension changes that could cause jitter
-        if (change.type === "dimensions") return false;
-        return true;
+        return (
+          change.type === "position" ||
+          change.type === "select" ||
+          change.type === "remove" ||
+          change.type === "dimensions"
+        );
       });
       onNodesChange(safeChanges);
     },
@@ -328,11 +343,98 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           target_node_id: connection.target,
           source_handle: connection.sourceHandle || undefined,
         });
+
+        // Conexão foi criada com sucesso -> não abrir menu flutuante.
+        pendingConnectRef.current = null;
+        setConnectMenu((s) => ({ ...s, open: false }));
       } catch (e) {
         console.error("Connect failed:", e);
       }
     },
     [addDbEdge]
+  );
+
+  const handleConnectStart = useCallback((_: unknown, params: any) => {
+    // params (xyflow) normalmente contém: nodeId, handleId, handleType
+    if (!params?.nodeId) return;
+    if (params.handleType !== "source") return;
+
+    pendingConnectRef.current = {
+      sourceNodeId: String(params.nodeId),
+      sourceHandle: params.handleId ? String(params.handleId) : null,
+    };
+  }, []);
+
+  const handleConnectEnd = useCallback((event: any) => {
+    // Se soltar no vazio (pane), abre menu de criação.
+    const pending = pendingConnectRef.current;
+    if (!pending) return;
+
+    const target = event?.target as HTMLElement | null;
+    const droppedOnPane = !!target?.closest?.(".react-flow__pane");
+    if (!droppedOnPane) return;
+
+    const point = (() => {
+      if ("clientX" in event && "clientY" in event) {
+        return { x: event.clientX as number, y: event.clientY as number };
+      }
+      const touch = event?.changedTouches?.[0];
+      if (touch) return { x: touch.clientX as number, y: touch.clientY as number };
+      return { x: 0, y: 0 };
+    })();
+
+    setConnectMenu({
+      open: true,
+      x: point.x,
+      y: point.y,
+      sourceNodeId: pending.sourceNodeId,
+      sourceHandle: pending.sourceHandle,
+    });
+  }, []);
+
+  const createNodeFromConnectionMenu = useCallback(
+    async (type: NodeType) => {
+      if (!connectMenu.sourceNodeId) return;
+
+      // Posição previsível: abaixo do nó de origem (ou fallback para o final do fluxo)
+      const source = nodes.find((n) => n.id === connectMenu.sourceNodeId);
+      const baseY = source ? Math.round(source.position.y) : Math.max(...nodes.map((n) => Math.round(n.position.y)), LAYOUT.START_Y);
+      const baseX = source ? Math.round(source.position.x) : Math.round(LAYOUT.CENTER_X);
+
+      try {
+        const created = await addNode.mutateAsync({
+          node_type: type,
+          position_x: Math.round(baseX),
+          position_y: Math.round(baseY + LAYOUT.GAP_Y),
+          config: getDefaultConfig(type),
+        });
+
+        await addDbEdge.mutateAsync({
+          source_node_id: connectMenu.sourceNodeId,
+          target_node_id: created.id,
+          source_handle: connectMenu.sourceHandle || undefined,
+        });
+
+        pendingConnectRef.current = null;
+        setConnectMenu((s) => ({ ...s, open: false }));
+        toast.success("Etapa adicionada!");
+
+        requestAnimationFrame(() => {
+          setTimeout(() => handleCenterView(), 50);
+        });
+      } catch (e) {
+        console.error("Create from connect menu failed:", e);
+        toast.error("Não consegui adicionar a etapa a partir da conexão.");
+      }
+    },
+    [
+      connectMenu.sourceNodeId,
+      connectMenu.sourceHandle,
+      nodes,
+      addNode,
+      addDbEdge,
+      getDefaultConfig,
+    ]
   );
 
   // Delete edges
@@ -365,12 +467,6 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   );
 
   // Add new node
-  const getDefaultConfig = useCallback((type: NodeType): Record<string, unknown> => {
-    // Keep nodes renderable even if UI expects certain fields.
-    if (type === "message") return { message: "", buttons: [] };
-    return {};
-  }, []);
-
   const handleAddNode = async (type: NodeType) => {
     // IMPORTANT: node.position.y can be float due to zoom/pan math.
     // Always compute using integer coordinates.
@@ -562,6 +658,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}
           onConnect={handleConnect}
+          onConnectStart={handleConnectStart}
+          onConnectEnd={handleConnectEnd}
           onNodesDelete={handleNodesDelete}
           onEdgesDelete={handleEdgesDelete}
           nodeTypes={flowNodeTypes}
@@ -670,6 +768,19 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
             </div>
           </Panel>
         </ReactFlow>
+
+        <ConnectionAddMenu
+          open={connectMenu.open}
+          x={connectMenu.x}
+          y={connectMenu.y}
+          onClose={() => {
+            pendingConnectRef.current = null;
+            setConnectMenu((s) => ({ ...s, open: false }));
+          }}
+          onSelect={(type) => {
+            void createNodeFromConnectionMenu(type as NodeType);
+          }}
+        />
       </div>
 
       {/* Config Dialog */}
