@@ -101,6 +101,24 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
   const lastFitViewTsRef = useRef(0);
 
+  // IMPORTANT: react-query can temporarily return `undefined` data when queries are disabled
+  // (e.g. auth/profile briefly toggles). If we blindly map that to [], the canvas looks like
+  // "sumiu" after ~1-2s. We keep the last non-empty snapshot to avoid clearing the editor.
+  const lastStableDbNodesRef = useRef<typeof dbNodes>([]);
+  const lastStableDbEdgesRef = useRef<typeof dbEdges>([]);
+
+  useEffect(() => {
+    if (!loadingNodes && dbNodes.length > 0) {
+      lastStableDbNodesRef.current = dbNodes;
+    }
+  }, [dbNodes, loadingNodes]);
+
+  useEffect(() => {
+    if (!loadingEdges && dbEdges.length > 0) {
+      lastStableDbEdgesRef.current = dbEdges;
+    }
+  }, [dbEdges, loadingEdges]);
+
   const requestFitView = useCallback(() => {
     const inst = rfInstanceRef.current;
     if (!inst) return;
@@ -127,6 +145,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   useEffect(() => {
     didAutoFixRef.current = false;
     didEnsureStartRef.current = false;
+    lastStableDbNodesRef.current = [];
+    lastStableDbEdgesRef.current = [];
     setRfInitTick(0);
   }, [flowId]);
 
@@ -274,9 +294,13 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   // Sync with DB data
   useEffect(() => {
-    const mapped = dbNodes.map(createNodeData) as FlowEditorNode[];
+    // If DB temporarily reports empty while still loading/auth gating, do NOT wipe the canvas.
+    if ((loadingNodes || authLoading) && dbNodes.length === 0) return;
+
+    const source = dbNodes.length > 0 ? dbNodes : lastStableDbNodesRef.current;
+    const mapped = source.map(createNodeData) as FlowEditorNode[];
     setNodes(mapped);
-  }, [dbNodes, setNodes, createNodeData]);
+  }, [dbNodes, setNodes, createNodeData, loadingNodes, authLoading]);
 
   // Keep viewport stable: fit on initial load AND after automatic re-layout.
   useEffect(() => {
@@ -288,8 +312,11 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   }, [loadingNodes, loadingEdges, nodes.length, rfInitTick, requestFitView]);
 
   useEffect(() => {
+    if ((loadingEdges || authLoading) && dbEdges.length === 0) return;
+
+    const source = dbEdges.length > 0 ? dbEdges : lastStableDbEdgesRef.current;
     setEdges(
-      (dbEdges.map((edge) => ({
+      (source.map((edge) => ({
         id: edge.id,
         source: edge.source_node_id,
         target: edge.target_node_id,
@@ -301,7 +328,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         style: { stroke: "#94a3b8", strokeWidth: 2 },
       })) as FlowEditorEdge[])
     );
-  }, [dbEdges, setEdges]);
+  }, [dbEdges, setEdges, loadingEdges, authLoading]);
 
   // Auto-fix layout on load
   useEffect(() => {
@@ -595,13 +622,6 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           onInit={(instance) => {
             rfInstanceRef.current = instance;
             setRfInitTick((t) => t + 1);
-          }}
-          fitView
-          fitViewOptions={{ 
-            padding: 0.3,
-            includeHiddenNodes: false,
-            minZoom: 0.5,
-            maxZoom: 1.5,
           }}
           minZoom={0.2}
           maxZoom={2}
