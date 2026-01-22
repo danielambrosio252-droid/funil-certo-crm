@@ -17,6 +17,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { 
   Plus, 
   UserPlus, 
@@ -26,6 +33,8 @@ import {
   X,
   Zap,
   Edit,
+  Shuffle,
+  Clock,
 } from "lucide-react";
 import { FlowNode, TriggerType, useWhatsAppFlows } from "@/hooks/useWhatsAppFlows";
 import { useFunnels, useFunnelStages } from "@/hooks/useFunnels";
@@ -37,6 +46,7 @@ interface TriggerSelectorProps {
   flowId: string;
   startNode: FlowNode | undefined;
   onTriggerSelect: (trigger: TriggerType | null) => void;
+  onAddNextStep?: (type: string) => void;
 }
 
 const triggerOptions = [
@@ -70,10 +80,11 @@ const triggerOptions = [
   },
 ];
 
-export function TriggerSelector({ flowId, startNode, onTriggerSelect }: TriggerSelectorProps) {
+export function TriggerSelector({ flowId, startNode, onTriggerSelect, onAddNextStep }: TriggerSelectorProps) {
   const [showTriggerDialog, setShowTriggerDialog] = useState(false);
   const [selectedTriggerType, setSelectedTriggerType] = useState<TriggerType | null>(null);
   const [configuring, setConfiguring] = useState(false);
+  const [showNextStepMenu, setShowNextStepMenu] = useState(false);
   
   // Config state
   const [keywords, setKeywords] = useState<string[]>([]);
@@ -84,6 +95,12 @@ export function TriggerSelector({ flowId, startNode, onTriggerSelect }: TriggerS
   const { funnels } = useFunnels();
   const { stages } = useFunnelStages(selectedFunnelId || null);
   const { updateFlow } = useWhatsAppFlows();
+
+  const handleAddNextStep = (type: string) => {
+    setShowNextStepMenu(false);
+    onAddNextStep?.(type);
+    toast.success(`Bloco "${type}" será adicionado!`);
+  };
 
   // Check current trigger config
   const currentConfig = startNode?.config as Record<string, unknown> | undefined;
@@ -253,27 +270,91 @@ export function TriggerSelector({ flowId, startNode, onTriggerSelect }: TriggerS
           </CardContent>
         </Card>
 
-        {/* Connection point - "Então" with dot */}
+        {/* Connection point - "Então" with dot and menu */}
         <div className="absolute -bottom-8 right-4 flex items-center gap-2">
           <span className="text-sm text-slate-500 font-medium">Então</span>
-          <div className="w-3 h-3 rounded-full bg-slate-400 border-2 border-white shadow cursor-pointer hover:bg-primary hover:scale-110 transition-all" />
+          
+          {/* Connection dot with dropdown menu */}
+          <DropdownMenu open={showNextStepMenu} onOpenChange={setShowNextStepMenu}>
+            <DropdownMenuTrigger asChild>
+              <div className="w-4 h-4 rounded-full bg-slate-400 border-2 border-white shadow cursor-pointer hover:bg-primary hover:scale-125 transition-all flex items-center justify-center" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent 
+              align="start" 
+              side="right" 
+              className="w-52 bg-white border shadow-lg rounded-lg z-50"
+              sideOffset={20}
+            >
+              <DropdownMenuItem 
+                className="flex items-center gap-2 p-3 cursor-pointer"
+                onClick={() => handleAddNextStep("messenger")}
+              >
+                <MessageSquare className="w-4 h-4 text-blue-500" />
+                <span>+ Messenger</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                className="flex items-center gap-2 p-3 cursor-pointer"
+                onClick={() => handleAddNextStep("ai_step")}
+              >
+                <Zap className="w-4 h-4 text-purple-500" />
+                <span>+ Etapa de IA</span>
+                <Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0.5">AI</Badge>
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                className="flex items-center gap-2 p-3 cursor-pointer"
+                onClick={() => handleAddNextStep("actions")}
+              >
+                <Plus className="w-4 h-4 text-emerald-500" />
+                <span>+ Ações</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                className="flex items-center gap-2 p-3 cursor-pointer"
+                onClick={() => handleAddNextStep("condition")}
+              >
+                <GitBranch className="w-4 h-4 text-orange-500" />
+                <span>+ Condição</span>
+                <Badge className="ml-auto text-xs px-1.5 py-0.5 bg-amber-500">PRO</Badge>
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                className="flex items-center gap-2 p-3 cursor-pointer"
+                onClick={() => handleAddNextStep("randomizer")}
+              >
+                <Shuffle className="w-4 h-4 text-pink-500" />
+                <span>+ Randomizador</span>
+                <Badge className="ml-auto text-xs px-1.5 py-0.5 bg-amber-500">PRO</Badge>
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                className="flex items-center gap-2 p-3 cursor-pointer"
+                onClick={() => handleAddNextStep("smart_delay")}
+              >
+                <Clock className="w-4 h-4 text-slate-500" />
+                <span>+ Atraso Inteligente</span>
+                <Badge className="ml-auto text-xs px-1.5 py-0.5 bg-amber-500">PRO</Badge>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                className="flex items-center gap-2 p-3 text-muted-foreground cursor-pointer"
+                onClick={() => setShowNextStepMenu(false)}
+              >
+                Cancelar
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
-        {/* Connection line going down */}
+        {/* Connection line curving to the right */}
         <svg 
-          className="absolute -bottom-8 right-[22px] pointer-events-none"
-          width="2" 
-          height="40" 
-          style={{ transform: 'translateY(12px)' }}
+          className="absolute -bottom-6 right-0 pointer-events-none"
+          width="80" 
+          height="60" 
+          style={{ transform: 'translate(60px, 8px)' }}
         >
-          <line 
-            x1="1" 
-            y1="0" 
-            x2="1" 
-            y2="40" 
+          <path 
+            d="M 0 0 Q 40 0 60 30" 
+            fill="none"
             stroke="#94a3b8" 
             strokeWidth="2" 
-            strokeDasharray="4 4"
           />
         </svg>
       </div>
