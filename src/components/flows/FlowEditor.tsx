@@ -31,10 +31,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 // Channel info type
-interface ChannelInfo {
-  mode: 'cloud_api' | 'baileys' | null;
+interface Channel {
+  id: string;
+  mode: 'cloud_api' | 'baileys';
   phoneNumber: string | null;
   displayName: string;
+  status?: string;
+}
+
+interface ChannelInfo {
+  channels: Channel[];
+  selectedChannelId: string | null;
 }
 
 type FlowEditorNode = {
@@ -49,6 +56,7 @@ type FlowEditorNode = {
     nodeIndex: number;
     channelInfo?: ChannelInfo;
     onConfigure: () => void;
+    onChannelChange?: (channelId: string) => void;
   };
 };
 
@@ -97,65 +105,68 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [showConfigDialog, setShowConfigDialog] = useState(false);
   const [channelInfo, setChannelInfo] = useState<ChannelInfo>({
-    mode: null,
-    phoneNumber: null,
-    displayName: 'Não configurado'
+    channels: [],
+    selectedChannelId: null
   });
 
-  // Fetch channel info from company and session
+  // Fetch ALL available channels (both API and Baileys if configured)
   useEffect(() => {
-    const fetchChannelInfo = async () => {
+    const fetchAllChannels = async () => {
       if (!profile?.company_id) return;
 
       try {
-        // Get company WhatsApp mode
+        const channels: Channel[] = [];
+
+        // Get company WhatsApp config for Cloud API
         const { data: company } = await supabase
           .from('companies')
-          .select('whatsapp_mode, whatsapp_phone_number_id')
+          .select('whatsapp_mode, whatsapp_phone_number_id, whatsapp_waba_id')
           .eq('id', profile.company_id)
           .single();
 
-        if (!company) return;
-
-        const mode = company.whatsapp_mode as 'cloud_api' | 'baileys' | null;
-
-        if (mode === 'cloud_api' && company.whatsapp_phone_number_id) {
-          // Cloud API - show phone number ID
-          setChannelInfo({
+        // Check if Cloud API is configured
+        if (company?.whatsapp_phone_number_id) {
+          channels.push({
+            id: 'cloud_api',
             mode: 'cloud_api',
             phoneNumber: company.whatsapp_phone_number_id,
-            displayName: `API ${company.whatsapp_phone_number_id.slice(-4)}`
+            displayName: `API Oficial ...${company.whatsapp_phone_number_id.slice(-4)}`,
+            status: 'active'
           });
-        } else if (mode === 'baileys') {
-          // Baileys - get session phone number
-          const { data: session } = await supabase
-            .from('whatsapp_sessions')
-            .select('phone_number, status')
-            .eq('company_id', profile.company_id)
-            .single();
-
-          if (session?.phone_number) {
-            const phone = session.phone_number;
-            const displayPhone = phone.length > 4 ? `...${phone.slice(-4)}` : phone;
-            setChannelInfo({
-              mode: 'baileys',
-              phoneNumber: phone,
-              displayName: displayPhone
-            });
-          } else {
-            setChannelInfo({
-              mode: 'baileys',
-              phoneNumber: null,
-              displayName: session?.status === 'connected' ? 'Conectado' : 'Desconectado'
-            });
-          }
         }
+
+        // Check if Baileys session exists
+        const { data: session } = await supabase
+          .from('whatsapp_sessions')
+          .select('id, phone_number, status')
+          .eq('company_id', profile.company_id)
+          .single();
+
+        if (session) {
+          const phone = session.phone_number;
+          const displayPhone = phone ? `...${phone.slice(-4)}` : '';
+          channels.push({
+            id: 'baileys',
+            mode: 'baileys',
+            phoneNumber: phone,
+            displayName: `WhatsApp Web ${displayPhone}`,
+            status: session.status
+          });
+        }
+
+        // Set channels and auto-select based on current mode
+        setChannelInfo({
+          channels,
+          selectedChannelId: company?.whatsapp_mode === 'cloud_api' ? 'cloud_api' : 
+                            company?.whatsapp_mode === 'baileys' ? 'baileys' : 
+                            channels.length > 0 ? channels[0].id : null
+        });
       } catch (error) {
-        console.error('Error fetching channel info:', error);
+        console.error('Error fetching channels:', error);
       }
     };
 
-    fetchChannelInfo();
+    fetchAllChannels();
   }, [profile?.company_id]);
 
   // Track if we already auto-fixed the layout for this session
@@ -183,6 +194,26 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     return map;
   }, [dbNodes]);
 
+  // Handle channel selection change
+  const handleChannelChange = useCallback((nodeId: string, channelId: string) => {
+    // Update the node config to save selected channel
+    const node = dbNodes.find(n => n.id === nodeId);
+    if (node) {
+      updateNode.mutate({
+        id: nodeId,
+        config: {
+          ...node.config,
+          selected_channel: channelId
+        }
+      });
+    }
+    // Update local state
+    setChannelInfo(prev => ({
+      ...prev,
+      selectedChannelId: channelId
+    }));
+  }, [dbNodes, updateNode]);
+
   // Convert DB nodes to React Flow format
   const createNodeData = useCallback((node: typeof dbNodes[0]) => ({
     id: node.id,
@@ -204,8 +235,9 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         });
         setShowConfigDialog(true);
       },
+      onChannelChange: (channelId: string) => handleChannelChange(node.id, channelId),
     },
-  }), [nodeIndexMap, channelInfo]);
+  }), [nodeIndexMap, channelInfo, handleChannelChange]);
 
   const initialNodes = useMemo(() => 
     dbNodes.map(createNodeData) as FlowEditorNode[], 
