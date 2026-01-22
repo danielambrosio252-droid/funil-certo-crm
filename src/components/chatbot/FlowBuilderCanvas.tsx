@@ -86,10 +86,11 @@ interface FlowBuilderCanvasProps {
 }
 
 function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvasProps) {
-  const { nodes: dbNodes, edges: dbEdges, loadingNodes, loadingEdges, addNode, updateNode, deleteNode, addEdge: addDbEdge, deleteEdge } = useChatbotFlowEditor(flowId);
+  const { nodes: dbNodes, edges: dbEdges, loadingNodes, loadingEdges, addNode, updateNode, deleteNode, addEdge: addDbEdge, deleteEdge, ensureStartNode } = useChatbotFlowEditor(flowId);
   const { fitView, zoomIn, zoomOut, getNodes } = useReactFlow();
   const [saving, setSaving] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const hasEnsuredStartNode = useRef(false);
 
   // Stable refs
   const dbEdgesRef = useRef(dbEdges);
@@ -98,6 +99,30 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
   dbEdgesRef.current = dbEdges;
   updateNodeRef.current = updateNode;
   dbNodesRef.current = dbNodes;
+
+  // CRITICAL FAILSAFE: Ensure Start node always exists
+  useEffect(() => {
+    const checkAndCreateStartNode = async () => {
+      if (loadingNodes || hasEnsuredStartNode.current) return;
+      
+      // Check if start node exists
+      const hasStartNode = dbNodes.some(n => n.node_type === "start");
+      
+      if (!hasStartNode) {
+        hasEnsuredStartNode.current = true;
+        try {
+          await ensureStartNode();
+        } catch (error) {
+          console.error("Failed to create start node:", error);
+          hasEnsuredStartNode.current = false;
+        }
+      } else {
+        hasEnsuredStartNode.current = true;
+      }
+    };
+    
+    checkAndCreateStartNode();
+  }, [loadingNodes, dbNodes, ensureStartNode]);
 
   // Callbacks
   const handleDeleteNode = useCallback(async (nodeId: string) => {

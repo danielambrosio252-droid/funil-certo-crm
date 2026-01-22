@@ -301,6 +301,31 @@ export function useChatbotFlowEditor(flowId: string | null) {
     },
   });
 
+  // CRITICAL FAILSAFE: Ensure Start node exists
+  const ensureStartNode = async () => {
+    if (!flowId || !profile?.company_id) return;
+    
+    // Check if start node already exists
+    const hasStart = nodes.some(n => n.node_type === "start");
+    if (hasStart) return;
+    
+    // Create start node centered on canvas
+    const { error } = await getNodesTable()
+      .insert({
+        flow_id: flowId,
+        company_id: profile.company_id,
+        node_type: "start",
+        position_x: 400,
+        position_y: 200,
+        config: { label: "Quando o contato iniciar conversa" },
+      });
+    
+    if (error) throw error;
+    
+    queryClient.invalidateQueries({ queryKey: ["chatbot-flow-nodes", flowId] });
+    toast.success("Nó inicial criado!");
+  };
+
   return {
     nodes,
     edges,
@@ -311,6 +336,7 @@ export function useChatbotFlowEditor(flowId: string | null) {
     deleteNode,
     addEdge,
     deleteEdge,
+    ensureStartNode,
   };
 }
 
