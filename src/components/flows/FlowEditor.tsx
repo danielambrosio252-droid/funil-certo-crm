@@ -143,8 +143,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       try {
         await addNode.mutateAsync({
           node_type: node.node_type,
-          position_x: LAYOUT.CENTER_X,
-          position_y: maxY + LAYOUT.GAP_Y,
+          position_x: Math.round(LAYOUT.CENTER_X),
+          position_y: Math.round(maxY + LAYOUT.GAP_Y),
           config: { ...node.config },
         });
         toast.success("Bloco duplicado!");
@@ -370,8 +370,9 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     try {
       await addNode.mutateAsync({
         node_type: type,
-        position_x: LAYOUT.CENTER_X,
-        position_y: maxY + LAYOUT.GAP_Y,
+        // IMPORTANT: DB expects integer coordinates.
+        position_x: Math.round(LAYOUT.CENTER_X),
+        position_y: Math.round(maxY + LAYOUT.GAP_Y),
       });
     } catch (e) {
       console.error("Add node failed:", e);
