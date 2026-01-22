@@ -32,7 +32,10 @@ import {
   Download,
   RotateCcw,
   Loader2,
+  Bot,
 } from "lucide-react";
+import { FlowBuilderModal } from "@/components/chatbot/FlowBuilderModal";
+import { ChatBotStatus } from "@/components/chatbot/ChatBotStatus";
 import { cn } from "@/lib/utils";
 import { formatLocalPhone, normalizePhone } from "@/lib/phoneNormalizer";
 import { useWhatsApp } from "@/hooks/useWhatsApp";
@@ -105,6 +108,7 @@ export function WhatsAppChat({ initialPhone, initialName }: WhatsAppChatProps = 
   
   // Slash command menu state
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [flowBuilderOpen, setFlowBuilderOpen] = useState(false);
   const { sendTemplate } = useWhatsAppTemplates();
   
   // Estado para indicador de "digitando..."
