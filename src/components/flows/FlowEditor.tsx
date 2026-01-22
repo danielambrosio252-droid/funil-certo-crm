@@ -352,45 +352,113 @@ function MessageBlock({
   );
 }
 
-// Reusable Next Step Dot
+// Reusable Next Step Dot with draggable line
 function NextStepDot({ onAddNextStep }: { onAddNextStep: (type: string) => void }) {
   const [open, setOpen] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 });
+  const [dotPosition, setDotPosition] = useState({ x: 0, y: 0 });
+
+  const handleDotMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    setDotPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    setDragPosition({ x: e.clientX, y: e.clientY });
+    setIsDragging(true);
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      setDragPosition({ x: moveEvent.clientX, y: moveEvent.clientY });
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      setIsDragging(false);
+      setOpen(true);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleSelectStep = (type: string) => {
+    setOpen(false);
+    setIsDragging(false);
+    onAddNextStep(type);
+  };
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <div className="w-5 h-5 rounded-full border-2 border-slate-300 bg-white cursor-pointer hover:border-primary hover:scale-110 transition-all shadow-sm" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="right" className="w-52 bg-white">
-        <DropdownMenuItem onClick={() => { setOpen(false); onAddNextStep("messenger"); }}>
-          <MessageSquare className="w-4 h-4 mr-2 text-blue-500" />
-          + Messenger
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => { setOpen(false); onAddNextStep("ai_step"); }}>
-          <Zap className="w-4 h-4 mr-2 text-purple-500" />
-          + Etapa de IA
-          <Badge variant="secondary" className="ml-auto text-xs">AI</Badge>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => { setOpen(false); onAddNextStep("delay"); }}>
-          <Clock className="w-4 h-4 mr-2 text-orange-500" />
-          + Aguardar
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => { setOpen(false); onAddNextStep("condition"); }}>
-          <GitBranch className="w-4 h-4 mr-2 text-orange-500" />
-          + Condição
-          <Badge className="ml-auto text-xs bg-amber-500">PRO</Badge>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => { setOpen(false); onAddNextStep("randomizer"); }}>
-          <Shuffle className="w-4 h-4 mr-2 text-pink-500" />
-          + Randomizador
-          <Badge className="ml-auto text-xs bg-amber-500">PRO</Badge>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => setOpen(false)} className="text-muted-foreground">
-          Cancelar
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <div 
+            className="w-5 h-5 rounded-full border-2 border-slate-300 bg-white cursor-grab hover:border-primary hover:scale-125 transition-all shadow-sm active:cursor-grabbing"
+            onMouseDown={handleDotMouseDown}
+          />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" side="right" className="w-52 bg-white border shadow-lg rounded-lg z-50" sideOffset={10}>
+          <DropdownMenuItem onClick={() => handleSelectStep("messenger")} className="flex items-center gap-2 p-3 cursor-pointer">
+            <MessageSquare className="w-4 h-4 text-blue-500" />
+            + Messenger
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleSelectStep("ai_step")} className="flex items-center gap-2 p-3 cursor-pointer">
+            <Zap className="w-4 h-4 text-purple-500" />
+            + Etapa de IA
+            <Badge variant="secondary" className="ml-auto text-xs">AI</Badge>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleSelectStep("delay")} className="flex items-center gap-2 p-3 cursor-pointer">
+            <Clock className="w-4 h-4 text-orange-500" />
+            + Aguardar
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => handleSelectStep("condition")} className="flex items-center gap-2 p-3 cursor-pointer">
+            <GitBranch className="w-4 h-4 text-orange-500" />
+            + Condição
+            <Badge className="ml-auto text-xs bg-amber-500">PRO</Badge>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleSelectStep("randomizer")} className="flex items-center gap-2 p-3 cursor-pointer">
+            <Shuffle className="w-4 h-4 text-pink-500" />
+            + Randomizador
+            <Badge className="ml-auto text-xs bg-amber-500">PRO</Badge>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => setOpen(false)} className="text-muted-foreground p-3 cursor-pointer">
+            Cancelar
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Dragging line overlay */}
+      {isDragging && (
+        <svg 
+          className="fixed inset-0 pointer-events-none z-50"
+          style={{ width: '100vw', height: '100vh' }}
+        >
+          <defs>
+            <marker
+              id="arrowhead-button"
+              markerWidth="10"
+              markerHeight="7"
+              refX="9"
+              refY="3.5"
+              orient="auto"
+            >
+              <polygon
+                points="0 0, 10 3.5, 0 7"
+                fill="#94a3b8"
+              />
+            </marker>
+          </defs>
+          <path 
+            d={`M ${dotPosition.x} ${dotPosition.y} Q ${dotPosition.x + (dragPosition.x - dotPosition.x) / 2} ${dotPosition.y} ${dragPosition.x} ${dragPosition.y}`}
+            fill="none"
+            stroke="#94a3b8" 
+            strokeWidth="2"
+            markerEnd="url(#arrowhead-button)"
+          />
+        </svg>
+      )}
+    </>
   );
 }
