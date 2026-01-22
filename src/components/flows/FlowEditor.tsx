@@ -172,7 +172,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     );
   }, [dbEdges, setEdges]);
 
-  // Auto-correção: SEMPRE aplica layout sequencial ao abrir o editor (garante organização)
+  // Auto-correção: Aplica layout sequencial ao abrir e SALVA automaticamente
   useEffect(() => {
     if (loadingNodes || loadingEdges) return;
     if (didAutoFixRef.current) return;
@@ -201,6 +201,22 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       },
     }));
 
+    // Verifica se já está organizado (todos em X=300 e Y sequencial)
+    const CENTER_X = 300;
+    const isAlreadyOrganized = mappedNodes.every((node, index) => {
+      const expectedY = 60 + index * 140;
+      return Math.abs(node.position.x - CENTER_X) < 10 && Math.abs(node.position.y - expectedY) < 10;
+    });
+
+    if (isAlreadyOrganized) {
+      // Já está organizado, apenas atualiza a referência
+      if (mappedNodes.length > 0) {
+        const lastNode = mappedNodes[mappedNodes.length - 1];
+        lastPlacedRef.current = { x: lastNode.position.x, y: lastNode.position.y };
+      }
+      return;
+    }
+
     // Aplica layout sequencial limpo
     const newPositions = computeSequentialLayout(mappedNodes);
     
@@ -216,7 +232,34 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       const lastNode = organizedNodes[organizedNodes.length - 1];
       lastPlacedRef.current = { x: lastNode.position.x, y: lastNode.position.y };
     }
-  }, [dbNodes, loadingNodes, loadingEdges, setNodes]);
+
+    // Salva automaticamente as posições corrigidas
+    const nodesToSave: FlowNode[] = organizedNodes.map((node) => ({
+      id: node.id,
+      flow_id: flowId,
+      company_id: "",
+      node_type: node.type as NodeType,
+      position_x: Math.round(node.position.x),
+      position_y: Math.round(node.position.y),
+      config: (node.data?.config || {}) as Record<string, unknown>,
+      created_at: "",
+    }));
+
+    const edgesToSave: FlowEdge[] = dbEdges.map((edge) => ({
+      id: edge.id,
+      flow_id: flowId,
+      company_id: "",
+      source_node_id: edge.source_node_id,
+      target_node_id: edge.target_node_id,
+      source_handle: edge.source_handle || null,
+      label: edge.label || null,
+      created_at: "",
+    }));
+
+    saveFlow.mutateAsync({ nodes: nodesToSave, edges: edgesToSave }).then(() => {
+      toast.success("Layout organizado automaticamente!");
+    });
+  }, [dbNodes, dbEdges, loadingNodes, loadingEdges, setNodes, flowId, saveFlow]);
 
   // Handle new connections
   const onConnect = useCallback(
@@ -272,8 +315,16 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     const NODE_GAP_Y = 140;
     const START_Y = 60;
 
-    // Calcula próxima posição Y baseado no número de nós
-    const nextY = START_Y + currentNodes.length * NODE_GAP_Y;
+    // Encontra o Y mais baixo atual (posição real, não quantidade de nós)
+    let maxY = START_Y - NODE_GAP_Y;
+    currentNodes.forEach((node) => {
+      if (node.position.y > maxY) {
+        maxY = node.position.y;
+      }
+    });
+
+    // Próximo nó vai abaixo do último
+    const nextY = maxY + NODE_GAP_Y;
 
     // Reserva slot imediatamente (previne sobreposição em cliques rápidos)
     lastPlacedRef.current = { x: CENTER_X, y: nextY };
