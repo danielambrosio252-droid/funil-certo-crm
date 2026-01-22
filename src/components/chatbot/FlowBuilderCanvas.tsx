@@ -611,12 +611,16 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
         />
 
         {/* Top Panel */}
-        <Panel position="top-left" className="flex items-center gap-3">
+        <Panel position="top-left" className="flex items-center gap-3 z-50">
           <Button
             variant="secondary"
             size="sm"
-            onClick={onClose}
-            className="gap-2"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onClose();
+            }}
+            className="gap-2 relative z-50"
           >
             <ArrowLeft className="w-4 h-4" />
             Voltar
