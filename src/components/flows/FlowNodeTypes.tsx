@@ -22,6 +22,12 @@ interface BaseNodeData {
   config?: Record<string, unknown>;
   onConfigure?: () => void;
   nodeIndex?: number;
+  // Channel info passed from FlowEditor
+  channelInfo?: {
+    mode: 'cloud_api' | 'baileys' | null;
+    phoneNumber: string | null;
+    displayName: string;
+  };
 }
 
 const nodeStyles = {
@@ -212,21 +218,30 @@ function KommoMessageNode({ data, selected }: { data: BaseNodeData; selected?: b
       )}
       style={{ minWidth: 300, maxWidth: 380 }}
     >
-      {/* Header - Kommo style */}
+      {/* Header - Kommo style with real channel info */}
       <div className="flex items-center gap-2 px-3 py-2 rounded-t-lg bg-[#0d1f29]/50 border-b border-[#2d5a6e]">
         {nodeIndex !== undefined && nodeIndex > 0 && (
           <span className="flex items-center justify-center w-5 h-5 rounded bg-[#2d5a6e] text-[10px] font-bold text-white">
             {nodeIndex}
           </span>
         )}
-        <span className="text-xs text-[#7eb8d0] flex-1">
+        <span className="text-xs text-[#7eb8d0]">
           Enviar m...
         </span>
-        <span className="text-[10px] text-[#5a8fa8]">
-          (para): <span className="underline">Todos os contatos</span>
-        </span>
-        <span className="text-[10px] text-[#5a8fa8]">
-          Canais: <span className="font-medium text-white">Todos</span>
+        <span className="text-[10px] text-[#5a8fa8] ml-auto">
+          Canal: <span className="font-medium text-white">
+            {data.channelInfo?.displayName || 'Não configurado'}
+          </span>
+          {data.channelInfo?.mode && (
+            <span className={cn(
+              "ml-1 px-1.5 py-0.5 rounded text-[9px] font-medium",
+              data.channelInfo.mode === 'cloud_api' 
+                ? "bg-green-500/20 text-green-400" 
+                : "bg-blue-500/20 text-blue-400"
+            )}>
+              {data.channelInfo.mode === 'cloud_api' ? 'API' : 'Web'}
+            </span>
+          )}
         </span>
       </div>
 
