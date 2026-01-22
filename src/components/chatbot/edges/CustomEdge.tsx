@@ -54,8 +54,9 @@ function CustomEdge({
         markerEnd={markerEnd}
         style={{
           ...style,
-          strokeWidth: isHovered ? 3 : 2,
-          stroke: isHovered ? "#10b981" : "#64748b",
+          strokeWidth: isHovered ? 4 : 3,
+          stroke: isHovered ? "#10b981" : "#94a3b8",
+          strokeDasharray: "none",
           transition: "all 0.2s",
         }}
         interactionWidth={20}
@@ -68,11 +69,11 @@ function CustomEdge({
           viewBox="0 0 10 10"
           refX="5"
           refY="5"
-          markerWidth="4"
-          markerHeight="4"
+          markerWidth="5"
+          markerHeight="5"
           orient="auto-start-reverse"
         >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
         </marker>
       </defs>
       
