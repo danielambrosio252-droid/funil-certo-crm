@@ -103,26 +103,31 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
   // CRITICAL FAILSAFE: Ensure Start node always exists
   useEffect(() => {
     const checkAndCreateStartNode = async () => {
-      if (loadingNodes || hasEnsuredStartNode.current) return;
+      // Wait for loading to complete
+      if (loadingNodes) return;
+      
+      // Only try once per mount
+      if (hasEnsuredStartNode.current) return;
+      hasEnsuredStartNode.current = true;
       
       // Check if start node exists
       const hasStartNode = dbNodes.some(n => n.node_type === "start");
       
       if (!hasStartNode) {
-        hasEnsuredStartNode.current = true;
+        console.log("[FlowBuilder] No start node found, creating one...");
         try {
           await ensureStartNode();
+          console.log("[FlowBuilder] Start node created successfully");
         } catch (error) {
-          console.error("Failed to create start node:", error);
+          console.error("[FlowBuilder] Failed to create start node:", error);
+          // Allow retry on next mount
           hasEnsuredStartNode.current = false;
         }
-      } else {
-        hasEnsuredStartNode.current = true;
       }
     };
     
     checkAndCreateStartNode();
-  }, [loadingNodes, dbNodes, ensureStartNode]);
+  }, [loadingNodes, dbNodes.length, ensureStartNode]);
 
   // Callbacks
   const handleDeleteNode = useCallback(async (nodeId: string) => {
