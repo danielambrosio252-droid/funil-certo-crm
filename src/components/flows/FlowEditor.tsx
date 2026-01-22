@@ -87,9 +87,38 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const [showConfigDialog, setShowConfigDialog] = useState(false);
 
   const didAutoFixRef = useRef(false);
+  const didEnsureStartRef = useRef(false);
   useEffect(() => {
     didAutoFixRef.current = false;
+    didEnsureStartRef.current = false;
   }, [flowId]);
+
+  const ensureStartNode = useCallback(async () => {
+    if (didEnsureStartRef.current) return;
+    if (loadingNodes) return;
+    if (dbNodes.length > 0) return;
+
+    didEnsureStartRef.current = true;
+    try {
+      await addNode.mutateAsync({
+        node_type: "start",
+        position_x: LAYOUT.CENTER_X,
+        position_y: LAYOUT.START_Y,
+        config: {},
+      });
+    } catch (error) {
+      didEnsureStartRef.current = false;
+      console.error("Error creating start node:", error);
+      toast.error("Não consegui criar o bloco inicial. Tente novamente.");
+    }
+  }, [addNode, dbNodes.length, loadingNodes]);
+
+  // Se por qualquer motivo um fluxo vier sem nós (ex: dados antigos), cria o START automaticamente.
+  useEffect(() => {
+    if (loadingNodes) return;
+    if (dbNodes.length > 0) return;
+    void ensureStartNode();
+  }, [dbNodes.length, ensureStartNode, loadingNodes]);
 
   // Build node index map
   const nodeIndexMap = useMemo(() => {
@@ -432,6 +461,27 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
       {/* Flow Editor Canvas - Professional dark graphite */}
       <div className="flex-1 relative" style={{ backgroundColor: '#1e293b' }}>
+        {/* Estado vazio "à prova de tela escura" */}
+        {nodes.length === 0 && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center p-6">
+            <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-sm">
+              <h3 className="text-base font-semibold text-foreground">Comece o seu fluxo</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Este fluxo ainda não tem nenhum bloco. Crie o bloco inicial para liberar o canvas e os
+                próximos passos.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button onClick={ensureStartNode} disabled={addNode.isPending}>
+                  Criar bloco inicial
+                </Button>
+                <Button variant="outline" onClick={onBack}>
+                  Voltar
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <ReactFlow
           nodes={nodes}
           edges={edges}
