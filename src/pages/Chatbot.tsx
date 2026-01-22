@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
-import { FlowBuilderModal } from "@/components/chatbot/FlowBuilderModal";
+import { FlowBuilderCanvas } from "@/components/chatbot/FlowBuilderCanvas";
 import { useChatbotFlows } from "@/hooks/useChatbotFlows";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,7 +17,8 @@ import {
   MoreVertical,
   Pencil,
   Trash2,
-  Copy
+  Copy,
+  Loader2
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -29,22 +30,77 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 export default function Chatbot() {
-  const [flowBuilderOpen, setFlowBuilderOpen] = useState(false);
-  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
-  const { flows, loadingFlows, toggleFlow, deleteFlow } = useChatbotFlows();
+  const [editingFlowId, setEditingFlowId] = useState<string | null>(null);
+  const [isCreatingDefault, setIsCreatingDefault] = useState(false);
+  const { flows, loadingFlows, createFlow, toggleFlow, deleteFlow } = useChatbotFlows();
+
+  // Auto-create default flow if none exists
+  useEffect(() => {
+    const createDefaultFlow = async () => {
+      if (!loadingFlows && flows.length === 0 && !isCreatingDefault) {
+        setIsCreatingDefault(true);
+        try {
+          const flow = await createFlow.mutateAsync({ 
+            name: "Fluxo Principal", 
+            description: "Fluxo padrão de atendimento",
+            is_default: true 
+          });
+          // Automatically open the editor for the new flow
+          setEditingFlowId(flow.id);
+        } catch (error) {
+          console.error("Error creating default flow:", error);
+        } finally {
+          setIsCreatingDefault(false);
+        }
+      }
+    };
+    createDefaultFlow();
+  }, [loadingFlows, flows.length, createFlow, isCreatingDefault]);
 
   const handleEditFlow = (flowId: string) => {
-    setSelectedFlowId(flowId);
-    setFlowBuilderOpen(true);
+    setEditingFlowId(flowId);
   };
 
-  const handleCreateFlow = () => {
-    setSelectedFlowId(null);
-    setFlowBuilderOpen(true);
+  const handleCreateFlow = async () => {
+    try {
+      const flow = await createFlow.mutateAsync({ name: "Novo Fluxo" });
+      setEditingFlowId(flow.id);
+    } catch (error) {
+      console.error("Error creating flow:", error);
+    }
   };
+
+  const editingFlow = flows.find(f => f.id === editingFlowId);
 
   const activeFlows = flows?.filter(f => f.is_active) || [];
   const totalFlows = flows?.length || 0;
+
+  // Show editor if editing a flow
+  if (editingFlow) {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-900">
+        <FlowBuilderCanvas
+          flowId={editingFlow.id}
+          flowName={editingFlow.name}
+          onClose={() => setEditingFlowId(null)}
+        />
+      </div>
+    );
+  }
+
+  // Loading state when creating default flow
+  if (loadingFlows || isCreatingDefault) {
+    return (
+      <MainLayout title="Fluxos do Chatbot" subtitle="Construa automações inteligentes para seu atendimento">
+        <div className="flex flex-col items-center justify-center py-24">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mb-4" />
+          <p className="text-muted-foreground">
+            {isCreatingDefault ? "Criando seu primeiro fluxo..." : "Carregando fluxos..."}
+          </p>
+        </div>
+      </MainLayout>
+    );
+  }
 
   return (
     <MainLayout title="Fluxos do Chatbot" subtitle="Construa automações inteligentes para seu atendimento">
@@ -125,11 +181,7 @@ export default function Chatbot() {
           </Button>
         </CardHeader>
         <CardContent>
-          {loadingFlows ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-            </div>
-          ) : flows && flows.length > 0 ? (
+          {flows && flows.length > 0 ? (
             <div className="grid gap-4">
               {flows.map((flow) => (
                 <div
@@ -215,12 +267,6 @@ export default function Chatbot() {
           )}
         </CardContent>
       </Card>
-
-      {/* Flow Builder Modal */}
-      <FlowBuilderModal
-        isOpen={flowBuilderOpen}
-        onClose={() => setFlowBuilderOpen(false)}
-      />
     </MainLayout>
   );
 }

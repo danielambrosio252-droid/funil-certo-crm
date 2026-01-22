@@ -87,14 +87,17 @@ interface FlowBuilderCanvasProps {
 
 function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvasProps) {
   const { nodes: dbNodes, edges: dbEdges, loadingNodes, loadingEdges, addNode, updateNode, deleteNode, addEdge: addDbEdge, deleteEdge } = useChatbotFlowEditor(flowId);
-  const { fitView, zoomIn, zoomOut } = useReactFlow();
+  const { fitView, zoomIn, zoomOut, getNodes } = useReactFlow();
   const [saving, setSaving] = useState(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   // Stable refs
   const dbEdgesRef = useRef(dbEdges);
   const updateNodeRef = useRef(updateNode);
+  const dbNodesRef = useRef(dbNodes);
   dbEdgesRef.current = dbEdges;
   updateNodeRef.current = updateNode;
+  dbNodesRef.current = dbNodes;
 
   // Callbacks
   const handleDeleteNode = useCallback(async (nodeId: string) => {
@@ -208,20 +211,69 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
     });
   }, [updateNode]);
 
-  // Add new node
-  const handleAddNode = async (type: NodeType) => {
-    // Calculate position based on existing nodes
-    const lastNode = nodes[nodes.length - 1];
-    const x = lastNode ? lastNode.position.x + 400 : 400;
-    const y = lastNode ? lastNode.position.y : 200;
+  // Handle node selection
+  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    setSelectedNodeId(node.id);
+  }, []);
 
-    await addNode.mutateAsync({
+  // Handle pane click to deselect
+  const onPaneClick = useCallback(() => {
+    setSelectedNodeId(null);
+  }, []);
+
+  // Add new node with auto-connection
+  const handleAddNode = async (type: NodeType) => {
+    // Find the source node to connect from
+    let sourceNodeId: string | null = null;
+    let sourceNode: ChatbotFlowNode | undefined;
+
+    if (selectedNodeId) {
+      // Use selected node
+      sourceNode = dbNodesRef.current.find(n => n.id === selectedNodeId);
+      sourceNodeId = selectedNodeId;
+    } else {
+      // Find start node
+      sourceNode = dbNodesRef.current.find(n => n.node_type === "start");
+      sourceNodeId = sourceNode?.id || null;
+    }
+
+    // Calculate position
+    let x = 400;
+    let y = 200;
+    
+    if (sourceNode) {
+      // Position to the right of source node
+      x = sourceNode.position_x + 350;
+      y = sourceNode.position_y;
+      
+      // Check if there are already nodes connected from source
+      const existingEdgesFromSource = dbEdgesRef.current.filter(e => e.source_node_id === sourceNodeId);
+      if (existingEdgesFromSource.length > 0) {
+        // Offset y position for each existing connection
+        y = sourceNode.position_y + (existingEdgesFromSource.length * 150);
+      }
+    }
+
+    // Create the new node
+    const newNode = await addNode.mutateAsync({
       node_type: type,
       position_x: x,
       position_y: y,
       config: {},
     });
-    toast.success("Bloco adicionado!");
+
+    // Auto-connect to source node if available
+    if (sourceNodeId) {
+      await addDbEdge.mutateAsync({
+        source_node_id: sourceNodeId,
+        target_node_id: newNode.id,
+      });
+    }
+
+    // Select the new node
+    setSelectedNodeId(newNode.id);
+    
+    toast.success("Bloco adicionado e conectado!");
   };
 
   // Loading state
@@ -242,6 +294,8 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeDragStop={onNodeDragStop}
+        onNodeClick={onNodeClick}
+        onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={{
