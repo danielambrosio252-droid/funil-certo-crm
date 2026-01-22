@@ -12,6 +12,7 @@ import {
   BackgroundVariant,
   Panel,
   MarkerType,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
@@ -94,9 +95,12 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   const didAutoFixRef = useRef(false);
   const didEnsureStartRef = useRef(false);
+  const didFitViewRef = useRef(false);
+  const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
   useEffect(() => {
     didAutoFixRef.current = false;
     didEnsureStartRef.current = false;
+    didFitViewRef.current = false;
   }, [flowId]);
 
   const ensureStartNode = useCallback(async () => {
@@ -246,6 +250,31 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     const mapped = dbNodes.map(createNodeData) as FlowEditorNode[];
     setNodes(mapped);
   }, [dbNodes, setNodes, createNodeData]);
+
+  // Safety: when nodes/edges load (or refetch) re-frame the viewport once.
+  // This prevents the "tela escura" / "sumiu" feeling when nodes exist but are off-screen.
+  useEffect(() => {
+    if (loadingNodes || loadingEdges) return;
+    if (nodes.length === 0) return;
+    if (didFitViewRef.current) return;
+    const inst = rfInstanceRef.current;
+    if (!inst) return;
+
+    didFitViewRef.current = true;
+
+    requestAnimationFrame(() => {
+      try {
+        inst.fitView({
+          padding: 0.3,
+          includeHiddenNodes: false,
+          minZoom: 0.5,
+          maxZoom: 1.5,
+        });
+      } catch (e) {
+        console.error("fitView failed:", e);
+      }
+    });
+  }, [loadingNodes, loadingEdges, nodes.length]);
 
   useEffect(() => {
     setEdges(
@@ -536,6 +565,9 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           onNodesDelete={onNodesDelete}
           onEdgesDelete={onEdgesDelete}
           nodeTypes={flowNodeTypes}
+          onInit={(instance) => {
+            rfInstanceRef.current = instance;
+          }}
           fitView
           fitViewOptions={{ 
             padding: 0.3,
