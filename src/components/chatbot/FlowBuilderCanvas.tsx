@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import {
   ReactFlow,
   Controls,
@@ -113,6 +113,46 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
     await deleteEdge.mutateAsync(edgeId);
   }, [deleteEdge]);
 
+  // Handle adding node from handle "+" button (ManyChat style)
+  const handleAddNodeFromHandle = useCallback(async (
+    nodeType: NodeType,
+    sourceNodeId: string,
+    sourceHandle?: string
+  ) => {
+    const sourceNode = dbNodesRef.current.find(n => n.id === sourceNodeId);
+    if (!sourceNode) return;
+
+    // Calculate position to the right
+    let x = sourceNode.position_x + 350;
+    let y = sourceNode.position_y;
+
+    // Offset if there are already edges from this source
+    const existingEdgesFromSource = dbEdgesRef.current.filter(
+      e => e.source_node_id === sourceNodeId && e.source_handle === (sourceHandle || null)
+    );
+    if (existingEdgesFromSource.length > 0) {
+      y = sourceNode.position_y + (existingEdgesFromSource.length * 150);
+    }
+
+    // Create the new node
+    const newNode = await addNode.mutateAsync({
+      node_type: nodeType,
+      position_x: x,
+      position_y: y,
+      config: {},
+    });
+
+    // Connect to source
+    await addDbEdge.mutateAsync({
+      source_node_id: sourceNodeId,
+      target_node_id: newNode.id,
+      source_handle: sourceHandle || undefined,
+    });
+
+    setSelectedNodeId(newNode.id);
+    toast.success("Bloco adicionado!");
+  }, [addNode, addDbEdge]);
+
   const handleInsertNodeOnEdge = useCallback(async (
     edgeId: string,
     sourceId: string,
@@ -148,23 +188,34 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
+  // Check if start node has connections
+  const startNodeHasConnections = useMemo(() => {
+    const startNode = dbNodes.find(n => n.node_type === "start");
+    if (!startNode) return false;
+    return dbEdges.some(e => e.source_node_id === startNode.id);
+  }, [dbNodes, dbEdges]);
+
   // Sync DB nodes to React Flow
   useEffect(() => {
     const rfNodes: Node[] = dbNodes.map((node) => {
       const config = node.config as Record<string, unknown>;
+      const isStartNode = node.node_type === "start";
+      
       return {
         id: node.id,
         type: node.node_type,
         position: { x: node.position_x, y: node.position_y },
         data: {
           ...config,
+          hasConnections: isStartNode ? startNodeHasConnections : undefined,
           onUpdate: (newConfig: Record<string, unknown>) => handleUpdateNode(node.id, newConfig),
           onDelete: node.node_type !== "start" ? () => handleDeleteNode(node.id) : undefined,
+          onAddNode: handleAddNodeFromHandle,
         },
       };
     });
     setNodes(rfNodes);
-  }, [dbNodes, setNodes, handleUpdateNode, handleDeleteNode]);
+  }, [dbNodes, setNodes, handleUpdateNode, handleDeleteNode, handleAddNodeFromHandle, startNodeHasConnections]);
 
   // Sync DB edges to React Flow
   useEffect(() => {
