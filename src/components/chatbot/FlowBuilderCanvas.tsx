@@ -8,7 +8,6 @@ import {
   Panel,
   useNodesState,
   useEdgesState,
-  addEdge,
   Connection,
   Node,
   Edge,
@@ -87,10 +86,11 @@ interface FlowBuilderCanvasProps {
 
 function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvasProps) {
   const { nodes: dbNodes, edges: dbEdges, loadingNodes, loadingEdges, addNode, updateNode, deleteNode, addEdge: addDbEdge, deleteEdge, ensureStartNode } = useChatbotFlowEditor(flowId);
-  const { fitView, zoomIn, zoomOut, getNodes } = useReactFlow();
+  const { fitView, zoomIn, zoomOut, getViewport } = useReactFlow();
   const [saving, setSaving] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const hasEnsuredStartNode = useRef(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
 
   // Stable refs
   const dbEdgesRef = useRef(dbEdges);
@@ -152,9 +152,23 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
     const sourceNode = dbNodesRef.current.find(n => n.id === sourceNodeId);
     if (!sourceNode) return;
 
-    // Calculate position to the right
-    let x = sourceNode.position_x + 350;
-    let y = sourceNode.position_y;
+    // Calculate position to the right of source node (guaranteed visible)
+    let x = Number(sourceNode.position_x) + 350;
+    let y = Number(sourceNode.position_y);
+
+    // Failsafe: if positions are invalid, drop near viewport center
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      const viewport = getViewport();
+      const rect = wrapperRef.current?.getBoundingClientRect();
+      const fallback = rect
+        ? {
+            x: (-viewport.x + rect.width / 2) / viewport.zoom,
+            y: (-viewport.y + rect.height / 2) / viewport.zoom,
+          }
+        : { x: 400, y: 200 };
+      x = fallback.x + 200;
+      y = fallback.y;
+    }
 
     // Offset if there are already edges from this source
     const existingEdgesFromSource = dbEdgesRef.current.filter(
@@ -164,7 +178,7 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
       y = sourceNode.position_y + (existingEdgesFromSource.length * 150);
     }
 
-    // Create the new node
+    // Create the new node (DB) + optimistic render (STATE)
     const newNode = await addNode.mutateAsync({
       node_type: nodeType,
       position_x: x,
@@ -172,16 +186,64 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
       config: {},
     });
 
+    // Optimistic: render immediately in canvas state
+    setNodes((nds) => {
+      const next = nds
+        .filter((n) => n.id !== newNode.id)
+        .map((n) => ({ ...n, selected: false }));
+      next.push({
+        id: newNode.id,
+        type: newNode.node_type,
+        position: { x: newNode.position_x, y: newNode.position_y },
+        selected: true,
+        data: {
+          ...(newNode.config as Record<string, unknown>),
+          onUpdate: (newConfig: Record<string, unknown>) => handleUpdateNode(newNode.id, newConfig),
+          onDelete: newNode.node_type !== "start" ? () => handleDeleteNode(newNode.id) : undefined,
+          onAddNode: handleAddNodeFromHandle,
+        },
+      });
+      return next;
+    });
+
     // Connect to source
-    await addDbEdge.mutateAsync({
+    const createdEdge = await addDbEdge.mutateAsync({
       source_node_id: sourceNodeId,
       target_node_id: newNode.id,
       source_handle: sourceHandle || undefined,
     });
 
+    // Optimistic: render edge immediately
+    setEdges((eds) => {
+      const next = eds.filter((e) => e.id !== createdEdge.id);
+      next.push({
+        id: createdEdge.id,
+        source: createdEdge.source_node_id,
+        target: createdEdge.target_node_id,
+        sourceHandle: createdEdge.source_handle || undefined,
+        type: "custom",
+        animated: true,
+        data: {
+          onDelete: () => handleDeleteEdge(createdEdge.id),
+          onInsertNode: (t: NodeType, position: { x: number; y: number }) => {
+            handleInsertNodeOnEdge(createdEdge.id, createdEdge.source_node_id, createdEdge.target_node_id, t, position);
+          },
+        },
+      });
+      return next;
+    });
+
     setSelectedNodeId(newNode.id);
+    // Keep the new node in view
+    requestAnimationFrame(() => {
+      try {
+        fitView({ padding: 0.35 });
+      } catch {
+        // noop
+      }
+    });
     toast.success("Bloco adicionado!");
-  }, [addNode, addDbEdge]);
+  }, [addNode, addDbEdge, fitView, getViewport, handleDeleteEdge, handleDeleteNode, handleInsertNodeOnEdge, handleUpdateNode]);
 
   const handleInsertNodeOnEdge = useCallback(async (
     edgeId: string,
@@ -225,46 +287,68 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
     return dbEdges.some(e => e.source_node_id === startNode.id);
   }, [dbNodes, dbEdges]);
 
-  // Sync DB nodes to React Flow
+  // Sync DB -> STATE (single source of truth for rendering)
+  // Guarded to avoid clobbering optimistic state unnecessarily.
   useEffect(() => {
-    const rfNodes: Node[] = dbNodes.map((node) => {
-      const config = node.config as Record<string, unknown>;
-      const isStartNode = node.node_type === "start";
-      
-      return {
-        id: node.id,
-        type: node.node_type,
-        position: { x: node.position_x, y: node.position_y },
-        data: {
-          ...config,
-          hasConnections: isStartNode ? startNodeHasConnections : undefined,
-          onUpdate: (newConfig: Record<string, unknown>) => handleUpdateNode(node.id, newConfig),
-          onDelete: node.node_type !== "start" ? () => handleDeleteNode(node.id) : undefined,
-          onAddNode: handleAddNodeFromHandle,
-        },
-      };
-    });
-    setNodes(rfNodes);
-  }, [dbNodes, setNodes, handleUpdateNode, handleDeleteNode, handleAddNodeFromHandle, startNodeHasConnections]);
+    const dbIds = new Set(dbNodes.map((n) => n.id));
+    const localIds = new Set(nodes.map((n) => n.id));
+    const isSameSet = dbIds.size === localIds.size && [...dbIds].every((id) => localIds.has(id));
 
-  // Sync DB edges to React Flow
+    if (!isSameSet) {
+      const rfNodes: Node[] = dbNodes.map((node) => {
+        const config = node.config as Record<string, unknown>;
+        const isStartNode = node.node_type === "start";
+        const x = Number(node.position_x);
+        const y = Number(node.position_y);
+        const safePos = {
+          x: Number.isFinite(x) ? x : 400,
+          y: Number.isFinite(y) ? y : 200,
+        };
+
+        return {
+          id: node.id,
+          type: node.node_type,
+          position: safePos,
+          selected: node.id === selectedNodeId,
+          data: {
+            ...config,
+            hasConnections: isStartNode ? startNodeHasConnections : undefined,
+            onUpdate: (newConfig: Record<string, unknown>) => handleUpdateNode(node.id, newConfig),
+            onDelete: node.node_type !== "start" ? () => handleDeleteNode(node.id) : undefined,
+            onAddNode: handleAddNodeFromHandle,
+          },
+        };
+      });
+      setNodes(rfNodes);
+    } else {
+      // Keep selection controlled
+      setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === selectedNodeId })));
+    }
+  }, [dbNodes, nodes, selectedNodeId, setNodes, handleUpdateNode, handleDeleteNode, handleAddNodeFromHandle, startNodeHasConnections]);
+
+  // Sync DB edges -> STATE (guarded)
   useEffect(() => {
-    const rfEdges: Edge[] = dbEdges.map((edge) => ({
-      id: edge.id,
-      source: edge.source_node_id,
-      target: edge.target_node_id,
-      sourceHandle: edge.source_handle || undefined,
-      type: "custom",
-      animated: true,
-      data: {
-        onDelete: () => handleDeleteEdge(edge.id),
-        onInsertNode: (nodeType: NodeType, position: { x: number; y: number }) => {
-          handleInsertNodeOnEdge(edge.id, edge.source_node_id, edge.target_node_id, nodeType, position);
+    const dbIds = new Set(dbEdges.map((e) => e.id));
+    const localIds = new Set(edges.map((e) => e.id));
+    const isSameSet = dbIds.size === localIds.size && [...dbIds].every((id) => localIds.has(id));
+    if (!isSameSet) {
+      const rfEdges: Edge[] = dbEdges.map((edge) => ({
+        id: edge.id,
+        source: edge.source_node_id,
+        target: edge.target_node_id,
+        sourceHandle: edge.source_handle || undefined,
+        type: "custom",
+        animated: true,
+        data: {
+          onDelete: () => handleDeleteEdge(edge.id),
+          onInsertNode: (nodeType: NodeType, position: { x: number; y: number }) => {
+            handleInsertNodeOnEdge(edge.id, edge.source_node_id, edge.target_node_id, nodeType, position);
+          },
         },
-      },
-    }));
-    setEdges(rfEdges);
-  }, [dbEdges, setEdges, handleDeleteEdge, handleInsertNodeOnEdge]);
+      }));
+      setEdges(rfEdges);
+    }
+  }, [dbEdges, edges, setEdges, handleDeleteEdge, handleInsertNodeOnEdge]);
 
   // Handle new connections
   const onConnect = useCallback(async (params: Connection) => {
@@ -295,11 +379,13 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
   // Handle node selection
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     setSelectedNodeId(node.id);
+    setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === node.id })));
   }, []);
 
   // Handle pane click to deselect
   const onPaneClick = useCallback(() => {
     setSelectedNodeId(null);
+    setNodes((nds) => nds.map((n) => ({ ...n, selected: false })));
   }, []);
 
   // Add new node with auto-connection
@@ -318,14 +404,23 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
       sourceNodeId = sourceNode?.id || null;
     }
 
-    // Calculate position
-    let x = 400;
-    let y = 200;
+    // Calculate position (guaranteed visible)
+    const viewport = getViewport();
+    const rect = wrapperRef.current?.getBoundingClientRect();
+    const center = rect
+      ? {
+          x: (-viewport.x + rect.width / 2) / viewport.zoom,
+          y: (-viewport.y + rect.height / 2) / viewport.zoom,
+        }
+      : { x: 400, y: 200 };
+
+    let x = center.x + 200;
+    let y = center.y;
     
     if (sourceNode) {
       // Position to the right of source node
-      x = sourceNode.position_x + 350;
-      y = sourceNode.position_y;
+      x = Number(sourceNode.position_x) + 350;
+      y = Number(sourceNode.position_y);
       
       // Check if there are already nodes connected from source
       const existingEdgesFromSource = dbEdgesRef.current.filter(e => e.source_node_id === sourceNodeId);
@@ -333,6 +428,12 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
         // Offset y position for each existing connection
         y = sourceNode.position_y + (existingEdgesFromSource.length * 150);
       }
+    }
+
+    // Final failsafe for invalid numbers
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      x = 400;
+      y = 200;
     }
 
     // Create the new node
@@ -343,16 +444,62 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
       config: {},
     });
 
+    // Optimistic: render immediately
+    setNodes((nds) => {
+      const next = nds
+        .filter((n) => n.id !== newNode.id)
+        .map((n) => ({ ...n, selected: false }));
+      next.push({
+        id: newNode.id,
+        type: newNode.node_type,
+        position: { x: newNode.position_x, y: newNode.position_y },
+        selected: true,
+        data: {
+          ...(newNode.config as Record<string, unknown>),
+          onUpdate: (newConfig: Record<string, unknown>) => handleUpdateNode(newNode.id, newConfig),
+          onDelete: newNode.node_type !== "start" ? () => handleDeleteNode(newNode.id) : undefined,
+          onAddNode: handleAddNodeFromHandle,
+        },
+      });
+      return next;
+    });
+
     // Auto-connect to source node if available
     if (sourceNodeId) {
-      await addDbEdge.mutateAsync({
+      const createdEdge = await addDbEdge.mutateAsync({
         source_node_id: sourceNodeId,
         target_node_id: newNode.id,
+      });
+
+      setEdges((eds) => {
+        const next = eds.filter((e) => e.id !== createdEdge.id);
+        next.push({
+          id: createdEdge.id,
+          source: createdEdge.source_node_id,
+          target: createdEdge.target_node_id,
+          sourceHandle: createdEdge.source_handle || undefined,
+          type: "custom",
+          animated: true,
+          data: {
+            onDelete: () => handleDeleteEdge(createdEdge.id),
+            onInsertNode: (t: NodeType, position: { x: number; y: number }) => {
+              handleInsertNodeOnEdge(createdEdge.id, createdEdge.source_node_id, createdEdge.target_node_id, t, position);
+            },
+          },
+        });
+        return next;
       });
     }
 
     // Select the new node
     setSelectedNodeId(newNode.id);
+    requestAnimationFrame(() => {
+      try {
+        fitView({ padding: 0.35 });
+      } catch {
+        // noop
+      }
+    });
     
     toast.success("Bloco adicionado e conectado!");
   };
@@ -367,7 +514,7 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
   }
 
   return (
-    <div className="h-full w-full bg-slate-900">
+    <div ref={wrapperRef} className="h-full w-full bg-slate-900">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -418,6 +565,14 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
           </Button>
           <div className="px-4 py-2 bg-white/10 backdrop-blur-sm rounded-lg">
             <h2 className="font-semibold text-white">{flowName}</h2>
+          </div>
+        </Panel>
+
+        {/* DEBUG UX: Visible state counter */}
+        <Panel position="top-right" className="pointer-events-none">
+          <div className="px-3 py-2 rounded-lg bg-white/10 backdrop-blur-sm text-white text-xs">
+            <div className="font-medium">Nodes no estado: {nodes.length}</div>
+            <div className="text-white/70">Edges no estado: {edges.length}</div>
           </div>
         </Panel>
 
