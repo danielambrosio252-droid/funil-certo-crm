@@ -283,13 +283,16 @@ export async function processAndSendAudioAsync(job: AudioProcessingJob): Promise
     const randomId = Math.random().toString(36).substring(2, 7);
 
     let uploadBlob = blob;
-    const originalBaseMime = mimeType.split(";")[0].toLowerCase();
+     const originalBaseMime = mimeType.split(";")[0].toLowerCase();
     let uploadMime = originalBaseMime;
     let extension = "ogg";
 
-    const isOggNative = originalBaseMime.includes("ogg");
+     // Only skip transcoding when the browser explicitly recorded Opus inside OGG.
+     // Some browsers may produce OGG/Vorbis when using just `audio/ogg`, which Meta rejects.
+     const isOggOpusNative =
+       originalBaseMime.includes("ogg") && mimeType.toLowerCase().includes("opus");
 
-    if (isOggNative) {
+     if (isOggOpusNative) {
       // BEST PATH: Browser recorded native OGG/Opus - no transcode needed.
       uploadMime = "audio/ogg";
       extension = "ogg";
@@ -322,8 +325,8 @@ export async function processAndSendAudioAsync(job: AudioProcessingJob): Promise
           codec: "opus (libopus)",
           target: {
             channels: 1,
-            sampleRate: 48000, // Opus standard (passes Meta scrutiny better)
-            bitrate: "32k",
+            sampleRate: 16000,
+            bitrate: "24k",
             container: "ogg",
           },
         },

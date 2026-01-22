@@ -6,6 +6,7 @@
 
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";
+import { isLikelyOggOpus } from "./oggUtils";
 
 type WorkerSelf = {
   postMessage: (message: unknown, transfer?: Transferable[]) => void;
@@ -112,53 +113,117 @@ async function transcode(inputArrayBuffer, originalMimeType) {
   post({ type: "progress", message: `[FFMPEG] writeFile ${inputName}` });
   await ffmpeg.writeFile(inputName, new Uint8Array(inputArrayBuffer));
 
-  post({ type: "progress", message: "[FFMPEG] exec -> ogg/opus (WhatsApp optimized)" });
-  // WhatsApp voice-note compatibility settings (VERIFIED working):
-  // - mono (ac=1)
-  // - 16kHz (ar=16000) - WhatsApp standard for voice notes
-  // - opus codec (libopus)
-  // - 24k bitrate
-  // - OGG container with proper headers
-  post({
-    type: "progress",
-    message:
-      "[FFMPEG] params: codec=libopus container=ogg ac=1 ar=48000 b:a=32k",
-  });
-  await ffmpeg.exec([
-    "-i",
-    inputName,
-    "-vn",              // No video
-    "-ac",
-    "1",                // Mono
-    "-ar",
-    "48000",            // Opus standard sample rate (Meta scrutiny is stricter)
-    "-c:a",
-    "libopus",          // Opus codec
-    "-b:a",
-    "32k",              // Slightly higher bitrate improves acceptance
-    "-vbr",
-    "on",               // Variable bitrate
-    "-compression_level",
-    "10",               // Maximum compression
-    "-frame_duration",
-    "20",               // 20ms frames (WhatsApp standard)
-    "-application",
-    "voip",             // Voice-note oriented Opus tuning (improves Meta compatibility)
-    "-f",
-    "ogg",              // Force OGG container explicitly (avoid ambiguous muxing)
-    outputName,         // Output file (extension determines container)
-  ]);
+  post({ type: "progress", message: "[FFMPEG] exec -> ogg/opus (Meta scrutiny safe)" });
 
-  post({ type: "progress", message: `[FFMPEG] readFile ${outputName}` });
-  const out = await ffmpeg.readFile(outputName);
+  // We do 2-pass preset fallback. Meta may accept upload but later reject on scrutiny;
+  // these presets aim to match WhatsApp voice note constraints.
+  const presets = [
+    {
+      label: "whatsapp_voice_16k_cbr",
+      args: [
+        "-i",
+        inputName,
+        "-vn",
+        "-map_metadata",
+        "-1",
+        "-map_chapters",
+        "-1",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "libopus",
+        "-b:a",
+        "24k",
+        "-vbr",
+        "off",
+        "-compression_level",
+        "10",
+        "-frame_duration",
+        "20",
+        "-application",
+        "voip",
+        "-f",
+        "ogg",
+        outputName,
+      ],
+    },
+    {
+      label: "opus_standard_48k_cbr",
+      args: [
+        "-i",
+        inputName,
+        "-vn",
+        "-map_metadata",
+        "-1",
+        "-map_chapters",
+        "-1",
+        "-ac",
+        "1",
+        "-ar",
+        "48000",
+        "-c:a",
+        "libopus",
+        "-b:a",
+        "32k",
+        "-vbr",
+        "off",
+        "-compression_level",
+        "10",
+        "-frame_duration",
+        "20",
+        "-application",
+        "voip",
+        "-f",
+        "ogg",
+        outputName,
+      ],
+    },
+  ];
 
-  // Quick sanity check: WhatsApp silently rejects some invalid OGGs.
-  // We'll fail-fast if the output is suspiciously tiny.
-  const outSize = out?.length ?? 0;
-  post({ type: "progress", message: `[FFMPEG] output size_bytes=${outSize}` });
-  if (outSize < 1024) {
-    post({ type: "error", error: `[FFMPEG] output too small (<1KB): ${outSize} bytes` });
-    throw new Error(`FFmpeg output too small: ${outSize} bytes`);
+  let out: Uint8Array | null = null;
+  let lastPresetError: any = null;
+  for (const preset of presets) {
+    try {
+      post({
+        type: "progress",
+        message: `[FFMPEG] preset=${preset.label}`,
+      });
+
+      await ffmpeg.exec(preset.args);
+
+      post({ type: "progress", message: `[FFMPEG] readFile ${outputName}` });
+      const candidate = await ffmpeg.readFile(outputName);
+
+      const size = candidate?.length ?? 0;
+      post({ type: "progress", message: `[FFMPEG] output size_bytes=${size}` });
+      if (size < 1024) {
+        throw new Error(`FFmpeg output too small: ${size} bytes`);
+      }
+
+      if (!isLikelyOggOpus(candidate)) {
+        throw new Error("Output is not OGG/Opus (missing OpusHead)");
+      }
+
+      out = candidate;
+      break;
+    } catch (e: any) {
+      lastPresetError = e;
+      post({
+        type: "progress",
+        message: `[FFMPEG] preset failed (${preset.label}): ${e?.message || String(e)}`,
+      });
+      try {
+        await ffmpeg.deleteFile(outputName);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  if (!out) {
+    throw lastPresetError || new Error("FFmpeg transcode failed (all presets)");
   }
 
   // cleanup
