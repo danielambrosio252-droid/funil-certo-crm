@@ -15,7 +15,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
-import { Save, ArrowLeft, LayoutGrid, Plus, ChevronDown } from "lucide-react";
+import { Save, ArrowLeft, LayoutGrid, Plus, ChevronDown, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useFlowEditor, FlowNode, FlowEdge, NodeType } from "@/hooks/useWhatsAppFlows";
 import { flowNodeTypes, availableNodeTypes } from "./FlowNodeTypes";
@@ -39,6 +39,7 @@ type FlowEditorNode = {
     createdAt: string;
     nodeIndex: number;
     onConfigure: () => void;
+    onUpdateConfig: (config: Record<string, unknown>) => void;
   };
 };
 
@@ -62,10 +63,10 @@ interface FlowEditorProps {
 
 // Constants for VERTICAL layout (Clean, professional, top-to-bottom)
 const LAYOUT = {
-  CENTER_X: 400,    // Central X position for all nodes
-  START_Y: 80,      // Starting Y position
-  GAP_Y: 160,       // Uniform vertical spacing between nodes
-  NODE_WIDTH: 280,
+  CENTER_X: 400,
+  START_Y: 80,
+  GAP_Y: 180,
+  NODE_WIDTH: 340,
 };
 
 export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
@@ -85,13 +86,12 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [showConfigDialog, setShowConfigDialog] = useState(false);
 
-  // Track if we already auto-fixed the layout for this session
   const didAutoFixRef = useRef(false);
   useEffect(() => {
     didAutoFixRef.current = false;
   }, [flowId]);
 
-  // Build node index map for numbering (excluding start node)
+  // Build node index map
   const nodeIndexMap = useMemo(() => {
     const map = new Map<string, number>();
     const sortedNodes = [...dbNodes].sort((a, b) => {
@@ -109,6 +109,15 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     });
     return map;
   }, [dbNodes]);
+
+  // Inline update handler for chat nodes
+  const handleInlineUpdate = useCallback(async (nodeId: string, config: Record<string, unknown>) => {
+    try {
+      await updateNode.mutateAsync({ id: nodeId, config });
+    } catch (error) {
+      console.error("Error updating node inline:", error);
+    }
+  }, [updateNode]);
 
   // Convert DB nodes to React Flow format
   const createNodeData = useCallback((node: typeof dbNodes[0]) => ({
@@ -130,15 +139,18 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         });
         setShowConfigDialog(true);
       },
+      onUpdateConfig: (config: Record<string, unknown>) => {
+        handleInlineUpdate(node.id, config);
+      },
     },
-  }), [nodeIndexMap]);
+  }), [nodeIndexMap, handleInlineUpdate]);
 
   const initialNodes = useMemo(() => 
     dbNodes.map(createNodeData) as FlowEditorNode[], 
     [dbNodes, createNodeData]
   );
 
-  // Convert DB edges to React Flow format - clean straight vertical edges
+  // Convert DB edges to React Flow format
   const initialEdges = useMemo(() => 
     dbEdges.map((edge) => ({
       id: edge.id,
@@ -177,7 +189,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     );
   }, [dbEdges, setEdges]);
 
-  // Auto-fix layout on load if needed - ALWAYS ensure vertical alignment
+  // Auto-fix layout on load
   useEffect(() => {
     if (loadingNodes || loadingEdges) return;
     if (didAutoFixRef.current) return;
@@ -185,10 +197,9 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
     didAutoFixRef.current = true;
 
-    // Check if layout needs reorganization (not centered or overlapping)
     const positions = dbNodes.map(n => ({ x: n.position_x, y: n.position_y }));
     const hasOverlap = positions.some((p1, i) => 
-      positions.some((p2, j) => i !== j && Math.abs(p1.y - p2.y) < 100)
+      positions.some((p2, j) => i !== j && Math.abs(p1.y - p2.y) < 120)
     );
     
     const notCentered = positions.some(p => Math.abs(p.x - LAYOUT.CENTER_X) > 50);
@@ -196,7 +207,6 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
     if (!needsReorganization) return;
 
-    // Apply vertical centered layout
     const newPositions = computeVerticalLayout(dbNodes);
     
     const organizedNodes = dbNodes.map(node => {
@@ -210,7 +220,6 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
     setNodes(organizedNodes);
 
-    // Save the fixed layout
     const nodesToSave: FlowNode[] = organizedNodes.map((node) => ({
       id: node.id,
       flow_id: flowId,
@@ -234,7 +243,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     }));
 
     saveFlow.mutateAsync({ nodes: nodesToSave, edges: edgesToSave }).then(() => {
-      toast.success("Layout organizado automaticamente!");
+      toast.success("Layout organizado!");
     });
   }, [dbNodes, dbEdges, loadingNodes, loadingEdges, setNodes, flowId, saveFlow, createNodeData]);
 
@@ -256,7 +265,6 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     [addDbEdge]
   );
 
-  // Handle edge deletion
   const onEdgesDelete = useCallback(
     async (edgesToDelete: Edge[]) => {
       for (const edge of edgesToDelete) {
@@ -270,7 +278,6 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     [deleteEdge]
   );
 
-  // Handle node deletion
   const onNodesDelete = useCallback(
     async (nodesToDelete: Node[]) => {
       for (const node of nodesToDelete) {
@@ -285,11 +292,10 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     [deleteNode]
   );
 
-  // Add new node - VERTICAL layout, always below the last node, centered
+  // Add new node - VERTICAL layout
   const handleAddNode = async (type: NodeType) => {
     const currentNodes = nodes;
     
-    // Find the maximum Y position (lowest node on screen)
     let maxY = LAYOUT.START_Y - LAYOUT.GAP_Y;
     currentNodes.forEach((node) => {
       if (node.position.y > maxY) {
@@ -297,7 +303,6 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       }
     });
 
-    // New node goes directly below, centered
     const nextY = maxY + LAYOUT.GAP_Y;
 
     try {
@@ -311,7 +316,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     }
   };
 
-  // Save flow (positions)
+  // Save flow
   const handleSave = async () => {
     const nodesToSave: FlowNode[] = nodes.map((node) => ({
       id: node.id,
@@ -338,7 +343,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     await saveFlow.mutateAsync({ nodes: nodesToSave, edges: edgesToSave });
   };
 
-  // Update node config
+  // Update node config (from modal)
   const handleUpdateNodeConfig = async (nodeId: string, config: Record<string, unknown>) => {
     try {
       await updateNode.mutateAsync({ id: nodeId, config });
@@ -349,7 +354,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     }
   };
 
-  // Auto-organize layout - vertical centered
+  // Auto-organize
   const handleAutoOrganize = () => {
     if (nodes.length === 0) return;
 
@@ -373,21 +378,21 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       })
     );
 
-    toast.success("Layout reorganizado! Clique em 'Salvar' para persistir.");
+    toast.success("Layout reorganizado!");
   };
 
   if (loadingNodes) {
     return (
-      <div className="h-full flex items-center justify-center bg-slate-900">
+      <div className="h-full flex items-center justify-center bg-slate-950">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col bg-slate-950">
+    <div className="h-full flex flex-col bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       {/* Professional Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800/50 bg-slate-900/80 backdrop-blur-sm">
         <div className="flex items-center gap-4">
           <Button 
             variant="ghost" 
@@ -399,7 +404,10 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
             Voltar
           </Button>
           <div className="h-6 w-px bg-slate-700" />
-          <h2 className="text-lg font-semibold text-white">{flowName}</h2>
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-emerald-400" />
+            <h2 className="text-lg font-semibold text-white">{flowName}</h2>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <Button 
@@ -414,7 +422,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           <Button 
             onClick={handleSave} 
             disabled={saveFlow.isPending}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/25"
           >
             <Save className="w-4 h-4 mr-2" />
             Salvar Fluxo
@@ -434,9 +442,9 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           onEdgesDelete={onEdgesDelete}
           nodeTypes={flowNodeTypes}
           fitView
-          fitViewOptions={{ padding: 0.3 }}
+          fitViewOptions={{ padding: 0.4 }}
           deleteKeyCode={["Backspace", "Delete"]}
-          className="bg-slate-950"
+          className="bg-transparent"
           defaultEdgeOptions={{
             type: "smoothstep",
             animated: false,
@@ -446,18 +454,18 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         >
           <Background 
             variant={BackgroundVariant.Dots} 
-            gap={32} 
+            gap={40} 
             size={1} 
-            color="rgba(255,255,255,0.04)"
+            color="rgba(255,255,255,0.03)"
           />
-          <Controls className="!bg-slate-800 !border-slate-700 !shadow-xl [&_button]:!bg-slate-700 [&_button]:!border-slate-600 [&_button]:hover:!bg-slate-600 [&_button_svg]:!fill-slate-300" />
+          <Controls className="!bg-slate-800/80 !backdrop-blur-sm !border-slate-700/50 !shadow-xl !rounded-xl [&_button]:!bg-slate-700/50 [&_button]:!border-slate-600/50 [&_button]:hover:!bg-slate-600 [&_button_svg]:!fill-slate-300 [&_button]:!rounded-lg" />
           <MiniMap 
-            className="!bg-slate-800 !border-slate-700 !shadow-xl"
-            maskColor="rgba(0,0,0,0.8)"
+            className="!bg-slate-800/80 !backdrop-blur-sm !border-slate-700/50 !shadow-xl !rounded-xl"
+            maskColor="rgba(0,0,0,0.85)"
             nodeColor={(node) => {
               switch (node.type) {
                 case "start": return "#10b981";
-                case "message": return "#0ea5e9";
+                case "message": return "#10b981";
                 case "template": return "#8b5cf6";
                 case "media": return "#f97316";
                 case "delay": return "#f59e0b";
@@ -469,13 +477,13 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
             }}
           />
 
-          {/* Professional Add Step Panel */}
+          {/* Floating Add Panel */}
           <Panel position="top-center" className="!mt-4">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button 
                   size="default" 
-                  className="bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 shadow-xl px-6"
+                  className="bg-slate-800/90 hover:bg-slate-700 text-white border border-slate-700/50 shadow-2xl px-6 backdrop-blur-sm rounded-xl"
                 >
                   <Plus className="w-4 h-4 mr-2" />
                   Adicionar Etapa
@@ -484,9 +492,9 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
               </DropdownMenuTrigger>
               <DropdownMenuContent 
                 align="center" 
-                className="w-72 bg-slate-800 border-slate-700 shadow-2xl p-2"
+                className="w-72 bg-slate-800/95 backdrop-blur-sm border-slate-700/50 shadow-2xl p-2 rounded-xl"
               >
-                <div className="px-2 py-2 mb-2 border-b border-slate-700">
+                <div className="px-3 py-2 mb-2 border-b border-slate-700/50">
                   <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">Selecione uma ação</p>
                 </div>
                 <div className="grid gap-1">
@@ -496,14 +504,12 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
                       <DropdownMenuItem
                         key={nodeType.type}
                         onClick={() => handleAddNode(nodeType.type as NodeType)}
-                        className="flex items-center gap-3 px-3 py-3 cursor-pointer text-slate-200 hover:bg-slate-700 focus:bg-slate-700 rounded-lg"
+                        className="flex items-center gap-3 px-3 py-3 cursor-pointer text-slate-200 hover:bg-slate-700/50 focus:bg-slate-700/50 rounded-xl"
                       >
-                        <div className={cn("p-2 rounded-lg", nodeType.bgColor)}>
+                        <div className={cn("p-2 rounded-xl", nodeType.bgColor)}>
                           <Icon className="w-4 h-4 text-white" />
                         </div>
-                        <div>
-                          <span className="font-medium block">{nodeType.label}</span>
-                        </div>
+                        <span className="font-medium">{nodeType.label}</span>
                       </DropdownMenuItem>
                     );
                   })}
@@ -511,10 +517,17 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
               </DropdownMenuContent>
             </DropdownMenu>
           </Panel>
+
+          {/* Tip panel */}
+          <Panel position="bottom-center" className="!mb-4">
+            <div className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/30 rounded-xl px-4 py-2 text-xs text-slate-400">
+              💡 Clique em uma mensagem para editar diretamente • Conecte botões aos próximos passos
+            </div>
+          </Panel>
         </ReactFlow>
       </div>
 
-      {/* Node Config Dialog */}
+      {/* Node Config Dialog - for non-message nodes */}
       <NodeConfigDialog
         open={showConfigDialog}
         onOpenChange={setShowConfigDialog}
@@ -526,10 +539,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 }
 
 /**
- * Vertical layout algorithm (Professional: top to bottom, centered)
- * - Start node at top center
- * - Other nodes ordered by creation date, stacked vertically
- * - All nodes centered on same X axis
+ * Vertical layout algorithm
  */
 function computeVerticalLayout(
   nodes: Array<{ id: string; node_type: string; created_at: string; position_x: number; position_y: number }>
@@ -538,14 +548,12 @@ function computeVerticalLayout(
   
   if (nodes.length === 0) return newPositions;
 
-  // Sort: start first, then by creation date
   const sortedNodes = [...nodes].sort((a, b) => {
     if (a.node_type === "start") return -1;
     if (b.node_type === "start") return 1;
     return a.created_at.localeCompare(b.created_at);
   });
 
-  // Position vertically, all centered on same X
   sortedNodes.forEach((node, index) => {
     newPositions.set(node.id, {
       x: LAYOUT.CENTER_X,
