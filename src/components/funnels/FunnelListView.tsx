@@ -25,6 +25,7 @@ import { CreateLeadDialog } from "./CreateLeadDialog";
 import { LeadDetailsDialog } from "./LeadDetailsDialog";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { WhatsAppChoiceDialog, useWhatsAppChoice } from "@/components/whatsapp/WhatsAppChoiceDialog";
 
 const sourceColors: Record<string, string> = {
   "Meta Ads": "bg-info/10 text-info",
@@ -58,6 +59,7 @@ export function FunnelListView({ funnelId, filters }: FunnelListViewProps) {
   const [showNewLead, setShowNewLead] = useState<string | null>(null);
   const [selectedLead, setSelectedLead] = useState<FunnelLead | null>(null);
   const [selectedLeadStage, setSelectedLeadStage] = useState<string | undefined>();
+  const whatsAppChoice = useWhatsAppChoice();
 
   // Get stage name by ID
   const getStageById = (stageId: string) => stages.find(s => s.id === stageId);
@@ -298,10 +300,16 @@ export function FunnelListView({ funnelId, filters }: FunnelListViewProps) {
                                   <Phone className="w-3.5 h-3.5" />
                                 </a>
                               </Button>
-                              <Button variant="ghost" size="icon" className="w-7 h-7" asChild>
-                                <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer">
-                                  <MessageCircle className="w-3.5 h-3.5" />
-                                </a>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="w-7 h-7"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  whatsAppChoice.openDialog(lead.phone!, lead.name);
+                                }}
+                              >
+                                <MessageCircle className="w-3.5 h-3.5" />
                               </Button>
                             </>
                           )}
@@ -397,6 +405,13 @@ export function FunnelListView({ funnelId, filters }: FunnelListViewProps) {
         stageIds={stageIds}
         stageName={selectedLeadStage}
         funnelId={funnelId}
+      />
+
+      <WhatsAppChoiceDialog
+        open={whatsAppChoice.isOpen}
+        onOpenChange={whatsAppChoice.setIsOpen}
+        phone={whatsAppChoice.targetPhone}
+        contactName={whatsAppChoice.targetName}
       />
     </>
   );

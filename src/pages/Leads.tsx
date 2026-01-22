@@ -42,6 +42,7 @@ import { BulkActionsBar } from "@/components/leads/BulkActionsBar";
 import { BulkEmailDialog } from "@/components/leads/BulkEmailDialog";
 import { LeadDetailsDialog } from "@/components/funnels/LeadDetailsDialog";
 import { LeadFilters, initialLeadFilters, type LeadFiltersState } from "@/components/leads/LeadFilters";
+import { WhatsAppChoiceDialog, useWhatsAppChoice } from "@/components/whatsapp/WhatsAppChoiceDialog";
 import type { FunnelLead } from "@/hooks/useFunnels";
 
 const sourceColors: Record<string, string> = {
@@ -87,6 +88,7 @@ export default function Leads() {
   const [showEmailDialog, setShowEmailDialog] = useState(false);
   const [selectedLead, setSelectedLead] = useState<FunnelLead | null>(null);
   const [filters, setFilters] = useState<LeadFiltersState>(initialLeadFilters);
+  const whatsAppChoice = useWhatsAppChoice();
 
   const filteredLeads = useMemo(() => {
     let result = leads;
@@ -399,15 +401,11 @@ export default function Leads() {
                               </DropdownMenuItem>
                             )}
                             {lead.phone && (
-                              <DropdownMenuItem asChild>
-                                <a 
-                                  href={`https://wa.me/${lead.phone.replace(/\D/g, "")}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  <MessageCircle className="w-4 h-4 mr-2" />
-                                  WhatsApp
-                                </a>
+                              <DropdownMenuItem
+                                onClick={() => whatsAppChoice.openDialog(lead.phone!, lead.name)}
+                              >
+                                <MessageCircle className="w-4 h-4 mr-2" />
+                                WhatsApp
                               </DropdownMenuItem>
                             )}
                             {lead.email && (
@@ -487,6 +485,13 @@ export default function Leads() {
         open={showEmailDialog}
         onOpenChange={setShowEmailDialog}
         leads={selectedLeadsData}
+      />
+
+      <WhatsAppChoiceDialog
+        open={whatsAppChoice.isOpen}
+        onOpenChange={whatsAppChoice.setIsOpen}
+        phone={whatsAppChoice.targetPhone}
+        contactName={whatsAppChoice.targetName}
       />
     </MainLayout>
   );

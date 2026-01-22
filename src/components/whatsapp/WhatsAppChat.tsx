@@ -66,7 +66,12 @@ interface Message {
   sent_at: string;
 }
 
-export function WhatsAppChat() {
+interface WhatsAppChatProps {
+  initialPhone?: string;
+  initialName?: string;
+}
+
+export function WhatsAppChat({ initialPhone, initialName }: WhatsAppChatProps = {}) {
   const { profile } = useAuth();
   const navigate = useNavigate();
   const { contacts, isConnected, sendMessage, fetchMessages, markAsRead, loading, refetch } = useWhatsApp();
@@ -82,6 +87,7 @@ export function WhatsAppChat() {
   const [newPhoneNumber, setNewPhoneNumber] = useState("");
   const [newContactName, setNewContactName] = useState("");
   const [creatingConversation, setCreatingConversation] = useState(false);
+  const hasAutoSelectedRef = useRef(false);
   
   // Mensagem pendente exibida separadamente (NÃO no array messages)
   const [pendingMessage, setPendingMessage] = useState<{
@@ -100,6 +106,60 @@ export function WhatsAppChat() {
     presence: "composing" | "recording";
   } | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Auto-select contact from initialPhone prop
+  useEffect(() => {
+    if (!initialPhone || hasAutoSelectedRef.current || contacts.length === 0 || !profile?.company_id) return;
+    
+    const cleanPhone = normalizePhone(initialPhone);
+    if (!cleanPhone) return;
+    
+    // Check if contact exists
+    const existingContact = contacts.find(c => normalizePhone(c.phone) === cleanPhone);
+    
+    if (existingContact) {
+      setSelectedContact(existingContact);
+      hasAutoSelectedRef.current = true;
+    } else {
+      // Create new contact automatically
+      const createContact = async () => {
+        try {
+          const { data: newContact, error } = await supabase
+            .from("whatsapp_contacts")
+            .insert({
+              company_id: profile.company_id,
+              phone: cleanPhone,
+              normalized_phone: cleanPhone,
+              name: initialName || null,
+              is_group: false,
+              unread_count: 0,
+            })
+            .select()
+            .single();
+
+          if (error) throw error;
+
+          await refetch();
+          
+          setSelectedContact({
+            id: newContact.id,
+            phone: newContact.phone,
+            name: newContact.name,
+            profile_picture: newContact.profile_picture,
+            unread_count: 0,
+            last_message_at: null,
+          });
+          
+          hasAutoSelectedRef.current = true;
+        } catch (error) {
+          console.error("Error auto-creating contact:", error);
+        }
+      };
+      
+      createContact();
+      hasAutoSelectedRef.current = true;
+    }
+  }, [initialPhone, initialName, contacts, profile?.company_id, refetch]);
 
   // Scroll to bottom on new messages
   useEffect(() => {

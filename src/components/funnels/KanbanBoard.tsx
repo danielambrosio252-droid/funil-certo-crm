@@ -17,6 +17,7 @@ import { CreateLeadDialog } from "./CreateLeadDialog";
 import { LeadDetailsDialog } from "./LeadDetailsDialog";
 import { EditStageDialog } from "./EditStageDialog";
 import { FunnelFiltersState } from "./FunnelFilters";
+import { WhatsAppChoiceDialog, useWhatsAppChoice } from "@/components/whatsapp/WhatsAppChoiceDialog";
 
 const sourceColors: Record<string, string> = {
   "Meta Ads": "bg-info/10 text-info",
@@ -44,6 +45,7 @@ export function KanbanBoard({ funnelId, filters }: KanbanBoardProps) {
   const [stageToEdit, setStageToEdit] = useState<FunnelStage | null>(null);
   const [selectedLead, setSelectedLead] = useState<FunnelLead | null>(null);
   const [selectedLeadStage, setSelectedLeadStage] = useState<string | undefined>();
+  const whatsAppChoice = useWhatsAppChoice();
 
   const handleLeadClick = (lead: FunnelLead, stageName: string) => {
     setSelectedLead(lead);
@@ -258,10 +260,16 @@ export function KanbanBoard({ funnelId, filters }: KanbanBoardProps) {
                                   </Button>
                                 )}
                                 {lead.phone && (
-                                  <Button variant="ghost" size="icon" className="w-7 h-7" asChild>
-                                    <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer">
-                                      <MessageCircle className="w-3.5 h-3.5 text-muted-foreground" />
-                                    </a>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="icon" 
+                                    className="w-7 h-7"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      whatsAppChoice.openDialog(lead.phone!, lead.name);
+                                    }}
+                                  >
+                                    <MessageCircle className="w-3.5 h-3.5 text-muted-foreground" />
                                   </Button>
                                 )}
                                 {lead.email && (
@@ -361,6 +369,13 @@ export function KanbanBoard({ funnelId, filters }: KanbanBoardProps) {
           funnelId={funnelId}
         />
       )}
+
+      <WhatsAppChoiceDialog
+        open={whatsAppChoice.isOpen}
+        onOpenChange={whatsAppChoice.setIsOpen}
+        phone={whatsAppChoice.targetPhone}
+        contactName={whatsAppChoice.targetName}
+      />
     </>
   );
 }
