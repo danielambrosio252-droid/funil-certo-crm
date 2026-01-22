@@ -299,43 +299,68 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
   }, [dbNodes, dbEdges]);
 
   // Sync DB -> STATE (single source of truth for rendering)
-  // Guarded to avoid clobbering optimistic state unnecessarily.
+  // ALWAYS sync data/config changes so node updates (like adding options) reflect immediately
   useEffect(() => {
-    const dbIds = new Set(dbNodes.map((n) => n.id));
-    const localIds = new Set(nodes.map((n) => n.id));
-    const isSameSet = dbIds.size === localIds.size && [...dbIds].every((id) => localIds.has(id));
+    // Build a map for quick lookup
+    const dbNodeMap = new Map(dbNodes.map((n) => [n.id, n]));
+    
+    setNodes((currentNodes) => {
+      const currentIds = new Set(currentNodes.map((n) => n.id));
+      const dbIds = new Set(dbNodes.map((n) => n.id));
+      
+      // If IDs differ, rebuild entire array
+      const idsMatch = currentIds.size === dbIds.size && [...currentIds].every((id) => dbIds.has(id));
+      
+      if (!idsMatch) {
+        // Full rebuild
+        return dbNodes.map((node) => {
+          const config = node.config as Record<string, unknown>;
+          const isStartNode = node.node_type === "start";
+          const x = Number(node.position_x);
+          const y = Number(node.position_y);
+          const safePos = {
+            x: Number.isFinite(x) ? x : 400,
+            y: Number.isFinite(y) ? y : 200,
+          };
 
-    if (!isSameSet) {
-      const rfNodes: Node[] = dbNodes.map((node) => {
-        const config = node.config as Record<string, unknown>;
-        const isStartNode = node.node_type === "start";
-        const x = Number(node.position_x);
-        const y = Number(node.position_y);
-        const safePos = {
-          x: Number.isFinite(x) ? x : 400,
-          y: Number.isFinite(y) ? y : 200,
-        };
-
+          return {
+            id: node.id,
+            type: node.node_type,
+            position: safePos,
+            selected: node.id === selectedNodeId,
+            data: {
+              ...config,
+              hasConnections: isStartNode ? startNodeHasConnections : undefined,
+              onUpdate: (newConfig: Record<string, unknown>) => handleUpdateNode(node.id, newConfig),
+              onDelete: node.node_type !== "start" ? () => handleDeleteNode(node.id) : undefined,
+              onAddNode: handleAddNodeFromHandle,
+            },
+          };
+        });
+      }
+      
+      // IDs match - update data/config for each node
+      return currentNodes.map((rfNode) => {
+        const dbNode = dbNodeMap.get(rfNode.id);
+        if (!dbNode) return rfNode;
+        
+        const config = dbNode.config as Record<string, unknown>;
+        const isStartNode = dbNode.node_type === "start";
+        
         return {
-          id: node.id,
-          type: node.node_type,
-          position: safePos,
-          selected: node.id === selectedNodeId,
+          ...rfNode,
+          selected: rfNode.id === selectedNodeId,
           data: {
             ...config,
             hasConnections: isStartNode ? startNodeHasConnections : undefined,
-            onUpdate: (newConfig: Record<string, unknown>) => handleUpdateNode(node.id, newConfig),
-            onDelete: node.node_type !== "start" ? () => handleDeleteNode(node.id) : undefined,
+            onUpdate: (newConfig: Record<string, unknown>) => handleUpdateNode(dbNode.id, newConfig),
+            onDelete: dbNode.node_type !== "start" ? () => handleDeleteNode(dbNode.id) : undefined,
             onAddNode: handleAddNodeFromHandle,
           },
         };
       });
-      setNodes(rfNodes);
-    } else {
-      // Keep selection controlled
-      setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === selectedNodeId })));
-    }
-  }, [dbNodes, nodes, selectedNodeId, setNodes, handleUpdateNode, handleDeleteNode, handleAddNodeFromHandle, startNodeHasConnections]);
+    });
+  }, [dbNodes, selectedNodeId, setNodes, handleUpdateNode, handleDeleteNode, handleAddNodeFromHandle, startNodeHasConnections]);
 
   // Sync DB edges -> STATE (guarded)
   useEffect(() => {
