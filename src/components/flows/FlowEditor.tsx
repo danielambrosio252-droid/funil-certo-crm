@@ -15,7 +15,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
-import { Save, ArrowLeft, LayoutGrid, Plus } from "lucide-react";
+import { Save, ArrowLeft, LayoutGrid, Plus, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { useFlowEditor, FlowNode, FlowEdge, NodeType } from "@/hooks/useWhatsAppFlows";
 import { flowNodeTypes, availableNodeTypes } from "./FlowNodeTypes";
@@ -60,13 +60,12 @@ interface FlowEditorProps {
   onBack: () => void;
 }
 
-// Constants for HORIZONTAL layout (Kommo-style)
+// Constants for VERTICAL layout (Clean, professional, top-to-bottom)
 const LAYOUT = {
-  START_X: 100,
-  START_Y: 200,
-  GAP_X: 300, // Horizontal spacing between nodes
-  GAP_Y: 150, // Vertical spacing for branches
-  NODE_WIDTH: 220,
+  CENTER_X: 400,    // Central X position for all nodes
+  START_Y: 80,      // Starting Y position
+  GAP_Y: 160,       // Uniform vertical spacing between nodes
+  NODE_WIDTH: 280,
 };
 
 export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
@@ -139,7 +138,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     [dbNodes, createNodeData]
   );
 
-  // Convert DB edges to React Flow format with Kommo-style edges
+  // Convert DB edges to React Flow format - clean straight vertical edges
   const initialEdges = useMemo(() => 
     dbEdges.map((edge) => ({
       id: edge.id,
@@ -149,8 +148,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       label: edge.label,
       animated: false,
       type: "smoothstep",
-      markerEnd: { type: MarkerType.ArrowClosed, color: "hsl(var(--primary))" },
-      style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
+      markerEnd: { type: MarkerType.ArrowClosed, color: "#64748b" },
+      style: { stroke: "#64748b", strokeWidth: 2 },
     })) as FlowEditorEdge[], [dbEdges]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowEditorNode>(initialNodes);
@@ -172,13 +171,13 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         label: edge.label,
         animated: false,
         type: "smoothstep",
-        markerEnd: { type: MarkerType.ArrowClosed, color: "hsl(var(--primary))" },
-        style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: "#64748b" },
+        style: { stroke: "#64748b", strokeWidth: 2 },
       })) as FlowEditorEdge[])
     );
   }, [dbEdges, setEdges]);
 
-  // Auto-fix layout on load if needed
+  // Auto-fix layout on load if needed - ALWAYS ensure vertical alignment
   useEffect(() => {
     if (loadingNodes || loadingEdges) return;
     if (didAutoFixRef.current) return;
@@ -186,19 +185,19 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
     didAutoFixRef.current = true;
 
-    // Check if layout is messy (nodes at same position or all at Y=0/default)
+    // Check if layout needs reorganization (not centered or overlapping)
     const positions = dbNodes.map(n => ({ x: n.position_x, y: n.position_y }));
     const hasOverlap = positions.some((p1, i) => 
-      positions.some((p2, j) => i !== j && Math.abs(p1.x - p2.x) < 50 && Math.abs(p1.y - p2.y) < 50)
+      positions.some((p2, j) => i !== j && Math.abs(p1.y - p2.y) < 100)
     );
     
-    const allSameY = positions.every(p => Math.abs(p.y - positions[0].y) < 20);
-    const needsReorganization = hasOverlap || (dbNodes.length > 1 && allSameY);
+    const notCentered = positions.some(p => Math.abs(p.x - LAYOUT.CENTER_X) > 50);
+    const needsReorganization = hasOverlap || notCentered;
 
     if (!needsReorganization) return;
 
-    // Apply horizontal layout
-    const newPositions = computeHorizontalLayout(dbNodes);
+    // Apply vertical centered layout
+    const newPositions = computeVerticalLayout(dbNodes);
     
     const organizedNodes = dbNodes.map(node => {
       const pos = newPositions.get(node.id);
@@ -286,26 +285,25 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     [deleteNode]
   );
 
-  // Add new node - HORIZONTAL layout
+  // Add new node - VERTICAL layout, always below the last node, centered
   const handleAddNode = async (type: NodeType) => {
     const currentNodes = nodes;
     
-    // Find rightmost X position
-    let maxX = LAYOUT.START_X;
+    // Find the maximum Y position (lowest node on screen)
+    let maxY = LAYOUT.START_Y - LAYOUT.GAP_Y;
     currentNodes.forEach((node) => {
-      if (node.position.x > maxX) {
-        maxX = node.position.x;
+      if (node.position.y > maxY) {
+        maxY = node.position.y;
       }
     });
 
-    // New node goes to the right
-    const nextX = maxX + LAYOUT.GAP_X;
-    const nextY = LAYOUT.START_Y;
+    // New node goes directly below, centered
+    const nextY = maxY + LAYOUT.GAP_Y;
 
     try {
       await addNode.mutateAsync({
         node_type: type,
-        position_x: nextX,
+        position_x: LAYOUT.CENTER_X,
         position_y: nextY,
       });
     } catch (error) {
@@ -351,11 +349,11 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     }
   };
 
-  // Auto-organize layout - horizontal
+  // Auto-organize layout - vertical centered
   const handleAutoOrganize = () => {
     if (nodes.length === 0) return;
 
-    const newPositions = computeHorizontalLayout(
+    const newPositions = computeVerticalLayout(
       nodes.map(n => ({
         id: n.id,
         node_type: n.type,
@@ -380,22 +378,27 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   if (loadingNodes) {
     return (
-      <div className="h-full flex items-center justify-center">
+      <div className="h-full flex items-center justify-center bg-slate-900">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col bg-slate-900">
-      {/* Kommo-style Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700 bg-slate-800">
+    <div className="h-full flex flex-col bg-slate-950">
+      {/* Professional Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={onBack} className="text-slate-300 hover:text-white hover:bg-slate-700">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={onBack} 
+            className="text-slate-400 hover:text-white hover:bg-slate-800"
+          >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Voltar
           </Button>
-          <div className="h-6 w-px bg-slate-600" />
+          <div className="h-6 w-px bg-slate-700" />
           <h2 className="text-lg font-semibold text-white">{flowName}</h2>
         </div>
         <div className="flex items-center gap-3">
@@ -403,7 +406,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
             variant="outline" 
             size="sm" 
             onClick={handleAutoOrganize}
-            className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
+            className="border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white"
           >
             <LayoutGrid className="w-4 h-4 mr-2" />
             Organizar
@@ -414,7 +417,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
             className="bg-emerald-600 hover:bg-emerald-700 text-white"
           >
             <Save className="w-4 h-4 mr-2" />
-            Salvar e Continuar
+            Salvar Fluxo
           </Button>
         </div>
       </div>
@@ -431,26 +434,26 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           onEdgesDelete={onEdgesDelete}
           nodeTypes={flowNodeTypes}
           fitView
-          fitViewOptions={{ padding: 0.2 }}
+          fitViewOptions={{ padding: 0.3 }}
           deleteKeyCode={["Backspace", "Delete"]}
-          className="bg-slate-900"
+          className="bg-slate-950"
           defaultEdgeOptions={{
             type: "smoothstep",
             animated: false,
-            markerEnd: { type: MarkerType.ArrowClosed, color: "hsl(var(--primary))" },
-            style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: "#64748b" },
+            style: { stroke: "#64748b", strokeWidth: 2 },
           }}
         >
           <Background 
             variant={BackgroundVariant.Dots} 
-            gap={24} 
-            size={1.5} 
-            color="rgba(255,255,255,0.08)"
+            gap={32} 
+            size={1} 
+            color="rgba(255,255,255,0.04)"
           />
-          <Controls className="!bg-slate-800 !border-slate-700 !shadow-lg [&_button]:!bg-slate-700 [&_button]:!border-slate-600 [&_button]:hover:!bg-slate-600 [&_button_svg]:!fill-slate-300" />
+          <Controls className="!bg-slate-800 !border-slate-700 !shadow-xl [&_button]:!bg-slate-700 [&_button]:!border-slate-600 [&_button]:hover:!bg-slate-600 [&_button_svg]:!fill-slate-300" />
           <MiniMap 
-            className="!bg-slate-800 !border-slate-700 !shadow-lg"
-            maskColor="rgba(0,0,0,0.7)"
+            className="!bg-slate-800 !border-slate-700 !shadow-xl"
+            maskColor="rgba(0,0,0,0.8)"
             nodeColor={(node) => {
               switch (node.type) {
                 case "start": return "#10b981";
@@ -466,44 +469,47 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
             }}
           />
 
-          {/* Kommo-style floating Add Step menu */}
-          <Panel position="top-right" className="!m-4">
-            <div className="flex items-center gap-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button 
-                    size="sm" 
-                    className="bg-sky-600 hover:bg-sky-700 text-white shadow-lg"
-                  >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Adicionar próximo passo
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent 
-                  align="end" 
-                  className="w-64 bg-slate-800 border-slate-700 shadow-2xl"
+          {/* Professional Add Step Panel */}
+          <Panel position="top-center" className="!mt-4">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  size="default" 
+                  className="bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 shadow-xl px-6"
                 >
-                  <div className="px-3 py-2 border-b border-slate-700">
-                    <p className="text-xs font-medium text-slate-400">Adicionar próximo passo</p>
-                  </div>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Adicionar Etapa
+                  <ChevronDown className="w-4 h-4 ml-2" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent 
+                align="center" 
+                className="w-72 bg-slate-800 border-slate-700 shadow-2xl p-2"
+              >
+                <div className="px-2 py-2 mb-2 border-b border-slate-700">
+                  <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">Selecione uma ação</p>
+                </div>
+                <div className="grid gap-1">
                   {availableNodeTypes.map((nodeType) => {
                     const Icon = nodeType.icon;
                     return (
                       <DropdownMenuItem
                         key={nodeType.type}
                         onClick={() => handleAddNode(nodeType.type as NodeType)}
-                        className="flex items-center gap-3 px-3 py-2.5 cursor-pointer text-slate-200 hover:bg-slate-700 focus:bg-slate-700"
+                        className="flex items-center gap-3 px-3 py-3 cursor-pointer text-slate-200 hover:bg-slate-700 focus:bg-slate-700 rounded-lg"
                       >
-                        <div className={cn("p-1.5 rounded-md", nodeType.bgColor)}>
-                          <Icon className="w-3.5 h-3.5 text-white" />
+                        <div className={cn("p-2 rounded-lg", nodeType.bgColor)}>
+                          <Icon className="w-4 h-4 text-white" />
                         </div>
-                        <span className="font-medium">{nodeType.label}</span>
+                        <div>
+                          <span className="font-medium block">{nodeType.label}</span>
+                        </div>
                       </DropdownMenuItem>
                     );
                   })}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </Panel>
         </ReactFlow>
       </div>
@@ -520,11 +526,12 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 }
 
 /**
- * Horizontal layout algorithm (Kommo-style: left to right)
- * - Start node on the left
- * - Other nodes ordered by creation date, placed horizontally
+ * Vertical layout algorithm (Professional: top to bottom, centered)
+ * - Start node at top center
+ * - Other nodes ordered by creation date, stacked vertically
+ * - All nodes centered on same X axis
  */
-function computeHorizontalLayout(
+function computeVerticalLayout(
   nodes: Array<{ id: string; node_type: string; created_at: string; position_x: number; position_y: number }>
 ): Map<string, { x: number; y: number }> {
   const newPositions = new Map<string, { x: number; y: number }>();
@@ -538,11 +545,11 @@ function computeHorizontalLayout(
     return a.created_at.localeCompare(b.created_at);
   });
 
-  // Position horizontally
+  // Position vertically, all centered on same X
   sortedNodes.forEach((node, index) => {
     newPositions.set(node.id, {
-      x: LAYOUT.START_X + index * LAYOUT.GAP_X,
-      y: LAYOUT.START_Y,
+      x: LAYOUT.CENTER_X,
+      y: LAYOUT.START_Y + index * LAYOUT.GAP_Y,
     });
   });
 
