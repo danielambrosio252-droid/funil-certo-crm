@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { WhatsAppChat } from "@/components/whatsapp/WhatsAppChat";
 import { WhatsAppTemplates } from "@/components/whatsapp/WhatsAppTemplates";
@@ -9,8 +10,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MessageSquare, FileText } from "lucide-react";
 
 export default function WhatsApp() {
+  const [searchParams] = useSearchParams();
   const { contacts, isConnected, whatsappMode, loading } = useWhatsApp();
   const [activeTab, setActiveTab] = useState("chat");
+  
+  // Get phone and name from URL params (from lead click)
+  const initialPhone = searchParams.get("phone") || undefined;
+  const initialName = searchParams.get("name") || undefined;
   
   // Pre-load FFmpeg in background for faster audio recording
   useFFmpegPreload();
@@ -64,7 +70,7 @@ export default function WhatsApp() {
 
           {/* Chat tab */}
           <TabsContent value="chat" className="mt-0 flex-1 min-h-0">
-            <WhatsAppChat />
+            <WhatsAppChat initialPhone={initialPhone} initialName={initialName} />
           </TabsContent>
 
           {/* Templates tab */}

@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { WhatsAppChoiceDialog, useWhatsAppChoice } from "@/components/whatsapp/WhatsAppChoiceDialog";
 
 const sourceColors: Record<string, string> = {
   "Meta Ads": "bg-info/10 text-info border-info/20",
@@ -20,6 +21,7 @@ const sourceColors: Record<string, string> = {
 
 export function RecentLeads() {
   const { profile } = useAuth();
+  const whatsAppChoice = useWhatsAppChoice();
 
   const { data: recentLeads, isLoading } = useQuery({
     queryKey: ['recent-leads', profile?.company_id],
@@ -131,10 +133,13 @@ export function RecentLeads() {
                     </Button>
                   )}
                   {lead.phone && (
-                    <Button variant="ghost" size="icon" className="w-8 h-8" asChild>
-                      <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer">
-                        <MessageCircle className="w-4 h-4 text-muted-foreground" />
-                      </a>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="w-8 h-8"
+                      onClick={() => whatsAppChoice.openDialog(lead.phone!, lead.name || "")}
+                    >
+                      <MessageCircle className="w-4 h-4 text-muted-foreground" />
                     </Button>
                   )}
                   {lead.email && (
@@ -154,6 +159,13 @@ export function RecentLeads() {
           </div>
         )}
       </div>
+
+      <WhatsAppChoiceDialog
+        open={whatsAppChoice.isOpen}
+        onOpenChange={whatsAppChoice.setIsOpen}
+        phone={whatsAppChoice.targetPhone}
+        contactName={whatsAppChoice.targetName}
+      />
     </motion.div>
   );
 }

@@ -40,6 +40,7 @@ import { FunnelLead, useFunnelLeads } from "@/hooks/useFunnels";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { WhatsAppChoiceDialog, useWhatsAppChoice } from "@/components/whatsapp/WhatsAppChoiceDialog";
 
 const SOURCES = [
   "Meta Ads",
@@ -84,6 +85,7 @@ export function LeadDetailsDialog({
   const [isEditing, setIsEditing] = useState(false);
   const [newNote, setNewNote] = useState("");
   const [newTag, setNewTag] = useState("");
+  const whatsAppChoice = useWhatsAppChoice();
 
   // Form state
   const [formData, setFormData] = useState({
@@ -266,15 +268,16 @@ export function LeadDetailsDialog({
                         Ligar
                       </a>
                     </Button>
-                    <Button variant="outline" size="sm" asChild>
-                      <a
-                        href={`https://wa.me/${(formData.phone || lead.phone || "").replace(/\D/g, "")}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        <MessageCircle className="w-4 h-4 mr-2" />
-                        WhatsApp
-                      </a>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => whatsAppChoice.openDialog(
+                        formData.phone || lead.phone || "",
+                        formData.name || lead.name
+                      )}
+                    >
+                      <MessageCircle className="w-4 h-4 mr-2" />
+                      WhatsApp
                     </Button>
                   </>
                 )}
@@ -644,6 +647,13 @@ export function LeadDetailsDialog({
           </div>
         </Tabs>
       </DialogContent>
+
+      <WhatsAppChoiceDialog
+        open={whatsAppChoice.isOpen}
+        onOpenChange={whatsAppChoice.setIsOpen}
+        phone={whatsAppChoice.targetPhone}
+        contactName={whatsAppChoice.targetName}
+      />
     </Dialog>
   );
 }
