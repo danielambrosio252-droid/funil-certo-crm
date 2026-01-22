@@ -36,6 +36,7 @@ import {
 import { useWhatsAppFlows, WhatsAppFlow, TriggerType } from "@/hooks/useWhatsAppFlows";
 import { CreateFlowDialog } from "@/components/flows/CreateFlowDialog";
 import { FlowEditor } from "@/components/flows/FlowEditor";
+import { FlowEditorErrorBoundary } from "@/components/flows/FlowEditorErrorBoundary";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -81,11 +82,13 @@ export default function Flows() {
     return (
       <MainLayout title="Fluxos de Automação" subtitle="Editor visual estilo ManyChat">
         <div className="h-[calc(100vh-4rem)]">
-          <FlowEditor
-            flowId={editingFlow.id}
-            flowName={editingFlow.name}
-            onBack={() => setEditingFlow(null)}
-          />
+          <FlowEditorErrorBoundary onBack={() => setEditingFlow(null)}>
+            <FlowEditor
+              flowId={editingFlow.id}
+              flowName={editingFlow.name}
+              onBack={() => setEditingFlow(null)}
+            />
+          </FlowEditorErrorBoundary>
         </div>
       </MainLayout>
     );
