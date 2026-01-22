@@ -86,7 +86,7 @@ function ChatMessageNode({
 
   return (
     <div className={cn(
-      "relative min-w-[300px] max-w-[340px] transition-all",
+      "relative min-w-[320px] max-w-[360px] transition-all",
       selected && "scale-[1.02]"
     )}>
       {/* Target handle - top center */}
@@ -99,122 +99,126 @@ function ChatMessageNode({
       {/* Chat bubble container */}
       <div 
         className={cn(
-          "relative rounded-2xl shadow-xl transition-all overflow-hidden",
-          "bg-gradient-to-br from-emerald-500 to-emerald-600",
-          selected && "ring-2 ring-white/30 ring-offset-2 ring-offset-slate-900"
+          "relative rounded-2xl shadow-xl transition-all overflow-visible",
+          "bg-slate-800 border border-slate-700",
+          selected && "ring-2 ring-primary/50 ring-offset-2 ring-offset-slate-900"
         )}
         onClick={(e) => {
           e.stopPropagation();
           setIsEditing(true);
         }}
       >
-        {/* Bubble tail */}
-        <div className="absolute -bottom-1 right-4 w-4 h-4 bg-emerald-600 transform rotate-45" />
-        
-        {/* Message content */}
-        <div className="relative p-4">
-          {/* Header label */}
-          <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/20">
-            <MessageCircle className="w-4 h-4 text-white/80" />
-            <span className="text-xs font-medium text-white/80 uppercase tracking-wide">
-              Mensagem
-            </span>
-            {data.nodeIndex !== undefined && data.nodeIndex > 0 && (
-              <span className="ml-auto flex items-center justify-center w-5 h-5 rounded-full bg-white/20 text-[10px] font-bold text-white">
-                {data.nodeIndex}
-              </span>
-            )}
+        {/* Header */}
+        <div className="flex items-center gap-2 p-3 border-b border-slate-700 bg-slate-800/80">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/20">
+            <MessageCircle className="w-4 h-4 text-emerald-400" />
           </div>
+          <span className="text-sm font-medium text-slate-200">
+            💬 Mensagem
+          </span>
+          {data.nodeIndex !== undefined && data.nodeIndex > 0 && (
+            <span className="ml-auto flex items-center justify-center w-5 h-5 rounded-full bg-primary/20 text-[10px] font-bold text-primary">
+              {data.nodeIndex}
+            </span>
+          )}
+        </div>
 
-          {/* Editable message area */}
+        {/* Message content area */}
+        <div className="p-4">
           {isEditing ? (
-            <div className="space-y-3">
-              <textarea
-                ref={textareaRef}
-                value={localMessage}
-                onChange={(e) => setLocalMessage(e.target.value)}
-                onBlur={saveChanges}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    setIsEditing(false);
-                  }
-                }}
-                placeholder="Digite sua mensagem..."
-                className="w-full bg-white/10 text-white placeholder-white/50 rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-white/30 min-h-[60px]"
-                autoFocus
-              />
-            </div>
+            <textarea
+              ref={textareaRef}
+              value={localMessage}
+              onChange={(e) => setLocalMessage(e.target.value)}
+              onBlur={saveChanges}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setIsEditing(false);
+                }
+              }}
+              placeholder="Digite sua mensagem..."
+              className="w-full bg-slate-700/50 text-slate-100 placeholder-slate-400 rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/50 min-h-[60px] border border-slate-600"
+              autoFocus
+            />
           ) : (
             <p className={cn(
-              "text-sm text-white leading-relaxed min-h-[40px]",
-              !localMessage && "italic opacity-60"
+              "text-sm text-slate-200 leading-relaxed min-h-[40px]",
+              !localMessage && "italic text-slate-400"
             )}>
               {localMessage || "Clique para escrever sua mensagem..."}
             </p>
           )}
         </div>
 
-        {/* Quick Reply Buttons */}
-        {(hasButtons || isEditing) && (
-          <div className="px-4 pb-4 space-y-2">
-            <div className="border-t border-white/20 pt-3 space-y-2">
-              {localButtons.map((btn, index) => (
-                <div key={index} className="relative group">
-                  {isEditing ? (
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={btn}
-                        onChange={(e) => updateButton(index, e.target.value)}
-                        onBlur={saveChanges}
-                        placeholder={`Botão ${index + 1}`}
-                        maxLength={20}
-                        className="flex-1 bg-white/20 text-white placeholder-white/50 rounded-xl px-4 py-2.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-white/30"
-                      />
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeButton(index);
-                        }}
-                        className="p-1.5 rounded-full bg-red-500/80 text-white hover:bg-red-500 transition-colors"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="relative">
-                      <div className="bg-white/20 backdrop-blur-sm text-white rounded-xl px-4 py-2.5 text-sm text-center font-medium hover:bg-white/30 transition-colors cursor-pointer">
-                        {btn || `Botão ${index + 1}`}
-                      </div>
-                      {/* Handle for each button */}
-                      <Handle
-                        type="source"
-                        position={Position.Bottom}
-                        id={`btn-${index}`}
-                        className="!w-2.5 !h-2.5 !bg-white !border-2 !border-emerald-600 !-bottom-1 !left-1/2 !-translate-x-1/2"
-                        style={{ position: 'absolute', left: '50%', bottom: '-6px' }}
-                      />
-                    </div>
-                  )}
+        {/* Buttons Section - Inside the box with right-side handles */}
+        <div className="px-4 pb-4 space-y-2">
+          {/* Add button trigger */}
+          {isEditing && localButtons.length < 3 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                addButton();
+              }}
+              className="w-full bg-slate-700/50 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded-lg px-3 py-2 text-xs text-center transition-colors flex items-center justify-center gap-2 border border-dashed border-slate-600"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Adicionar botão
+            </button>
+          )}
+
+          {/* Buttons with individual handles */}
+          {localButtons.map((btn, index) => (
+            <div key={index} className="relative">
+              {isEditing ? (
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 flex items-center bg-slate-700 rounded-lg border border-slate-600 overflow-hidden">
+                    <span className="px-3 py-2 bg-slate-600 text-slate-400 text-xs">⬜</span>
+                    <input
+                      type="text"
+                      value={btn}
+                      onChange={(e) => updateButton(index, e.target.value)}
+                      onBlur={saveChanges}
+                      placeholder={`Botão ${index + 1}`}
+                      maxLength={20}
+                      className="flex-1 bg-transparent text-slate-200 placeholder-slate-500 px-3 py-2 text-sm focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeButton(index);
+                    }}
+                    className="p-1.5 rounded-md bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-              ))}
-              
-              {/* Add button - only in edit mode */}
-              {isEditing && localButtons.length < 3 && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    addButton();
-                  }}
-                  className="w-full bg-white/10 hover:bg-white/20 text-white/70 rounded-xl px-4 py-2.5 text-sm text-center transition-colors flex items-center justify-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  Adicionar botão
-                </button>
+              ) : (
+                <div className="relative flex items-center">
+                  {/* Button visual */}
+                  <div className="flex-1 flex items-center bg-slate-700/80 hover:bg-slate-700 rounded-lg border border-slate-600 transition-colors cursor-pointer">
+                    <span className="px-3 py-2.5 text-slate-400 text-sm">⬜</span>
+                    <span className="flex-1 text-sm text-slate-200 pr-8">
+                      {btn || `Botão ${index + 1}`}
+                    </span>
+                  </div>
+                  
+                  {/* Connection point on the right */}
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
+                    <div className="w-4 h-px bg-slate-500" />
+                    <Handle
+                      type="source"
+                      position={Position.Right}
+                      id={`btn-${index}`}
+                      className="!relative !transform-none !w-3 !h-3 !bg-emerald-500 !border-2 !border-slate-800 !right-0"
+                      style={{ position: 'relative', right: 0, top: 0, transform: 'none' }}
+                    />
+                  </div>
+                </div>
               )}
             </div>
-          </div>
-        )}
+          ))}
+        </div>
       </div>
 
       {/* Default source handle - only if no buttons */}
