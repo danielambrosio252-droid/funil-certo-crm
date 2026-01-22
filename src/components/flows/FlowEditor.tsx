@@ -237,7 +237,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       },
       onChannelChange: (channelId: string) => handleChannelChange(node.id, channelId),
     },
-  }), [nodeIndexMap, channelInfo, handleChannelChange]);
+  }), [nodeIndexMap, handleChannelChange, channelInfo]);
 
   const initialNodes = useMemo(() => 
     dbNodes.map(createNodeData) as FlowEditorNode[], 
@@ -261,8 +261,9 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowEditorNode>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEditorEdge>(initialEdges);
 
-  // Sync with DB data
+  // Sync with DB data - only when dbNodes changes, not channelInfo
   useEffect(() => {
+    if (dbNodes.length === 0) return;
     const mapped = dbNodes.map(createNodeData) as FlowEditorNode[];
     setNodes(mapped);
   }, [dbNodes, setNodes, createNodeData]);
