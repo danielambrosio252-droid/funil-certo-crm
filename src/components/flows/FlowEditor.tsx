@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, useEffect } from "react";
+import { useCallback, useMemo, useRef, useState, useEffect, type CSSProperties } from "react";
 import {
   ReactFlow,
   Background,
@@ -35,6 +35,7 @@ type FlowEditorNode = {
   type: NodeType;
   position: { x: number; y: number };
   draggable: boolean;
+  style?: CSSProperties;
   data: {
     label: string;
     config: Record<string, unknown>;
@@ -98,6 +99,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   const didAutoFixRef = useRef(false);
   const didEnsureStartRef = useRef(false);
+  const didEnsureMinimumFlowRef = useRef(false);
+  const didHardResetLayoutRef = useRef(false);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
   const lastFitViewTsRef = useRef(0);
 
@@ -145,10 +148,33 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   useEffect(() => {
     didAutoFixRef.current = false;
     didEnsureStartRef.current = false;
+    didEnsureMinimumFlowRef.current = false;
+    didHardResetLayoutRef.current = false;
     lastStableDbNodesRef.current = [];
     lastStableDbEdgesRef.current = [];
     setRfInitTick(0);
   }, [flowId]);
+
+  const forceDomVisibility = useCallback(() => {
+    try {
+      const nodesEls = document.querySelectorAll<HTMLElement>(".react-flow__node");
+      nodesEls.forEach((el) => {
+        el.style.opacity = "1";
+        el.style.visibility = "visible";
+        el.style.display = "block";
+      });
+
+      // Also ensure the pane itself never goes fully transparent.
+      const pane = document.querySelector<HTMLElement>(".react-flow__pane");
+      if (pane) {
+        pane.style.opacity = "1";
+        pane.style.visibility = "visible";
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("[FlowEditor] forceDomVisibility failed", e);
+    }
+  }, []);
 
   const ensureStartNode = useCallback(async () => {
     if (didEnsureStartRef.current) return;
@@ -170,12 +196,70 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     }
   }, [addNode, dbNodes.length, loadingNodes]);
 
+  const ensureMinimumFlow = useCallback(async () => {
+    // Absolute fallback: never allow a flow to remain without something visible.
+    if (didEnsureMinimumFlowRef.current) return;
+    if (loadingNodes) return;
+
+    const hasStart = dbNodes.some((n) => n.node_type === "start");
+    const hasNonStart = dbNodes.some((n) => n.node_type !== "start");
+
+    // If nothing exists, create Start + Message.
+    if (dbNodes.length === 0) {
+      didEnsureMinimumFlowRef.current = true;
+      try {
+        const createdStart = await addNode.mutateAsync({
+          node_type: "start",
+          position_x: LAYOUT.CENTER_X,
+          position_y: LAYOUT.START_Y,
+          config: {},
+        });
+
+        await addNode.mutateAsync({
+          node_type: "message",
+          position_x: LAYOUT.CENTER_X,
+          position_y: LAYOUT.START_Y + LAYOUT.GAP_Y,
+          config: {},
+        });
+
+        // Best-effort: frame after creation.
+        requestAnimationFrame(() => requestFitView());
+        void createdStart;
+      } catch (error) {
+        didEnsureMinimumFlowRef.current = false;
+        console.error("Error creating minimum flow:", error);
+        toast.error("Não consegui criar o fluxo mínimo. Tente novamente.");
+      }
+      return;
+    }
+
+    // If there is Start but nothing else, add a Message below.
+    if (hasStart && !hasNonStart) {
+      didEnsureMinimumFlowRef.current = true;
+      try {
+        await addNode.mutateAsync({
+          node_type: "message",
+          position_x: LAYOUT.CENTER_X,
+          position_y: LAYOUT.START_Y + LAYOUT.GAP_Y,
+          config: {},
+        });
+        requestAnimationFrame(() => requestFitView());
+      } catch (error) {
+        didEnsureMinimumFlowRef.current = false;
+        console.error("Error creating default message node:", error);
+        toast.error("Não consegui criar o bloco de mensagem. Tente novamente.");
+      }
+    }
+  }, [addNode, dbNodes, loadingNodes, requestFitView]);
+
   // Se por qualquer motivo um fluxo vier sem nós (ex: dados antigos), cria o START automaticamente.
   useEffect(() => {
     if (loadingNodes) return;
-    if (dbNodes.length > 0) return;
-    void ensureStartNode();
-  }, [dbNodes.length, ensureStartNode, loadingNodes]);
+    // Make sure we ALWAYS have at least Start + Message.
+    void ensureMinimumFlow();
+    // Keep old behavior as a safety net.
+    if (dbNodes.length === 0) void ensureStartNode();
+  }, [dbNodes.length, ensureStartNode, ensureMinimumFlow, loadingNodes]);
 
   // Build node index map
   const nodeIndexMap = useMemo(() => {
@@ -248,6 +332,8 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     type: node.node_type as NodeType,
     position: { x: node.position_x, y: node.position_y },
     draggable: node.node_type !== "start",
+    // Hard-force visibility (some sessions reported nodes going hidden).
+    style: { opacity: 1, visibility: "visible", display: "block" },
     data: { 
       label: getNodeLabel(node.node_type),
       config: node.config,
@@ -300,7 +386,10 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     const source = dbNodes.length > 0 ? dbNodes : lastStableDbNodesRef.current;
     const mapped = source.map(createNodeData) as FlowEditorNode[];
     setNodes(mapped);
-  }, [dbNodes, setNodes, createNodeData, loadingNodes, authLoading]);
+
+    // Emergency: make sure DOM never hides nodes.
+    forceDomVisibility();
+  }, [dbNodes, setNodes, createNodeData, loadingNodes, authLoading, forceDomVisibility]);
 
   // Keep viewport stable: fit on initial load AND after automatic re-layout.
   useEffect(() => {
@@ -309,7 +398,76 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     // rfInitTick ensures ReactFlow instance exists
     if (rfInitTick === 0) return;
     requestFitView();
-  }, [loadingNodes, loadingEdges, nodes.length, rfInitTick, requestFitView]);
+    forceDomVisibility();
+  }, [loadingNodes, loadingEdges, nodes.length, rfInitTick, requestFitView, forceDomVisibility]);
+
+  // Mandatory hard reset: when nodes exist in DB, force a clean vertical layout once per flow.
+  useEffect(() => {
+    if (loadingNodes || loadingEdges) return;
+    if (dbNodes.length === 0) return;
+    if (didHardResetLayoutRef.current) return;
+
+    didHardResetLayoutRef.current = true;
+
+    const newPositions = computeVerticalLayout(
+      dbNodes.map((n) => ({
+        id: n.id,
+        node_type: n.node_type,
+        created_at: n.created_at,
+        position_x: n.position_x,
+        position_y: n.position_y,
+      }))
+    );
+
+    const organizedNodes = dbNodes.map((node) => {
+      const pos = newPositions.get(node.id);
+      return createNodeData({
+        ...node,
+        position_x: pos?.x ?? LAYOUT.CENTER_X,
+        position_y: pos?.y ?? LAYOUT.START_Y,
+      });
+    }) as FlowEditorNode[];
+
+    setNodes(organizedNodes);
+    requestFitView();
+    forceDomVisibility();
+
+    // Persist positions best-effort (avoid changing business logic beyond recovery).
+    const nodesToSave: FlowNode[] = organizedNodes.map((node) => ({
+      id: node.id,
+      flow_id: flowId,
+      company_id: "",
+      node_type: node.type as NodeType,
+      position_x: Math.round(node.position.x),
+      position_y: Math.round(node.position.y),
+      config: (node.data?.config || {}) as Record<string, unknown>,
+      created_at: "",
+    }));
+
+    const edgesToSave: FlowEdge[] = dbEdges.map((edge) => ({
+      id: edge.id,
+      flow_id: flowId,
+      company_id: "",
+      source_node_id: edge.source_node_id,
+      target_node_id: edge.target_node_id,
+      source_handle: edge.source_handle || null,
+      label: edge.label || null,
+      created_at: "",
+    }));
+
+    void saveFlow.mutateAsync({ nodes: nodesToSave, edges: edgesToSave });
+  }, [
+    loadingNodes,
+    loadingEdges,
+    dbNodes,
+    dbEdges,
+    createNodeData,
+    setNodes,
+    requestFitView,
+    forceDomVisibility,
+    flowId,
+    saveFlow,
+  ]);
 
   useEffect(() => {
     if ((loadingEdges || authLoading) && dbEdges.length === 0) return;
@@ -597,18 +755,25 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
       {/* Flow Editor Canvas - Professional dark graphite */}
       <div className="flex-1 relative" style={{ backgroundColor: '#1e293b' }}>
-        {/* Estado vazio "à prova de tela escura" */}
+        {/* Estado vazio / recuperação obrigatória: o usuário NUNCA pode ver canvas vazio */}
         {nodes.length === 0 && (
           <div className="absolute inset-0 z-10 flex items-center justify-center p-6">
             <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-sm">
-              <h3 className="text-base font-semibold text-foreground">Comece o seu fluxo</h3>
+              <h3 className="text-base font-semibold text-foreground">Recuperando o canvas…</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Este fluxo ainda não tem nenhum bloco. Crie o bloco inicial para liberar o canvas e os
-                próximos passos.
+                Estamos forçando um layout seguro (vertical) e centralizando os blocos. Se este fluxo
+                estiver vazio, criaremos automaticamente <strong>Início</strong> e <strong>Mensagem</strong>.
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
-                <Button onClick={ensureStartNode} disabled={addNode.isPending}>
-                  Criar bloco inicial
+                <Button
+                  onClick={() => {
+                    forceDomVisibility();
+                    void ensureMinimumFlow();
+                    requestFitView();
+                  }}
+                  disabled={addNode.isPending}
+                >
+                  Forçar recuperação
                 </Button>
                 <Button variant="outline" onClick={onBack}>
                   Voltar
@@ -632,6 +797,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
             setRfInitTick((t) => t + 1);
             // Ensure we frame nodes immediately on mount.
             requestAnimationFrame(() => requestFitView());
+            requestAnimationFrame(() => forceDomVisibility());
           }}
           fitView
           fitViewOptions={{
