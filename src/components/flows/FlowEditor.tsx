@@ -22,6 +22,7 @@ import { useFlowEditor, FlowNode, FlowEdge, NodeType } from "@/hooks/useWhatsApp
 import { flowNodeTypes, availableNodeTypes } from "./FlowNodeTypes";
 import { NodeConfigDialog } from "./NodeConfigDialog";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -71,6 +72,7 @@ const LAYOUT = {
 };
 
 export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
+  const { profile, loading: authLoading } = useAuth();
   const { 
     nodes: dbNodes, 
     edges: dbEdges, 
@@ -86,6 +88,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [showConfigDialog, setShowConfigDialog] = useState(false);
+  const [rfInitTick, setRfInitTick] = useState(0);
 
   // Guard against render loops: keep mutation fns in refs so callbacks/effects stay stable.
   const updateNodeMutateRef = useRef(updateNode.mutateAsync);
@@ -101,6 +104,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     didAutoFixRef.current = false;
     didEnsureStartRef.current = false;
     didFitViewRef.current = false;
+    setRfInitTick(0);
   }, [flowId]);
 
   const ensureStartNode = useCallback(async () => {
@@ -262,7 +266,9 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
 
     didFitViewRef.current = true;
 
+    // two frames: ensure nodes mounted before fit
     requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
       try {
         inst.fitView({
           padding: 0.3,
@@ -273,8 +279,9 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
       } catch (e) {
         console.error("fitView failed:", e);
       }
+      });
     });
-  }, [loadingNodes, loadingEdges, nodes.length]);
+  }, [loadingNodes, loadingEdges, nodes.length, rfInitTick]);
 
   useEffect(() => {
     setEdges(
@@ -484,6 +491,18 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
     toast.success("Layout reorganizado!");
   };
 
+  // Guard: don't render the editor until auth/profile is ready.
+  if (authLoading || !profile?.company_id) {
+    return (
+      <div className="h-full flex items-center justify-center bg-slate-950">
+        <div className="flex items-center gap-3">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+          <div className="text-sm text-muted-foreground">Carregando seu workspace…</div>
+        </div>
+      </div>
+    );
+  }
+
   if (loadingNodes) {
     return (
       <div className="h-full flex items-center justify-center bg-slate-950">
@@ -567,6 +586,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           nodeTypes={flowNodeTypes}
           onInit={(instance) => {
             rfInstanceRef.current = instance;
+            setRfInitTick((t) => t + 1);
           }}
           fitView
           fitViewOptions={{ 

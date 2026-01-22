@@ -234,8 +234,10 @@ export function useWhatsAppFlows() {
 
 // Hook for managing nodes and edges of a specific flow
 export function useFlowEditor(flowId: string | null) {
-  const { profile } = useAuth();
+  const { profile, loading: authLoading } = useAuth();
   const queryClient = useQueryClient();
+
+  const enabled = !!flowId && !!profile?.company_id && !authLoading;
 
   // Fetch nodes
   const { data: nodes = [], isLoading: loadingNodes } = useQuery({
@@ -253,7 +255,7 @@ export function useFlowEditor(flowId: string | null) {
       if (error) throw error;
       return (data || []).map(mapDbToNode);
     },
-    enabled: !!flowId && !!profile?.company_id,
+    enabled,
   });
 
   // Fetch edges
@@ -272,7 +274,7 @@ export function useFlowEditor(flowId: string | null) {
       if (error) throw error;
       return (data || []).map(mapDbToEdge);
     },
-    enabled: !!flowId && !!profile?.company_id,
+    enabled,
   });
 
   // Add node
@@ -415,8 +417,8 @@ export function useFlowEditor(flowId: string | null) {
   return {
     nodes,
     edges,
-    loadingNodes,
-    loadingEdges,
+    loadingNodes: authLoading || !enabled || loadingNodes,
+    loadingEdges: authLoading || !enabled || loadingEdges,
     addNode,
     updateNode,
     deleteNode,
