@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.whatsapp-session]
 verify_jwt = false
+
+[functions.flow-executor]
+verify_jwt = false
