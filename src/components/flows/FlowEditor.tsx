@@ -1,10 +1,8 @@
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, Zap, Plus } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { TriggerSelector } from "./TriggerSelector";
-import { ActionBuilder } from "./ActionBuilder";
 import { useFlowEditor, TriggerType } from "@/hooks/useWhatsAppFlows";
+import { useState } from "react";
 
 interface FlowEditorProps {
   flowId: string;
@@ -13,15 +11,11 @@ interface FlowEditorProps {
 }
 
 export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
-  const { nodes, edges, loadingNodes, addNode, addEdge, updateNode, deleteNode, deleteEdge } = useFlowEditor(flowId);
+  const { nodes, loadingNodes } = useFlowEditor(flowId);
   const [selectedTrigger, setSelectedTrigger] = useState<TriggerType | null>(null);
 
-  // Check if we have a start node with trigger configured
+  // Get start node
   const startNode = nodes.find(n => n.node_type === "start");
-  const hasTriggerConfigured = startNode && Object.keys(startNode.config || {}).length > 0;
-
-  // Get action nodes (non-start nodes)
-  const actionNodes = nodes.filter(n => n.node_type !== "start");
 
   if (loadingNodes) {
     return (
@@ -46,48 +40,19 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={onBack}>
-            Cancelar
+            Voltar
           </Button>
-          <Button>Publicar</Button>
         </div>
       </div>
 
-      {/* Main Content - ManyChat Style */}
+      {/* Main Content - Only Trigger */}
       <div className="flex-1 overflow-auto p-8">
-        <div className="max-w-2xl mx-auto space-y-6">
-          
-          {/* WHEN Section - Trigger */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-lg font-semibold">
-              <Zap className="w-5 h-5 text-amber-500" />
-              <span>Quando...</span>
-            </div>
-            
-            <TriggerSelector
-              flowId={flowId}
-              startNode={startNode}
-              onTriggerSelect={setSelectedTrigger}
-            />
-          </div>
-
-          {/* THEN Section - Actions */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-lg font-semibold text-slate-600">
-              <span>Então...</span>
-            </div>
-
-            <ActionBuilder
-              flowId={flowId}
-              nodes={actionNodes}
-              edges={edges}
-              startNodeId={startNode?.id}
-              addNode={addNode}
-              addEdge={addEdge}
-              updateNode={updateNode}
-              deleteNode={deleteNode}
-              deleteEdge={deleteEdge}
-            />
-          </div>
+        <div className="max-w-2xl mx-auto">
+          <TriggerSelector
+            flowId={flowId}
+            startNode={startNode}
+            onTriggerSelect={setSelectedTrigger}
+          />
         </div>
       </div>
     </div>
