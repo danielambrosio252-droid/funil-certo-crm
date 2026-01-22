@@ -341,12 +341,14 @@ async function processNode(
           buttons
         );
 
-        // Save as interactive message
+        // Persist in DB using an allowed message_type.
+        // The whatsapp_messages table has a CHECK constraint that only allows:
+        // text | image | audio | video | document | sticker
         await supabase.from("whatsapp_messages").insert({
           company_id: context.companyId,
           contact_id: context.contactId,
           content: `${question}\n\n[Botões: ${options.join(" | ")}]`,
-          message_type: "interactive",
+          message_type: "text",
           is_from_me: true,
           status: "sent",
           sent_at: new Date().toISOString(),

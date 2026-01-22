@@ -296,6 +296,8 @@ Deno.serve(async (req) => {
       }
 
       // Extract message content and process media
+      // NOTE: whatsapp_messages has a CHECK constraint that only allows:
+      // text | image | audio | video | document | sticker
       let content = "";
       let messageType = "text";
       let mediaUrl: string | null = null;
@@ -308,18 +310,21 @@ Deno.serve(async (req) => {
         if (message.interactive?.type === "button_reply") {
           buttonId = message.interactive.button_reply?.id || null;
           content = message.interactive.button_reply?.title || "";
-          messageType = "interactive_reply";
+          // Persist as text due to DB constraint
+          messageType = "text";
           console.log(`📱 Button reply received: id="${buttonId}", title="${content}"`);
         } else if (message.interactive?.type === "list_reply") {
           buttonId = message.interactive.list_reply?.id || null;
           content = message.interactive.list_reply?.title || "";
-          messageType = "interactive_reply";
+          // Persist as text due to DB constraint
+          messageType = "text";
         }
       } else if (message.type === "button") {
         // Legacy button response
         buttonId = message.button?.payload || null;
         content = message.button?.text || "";
-        messageType = "button_reply";
+        // Persist as text due to DB constraint
+        messageType = "text";
       } else if (message.type === "image") {
         content = message.image?.caption || "[Imagem]";
         messageType = "image";
@@ -392,13 +397,16 @@ Deno.serve(async (req) => {
         }
       } else if (message.type === "location") {
         content = `[Localização: ${message.location?.latitude}, ${message.location?.longitude}]`;
-        messageType = "location";
+        // Persist as text due to DB constraint
+        messageType = "text";
       } else if (message.type === "contacts") {
         content = "[Contato compartilhado]";
-        messageType = "contacts";
+        // Persist as text due to DB constraint
+        messageType = "text";
       } else {
         content = `[${message.type}]`;
-        messageType = message.type;
+        // Persist as text due to DB constraint
+        messageType = "text";
       }
 
       // Check for duplicate message
