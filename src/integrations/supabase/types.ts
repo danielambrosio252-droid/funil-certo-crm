@@ -118,6 +118,296 @@ export type Database = {
           },
         ]
       }
+      chatbot_flow_edges: {
+        Row: {
+          company_id: string
+          created_at: string
+          flow_id: string
+          id: string
+          label: string | null
+          source_handle: string | null
+          source_node_id: string
+          target_node_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          flow_id: string
+          id?: string
+          label?: string | null
+          source_handle?: string | null
+          source_node_id: string
+          target_node_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          flow_id?: string
+          id?: string
+          label?: string | null
+          source_handle?: string | null
+          source_node_id?: string
+          target_node_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chatbot_flow_edges_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_flow_edges_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_flows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_flow_edges_source_node_id_fkey"
+            columns: ["source_node_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_flow_nodes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_flow_edges_target_node_id_fkey"
+            columns: ["target_node_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_flow_nodes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chatbot_flow_executions: {
+        Row: {
+          company_id: string
+          completed_at: string | null
+          contact_id: string | null
+          context: Json | null
+          current_node_id: string | null
+          flow_id: string
+          id: string
+          is_human_takeover: boolean
+          lead_id: string | null
+          next_action_at: string | null
+          started_at: string
+          status: string
+        }
+        Insert: {
+          company_id: string
+          completed_at?: string | null
+          contact_id?: string | null
+          context?: Json | null
+          current_node_id?: string | null
+          flow_id: string
+          id?: string
+          is_human_takeover?: boolean
+          lead_id?: string | null
+          next_action_at?: string | null
+          started_at?: string
+          status?: string
+        }
+        Update: {
+          company_id?: string
+          completed_at?: string | null
+          contact_id?: string | null
+          context?: Json | null
+          current_node_id?: string | null
+          flow_id?: string
+          id?: string
+          is_human_takeover?: boolean
+          lead_id?: string | null
+          next_action_at?: string | null
+          started_at?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chatbot_flow_executions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_flow_executions_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_flow_executions_current_node_id_fkey"
+            columns: ["current_node_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_flow_nodes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_flow_executions_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_flows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_flow_executions_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "funnel_leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chatbot_flow_logs: {
+        Row: {
+          action: string
+          company_id: string
+          created_at: string
+          details: Json | null
+          execution_id: string
+          id: string
+          node_id: string | null
+          node_type: string | null
+        }
+        Insert: {
+          action: string
+          company_id: string
+          created_at?: string
+          details?: Json | null
+          execution_id: string
+          id?: string
+          node_id?: string | null
+          node_type?: string | null
+        }
+        Update: {
+          action?: string
+          company_id?: string
+          created_at?: string
+          details?: Json | null
+          execution_id?: string
+          id?: string
+          node_id?: string | null
+          node_type?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chatbot_flow_logs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_flow_logs_execution_id_fkey"
+            columns: ["execution_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_flow_executions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_flow_logs_node_id_fkey"
+            columns: ["node_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_flow_nodes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chatbot_flow_nodes: {
+        Row: {
+          company_id: string
+          config: Json
+          created_at: string
+          flow_id: string
+          id: string
+          node_type: string
+          position_x: number
+          position_y: number
+        }
+        Insert: {
+          company_id: string
+          config?: Json
+          created_at?: string
+          flow_id: string
+          id?: string
+          node_type: string
+          position_x?: number
+          position_y?: number
+        }
+        Update: {
+          company_id?: string
+          config?: Json
+          created_at?: string
+          flow_id?: string
+          id?: string
+          node_type?: string
+          position_x?: number
+          position_y?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chatbot_flow_nodes_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_flow_nodes_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_flows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chatbot_flows: {
+        Row: {
+          company_id: string
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          is_default: boolean
+          name: string
+          trigger_keywords: string[] | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          name: string
+          trigger_keywords?: string[] | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          name?: string
+          trigger_keywords?: string[] | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chatbot_flows_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       companies: {
         Row: {
           address: string | null
