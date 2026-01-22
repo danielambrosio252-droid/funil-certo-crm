@@ -52,7 +52,7 @@ export interface QrResponse {
 }
 
 export function useWhatsApp() {
-  const { profile, loading: authLoading } = useAuth();
+  const { profile, user, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const [session, setSession] = useState<WhatsAppSession | null>(null);
   const [contacts, setContacts] = useState<WhatsAppContact[]>([]);
@@ -348,21 +348,44 @@ export function useWhatsApp() {
   }, [fetchSession, fetchContacts, fetchCompanyConfig]);
 
   useEffect(() => {
+    // IMPORTANT: `useAuth().loading` pode virar false antes do profile carregar.
+    // Então, só inicializamos o WhatsApp quando tivermos `profile` e `company_id`.
     if (authLoading) return;
-    if (!profile?.company_id) {
+
+    // Sem usuário logado (ex.: logout) -> limpar estado.
+    if (!user) {
+      setSession(null);
+      setContacts([]);
+      setWhatsappMode(null);
+      setCloudApiConfigured(false);
       setInitializing(false);
-      hasFetched.current = true;
+      hasFetched.current = false;
       return;
     }
+
+    // Perfil ainda carregando -> manter loading.
+    if (!profile) {
+      setInitializing(true);
+      return;
+    }
+
+    // Perfil carregou, mas sem empresa -> parar loading (não há o que buscar).
+    if (!profile.company_id) {
+      setInitializing(false);
+      hasFetched.current = false;
+      return;
+    }
+
     if (hasFetched.current) return;
     hasFetched.current = true;
+    setInitializing(true);
 
     const doFetch = async () => {
       await Promise.all([fetchSession(), fetchContacts(), fetchCompanyConfig()]);
       setInitializing(false);
     };
-    doFetch();
-  }, [authLoading, profile?.company_id, fetchSession, fetchContacts, fetchCompanyConfig]);
+    void doFetch();
+  }, [authLoading, user, profile, fetchSession, fetchContacts, fetchCompanyConfig]);
 
   useEffect(() => {
     const companyId = profile?.company_id;
