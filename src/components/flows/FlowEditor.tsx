@@ -2,7 +2,6 @@ import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -21,8 +20,6 @@ import {
   Image, 
   Trash2, 
   Plus,
-  Smile,
-  Braces,
   X,
 } from "lucide-react";
 import { TriggerSelector } from "./TriggerSelector";
@@ -35,32 +32,16 @@ interface FlowEditorProps {
   onBack: () => void;
 }
 
-const nodeTypeConfig: Record<string, { icon: React.ElementType; label: string; color: string }> = {
-  messenger: { icon: MessageSquare, label: "Enviar Mensagem", color: "bg-blue-500" },
-  message: { icon: MessageSquare, label: "Enviar Mensagem", color: "bg-blue-500" },
-  ai_step: { icon: Zap, label: "Etapa de IA", color: "bg-purple-500" },
-  actions: { icon: Zap, label: "Ações", color: "bg-emerald-500" },
-  condition: { icon: GitBranch, label: "Condição", color: "bg-orange-500" },
-  randomizer: { icon: Shuffle, label: "Randomizador", color: "bg-pink-500" },
-  smart_delay: { icon: Clock, label: "Atraso Inteligente", color: "bg-slate-500" },
-  delay: { icon: Clock, label: "Aguardar", color: "bg-orange-500" },
-  media: { icon: Image, label: "Mídia", color: "bg-violet-500" },
-};
-
 export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   const { nodes, edges, loadingNodes, addNode, addEdge, updateNode, deleteNode, deleteEdge } = useFlowEditor(flowId);
   const [selectedTrigger, setSelectedTrigger] = useState<TriggerType | null>(null);
 
-  // Get start node
   const startNode = nodes.find(n => n.node_type === "start");
-  
-  // Get action nodes (non-start nodes) sorted by position
   const actionNodes = nodes
     .filter(n => n.node_type !== "start")
     .sort((a, b) => a.position_y - b.position_y);
 
-  // Handle adding next step
-  const handleAddNextStep = useCallback(async (type: string, position?: { x: number; y: number }) => {
+  const handleAddNextStep = useCallback(async (type: string) => {
     try {
       let nodeType: NodeType = "message";
       let config: Record<string, unknown> = {};
@@ -78,11 +59,7 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         case "delay":
         case "smart_delay":
           nodeType = "delay";
-          config = { delay_seconds: 5, smart: type === "smart_delay" };
-          break;
-        case "media":
-          nodeType = "media";
-          config = { media_url: "", caption: "" };
+          config = { delay_seconds: 5 };
           break;
         case "condition":
           nodeType = "condition";
@@ -93,16 +70,15 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
           config = { is_randomizer: true };
           break;
         default:
-          nodeType = "message";
           config = { message: "", buttons: [] };
       }
 
       const lastNode = actionNodes[actionNodes.length - 1];
-      const positionY = lastNode ? lastNode.position_y + 200 : startNode ? startNode.position_y + 200 : 280;
+      const positionY = lastNode ? lastNode.position_y + 200 : 200;
 
       const newNode = await addNode.mutateAsync({
         node_type: nodeType,
-        position_x: 400,
+        position_x: 600,
         position_y: Math.round(positionY),
         config,
       });
@@ -122,55 +98,44 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
   }, [actionNodes, startNode, addNode, addEdge]);
 
   const handleUpdateNodeConfig = useCallback(async (nodeId: string, config: Record<string, unknown>) => {
-    try {
-      await updateNode.mutateAsync({ id: nodeId, config });
-    } catch (error: any) {
-      console.error(error);
-    }
+    await updateNode.mutateAsync({ id: nodeId, config });
   }, [updateNode]);
 
   const handleDeleteNode = useCallback(async (nodeId: string) => {
-    try {
-      const connectedEdges = edges.filter(e => e.source_node_id === nodeId || e.target_node_id === nodeId);
-      for (const edge of connectedEdges) {
-        await deleteEdge.mutateAsync(edge.id);
-      }
-      await deleteNode.mutateAsync(nodeId);
-      toast.success("Bloco removido!");
-    } catch (error: any) {
-      toast.error("Erro: " + error.message);
+    const connectedEdges = edges.filter(e => e.source_node_id === nodeId || e.target_node_id === nodeId);
+    for (const edge of connectedEdges) {
+      await deleteEdge.mutateAsync(edge.id);
     }
+    await deleteNode.mutateAsync(nodeId);
+    toast.success("Bloco removido!");
   }, [edges, deleteEdge, deleteNode]);
 
-  const handleAddButton = useCallback((nodeId: string, config: Record<string, unknown>) => {
+  const handleAddButton = (nodeId: string, config: Record<string, unknown>) => {
     const buttons = (config.buttons as string[]) || [];
-    const newButtons = [...buttons, `Botão ${buttons.length + 1}`];
-    handleUpdateNodeConfig(nodeId, { ...config, buttons: newButtons });
-  }, [handleUpdateNodeConfig]);
+    handleUpdateNodeConfig(nodeId, { ...config, buttons: [...buttons, `Botão ${buttons.length + 1}`] });
+  };
 
-  const handleRemoveButton = useCallback((nodeId: string, config: Record<string, unknown>, index: number) => {
+  const handleRemoveButton = (nodeId: string, config: Record<string, unknown>, index: number) => {
     const buttons = (config.buttons as string[]) || [];
-    const newButtons = buttons.filter((_, i) => i !== index);
-    handleUpdateNodeConfig(nodeId, { ...config, buttons: newButtons });
-  }, [handleUpdateNodeConfig]);
+    handleUpdateNodeConfig(nodeId, { ...config, buttons: buttons.filter((_, i) => i !== index) });
+  };
 
-  const handleUpdateButton = useCallback((nodeId: string, config: Record<string, unknown>, index: number, value: string) => {
-    const buttons = (config.buttons as string[]) || [];
-    const newButtons = [...buttons];
-    newButtons[index] = value;
-    handleUpdateNodeConfig(nodeId, { ...config, buttons: newButtons });
-  }, [handleUpdateNodeConfig]);
+  const handleUpdateButton = (nodeId: string, config: Record<string, unknown>, index: number, value: string) => {
+    const buttons = [...((config.buttons as string[]) || [])];
+    buttons[index] = value;
+    handleUpdateNodeConfig(nodeId, { ...config, buttons });
+  };
 
   if (loadingNodes) {
     return (
-      <div className="h-full flex items-center justify-center bg-slate-50">
+      <div className="h-full flex items-center justify-center bg-slate-100">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col bg-gradient-to-br from-slate-100 to-slate-200 overflow-hidden">
+    <div className="h-full flex flex-col bg-slate-100 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 bg-white border-b shadow-sm shrink-0">
         <div className="flex items-center gap-4">
@@ -184,199 +149,219 @@ export function FlowEditor({ flowId, flowName, onBack }: FlowEditorProps) {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={onBack}>Voltar</Button>
-          <Button>Publicar</Button>
+          <Button className="bg-primary">Publicar</Button>
         </div>
       </div>
 
-      {/* Canvas */}
+      {/* Canvas - Horizontal Layout */}
       <div className="flex-1 overflow-auto p-8">
-        <div className="min-h-full flex flex-col items-center">
+        <div className="flex items-start gap-0 min-w-max">
           
           {/* Trigger Card */}
-          <TriggerSelector
-            flowId={flowId}
-            startNode={startNode}
-            onTriggerSelect={setSelectedTrigger}
-            onAddNextStep={handleAddNextStep}
-          />
+          <div className="shrink-0">
+            <TriggerSelector
+              flowId={flowId}
+              startNode={startNode}
+              onTriggerSelect={setSelectedTrigger}
+              onAddNextStep={handleAddNextStep}
+            />
+          </div>
 
-          {/* Connection line from trigger */}
+          {/* Curved Connection Line + Message Blocks */}
           {actionNodes.length > 0 && (
-            <svg width="2" height="40" className="my-2">
-              <line x1="1" y1="0" x2="1" y2="40" stroke="#94a3b8" strokeWidth="2" />
-            </svg>
-          )}
+            <div className="flex items-start">
+              {/* Curved SVG line */}
+              <svg width="120" height="200" className="shrink-0 -ml-2" style={{ marginTop: '60px' }}>
+                <path 
+                  d="M 0 0 C 60 0 60 100 120 100" 
+                  fill="none" 
+                  stroke="#94a3b8" 
+                  strokeWidth="2"
+                />
+                {/* Arrow */}
+                <polygon 
+                  points="115,95 120,100 115,105" 
+                  fill="#94a3b8"
+                />
+              </svg>
 
-          {/* Action Nodes */}
-          {actionNodes.map((node, index) => {
-            const config = node.config as Record<string, unknown>;
-            const buttons = (config.buttons as string[]) || [];
-            const typeKey = config.ai_enabled ? "ai_step" : config.is_randomizer ? "randomizer" : node.node_type;
-            const nodeConfig = nodeTypeConfig[typeKey] || nodeTypeConfig.message;
-            const Icon = nodeConfig.icon;
-
-            return (
-              <div key={node.id} className="flex flex-col items-center">
-                {/* ManyChat-style Message Block */}
-                <Card className="w-96 bg-white border shadow-lg rounded-2xl overflow-hidden">
-                  {/* Header */}
-                  <div className="flex items-center justify-between px-4 py-3 border-b bg-slate-50">
-                    <div className="flex items-center gap-2">
-                      <div className={`p-1.5 rounded-lg ${nodeConfig.color}`}>
-                        <Icon className="w-4 h-4 text-white" />
-                      </div>
-                      <span className="font-medium text-sm">{nodeConfig.label}</span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleDeleteNode(node.id)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-
-                  <CardContent className="p-4 space-y-4">
-                    {/* Message Type */}
-                    {node.node_type === "message" && (
-                      <>
-                        {/* Text Area */}
-                        <div className="border-2 border-dashed border-cyan-400 rounded-lg p-3 bg-cyan-50/30">
-                          <Textarea
-                            placeholder="Adicionar texto..."
-                            className="min-h-[80px] resize-none border-0 bg-transparent focus-visible:ring-0 p-0 text-sm"
-                            value={(config.message as string) || ""}
-                            onChange={(e) => handleUpdateNodeConfig(node.id, { ...config, message: e.target.value })}
-                          />
-                          
-                          {/* Toolbar */}
-                          <div className="flex items-center justify-between mt-2 pt-2 border-t border-cyan-200">
-                            <div className="flex items-center gap-1">
-                              <Button variant="ghost" size="icon" className="h-7 w-7">
-                                <Smile className="w-4 h-4 text-muted-foreground" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7">
-                                <Braces className="w-4 h-4 text-muted-foreground" />
-                              </Button>
-                            </div>
-                            <span className="text-xs text-muted-foreground">
-                              {((config.message as string) || "").length}/2000
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Buttons */}
-                        {buttons.length > 0 && (
-                          <div className="space-y-2">
-                            {buttons.map((btn, btnIndex) => (
-                              <div key={btnIndex} className="flex items-center gap-2">
-                                <Input
-                                  value={btn}
-                                  onChange={(e) => handleUpdateButton(node.id, config, btnIndex, e.target.value)}
-                                  className="text-sm"
-                                  placeholder="Texto do botão..."
-                                />
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 shrink-0"
-                                  onClick={() => handleRemoveButton(node.id, config, btnIndex)}
-                                >
-                                  <X className="w-4 h-4" />
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Add Button */}
-                        <Button
-                          variant="ghost"
-                          className="w-full justify-start text-muted-foreground hover:text-primary"
-                          onClick={() => handleAddButton(node.id, config)}
-                        >
-                          <Plus className="w-4 h-4 mr-2" />
-                          Botão Adicionar
-                        </Button>
-                      </>
-                    )}
-
-                    {/* Delay Type */}
-                    {node.node_type === "delay" && (
-                      <div className="flex items-center gap-3 p-3 bg-orange-50 rounded-lg">
-                        <Clock className="w-5 h-5 text-orange-500" />
-                        <span className="text-sm">Aguardar</span>
-                        <Input
-                          type="number"
-                          className="w-20 text-sm"
-                          value={(config.delay_seconds as number) || 5}
-                          onChange={(e) => handleUpdateNodeConfig(node.id, { ...config, delay_seconds: parseInt(e.target.value) || 5 })}
-                        />
-                        <span className="text-sm text-muted-foreground">segundos</span>
-                      </div>
-                    )}
-
-                    {/* Media Type */}
-                    {node.node_type === "media" && (
-                      <div className="space-y-3">
-                        <Input
-                          placeholder="URL da imagem..."
-                          className="text-sm"
-                          value={(config.media_url as string) || ""}
-                          onChange={(e) => handleUpdateNodeConfig(node.id, { ...config, media_url: e.target.value })}
-                        />
-                        <Input
-                          placeholder="Legenda (opcional)"
-                          className="text-sm"
-                          value={(config.caption as string) || ""}
-                          onChange={(e) => handleUpdateNodeConfig(node.id, { ...config, caption: e.target.value })}
-                        />
-                      </div>
-                    )}
-
-                    {/* Condition Type */}
-                    {node.node_type === "condition" && (
-                      <div className="p-3 bg-orange-50 rounded-lg text-center">
-                        <p className="text-sm text-muted-foreground">
-                          {config.is_randomizer ? "Distribuir aleatoriamente" : "Configurar condições"}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Next Step Connection */}
-                    <div className="flex items-center justify-end gap-2 pt-2 border-t">
-                      <span className="text-sm text-slate-500">Próximo Passo</span>
-                      <NextStepDot onAddNextStep={handleAddNextStep} />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Connection line to next node */}
-                {index < actionNodes.length - 1 && (
-                  <svg width="2" height="40" className="my-2">
-                    <line x1="1" y1="0" x2="1" y2="40" stroke="#94a3b8" strokeWidth="2" />
-                  </svg>
-                )}
+              {/* Message Blocks Stack */}
+              <div className="flex flex-col gap-6 -ml-2">
+                {actionNodes.map((node, index) => (
+                  <MessageBlock 
+                    key={node.id}
+                    node={node}
+                    onDelete={() => handleDeleteNode(node.id)}
+                    onUpdateConfig={(config) => handleUpdateNodeConfig(node.id, config)}
+                    onAddButton={(config) => handleAddButton(node.id, config)}
+                    onRemoveButton={(config, idx) => handleRemoveButton(node.id, config, idx)}
+                    onUpdateButton={(config, idx, val) => handleUpdateButton(node.id, config, idx, val)}
+                    onAddNextStep={handleAddNextStep}
+                    showConnectionToNext={index < actionNodes.length - 1}
+                  />
+                ))}
               </div>
-            );
-          })}
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-// Reusable Next Step Dot Component
+// ManyChat-style Message Block
+function MessageBlock({
+  node,
+  onDelete,
+  onUpdateConfig,
+  onAddButton,
+  onRemoveButton,
+  onUpdateButton,
+  onAddNextStep,
+  showConnectionToNext,
+}: {
+  node: FlowNode;
+  onDelete: () => void;
+  onUpdateConfig: (config: Record<string, unknown>) => void;
+  onAddButton: (config: Record<string, unknown>) => void;
+  onRemoveButton: (config: Record<string, unknown>, index: number) => void;
+  onUpdateButton: (config: Record<string, unknown>, index: number, value: string) => void;
+  onAddNextStep: (type: string) => void;
+  showConnectionToNext: boolean;
+}) {
+  const config = node.config as Record<string, unknown>;
+  const buttons = (config.buttons as string[]) || [];
+  const [editingMessage, setEditingMessage] = useState(false);
+
+  return (
+    <div className="relative">
+      <Card className="w-[420px] bg-white border shadow-xl rounded-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 bg-white border-b">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center">
+              <MessageSquare className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">WhatsApp</p>
+              <p className="font-semibold">Enviar Mensagem</p>
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onDelete} className="text-muted-foreground hover:text-destructive">
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </div>
+
+        <CardContent className="p-4 space-y-3">
+          {/* Message Content - Chat Bubble Style */}
+          {node.node_type === "message" && (
+            <>
+              {/* Message Bubble */}
+              <div 
+                className="bg-slate-100 rounded-2xl rounded-tl-sm p-4 cursor-text min-h-[60px]"
+                onClick={() => setEditingMessage(true)}
+              >
+                {editingMessage ? (
+                  <textarea
+                    autoFocus
+                    className="w-full bg-transparent border-none outline-none resize-none text-sm"
+                    placeholder="Digite sua mensagem..."
+                    value={(config.message as string) || ""}
+                    onChange={(e) => onUpdateConfig({ ...config, message: e.target.value })}
+                    onBlur={() => setEditingMessage(false)}
+                    rows={3}
+                  />
+                ) : (
+                  <p className="text-sm">
+                    {(config.message as string) || <span className="text-muted-foreground">Clique para adicionar texto...</span>}
+                  </p>
+                )}
+              </div>
+
+              {/* Buttons with connection dots */}
+              {buttons.map((btn, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <div className="flex-1 flex items-center border rounded-xl overflow-hidden bg-white">
+                    <Input
+                      value={btn}
+                      onChange={(e) => onUpdateButton(config, idx, e.target.value)}
+                      className="border-0 text-center font-medium"
+                      placeholder="Texto do botão..."
+                    />
+                    <Button variant="ghost" size="icon" className="shrink-0" onClick={() => onRemoveButton(config, idx)}>
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  {/* Connection dot for button */}
+                  <NextStepDot onAddNextStep={onAddNextStep} />
+                </div>
+              ))}
+
+              {/* Add Button */}
+              <Button
+                variant="outline"
+                className="w-full border-dashed"
+                onClick={() => onAddButton(config)}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Adicionar Botão
+              </Button>
+            </>
+          )}
+
+          {/* Delay Type */}
+          {node.node_type === "delay" && (
+            <div className="flex items-center gap-3 p-4 bg-orange-50 rounded-xl">
+              <Clock className="w-6 h-6 text-orange-500" />
+              <span>Aguardar</span>
+              <Input
+                type="number"
+                className="w-20"
+                value={(config.delay_seconds as number) || 5}
+                onChange={(e) => onUpdateConfig({ ...config, delay_seconds: parseInt(e.target.value) || 5 })}
+              />
+              <span className="text-muted-foreground">segundos</span>
+            </div>
+          )}
+
+          {/* Condition Type */}
+          {node.node_type === "condition" && (
+            <div className="p-4 bg-orange-50 rounded-xl text-center">
+              <GitBranch className="w-6 h-6 mx-auto mb-2 text-orange-500" />
+              <p className="text-sm">{config.is_randomizer ? "Randomizador" : "Condição"}</p>
+            </div>
+          )}
+
+          {/* Next Step - Only if no buttons */}
+          {buttons.length === 0 && (
+            <div className="flex items-center justify-end gap-2 pt-3 border-t">
+              <span className="text-sm text-slate-500">Próximo Passo</span>
+              <NextStepDot onAddNextStep={onAddNextStep} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Connection line to next block */}
+      {showConnectionToNext && (
+        <svg width="2" height="40" className="absolute -bottom-10 left-1/2 -translate-x-1/2">
+          <line x1="1" y1="0" x2="1" y2="40" stroke="#94a3b8" strokeWidth="2" />
+        </svg>
+      )}
+    </div>
+  );
+}
+
+// Reusable Next Step Dot
 function NextStepDot({ onAddNextStep }: { onAddNextStep: (type: string) => void }) {
   const [open, setOpen] = useState(false);
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <div className="w-4 h-4 rounded-full bg-slate-400 border-2 border-white shadow cursor-pointer hover:bg-primary hover:scale-125 transition-all" />
+        <div className="w-5 h-5 rounded-full border-2 border-slate-300 bg-white cursor-pointer hover:border-primary hover:scale-110 transition-all shadow-sm" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52 bg-white border shadow-lg rounded-lg z-50">
+      <DropdownMenuContent align="start" side="right" className="w-52 bg-white">
         <DropdownMenuItem onClick={() => { setOpen(false); onAddNextStep("messenger"); }}>
           <MessageSquare className="w-4 h-4 mr-2 text-blue-500" />
           + Messenger
