@@ -235,20 +235,28 @@ async function findMatchingFlow(
     }
   }
 
-  // If no keyword match, use default flow
-  const defaultFlow = flows.find((f: ChatbotFlow) => f.is_default);
-  if (defaultFlow) {
-    console.log(`✅ Using default flow: ${defaultFlow.name}`);
-    return defaultFlow as ChatbotFlow;
+  // IMPORTANTE: Se não houve match de keyword, verificar se é uma PRIMEIRA mensagem do contato
+  // O fluxo default só deve disparar para primeiras mensagens ou mensagens que explicitamente 
+  // contêm keywords. Isso evita que o bot responda a QUALQUER mensagem.
+  
+  // Por enquanto, remover o fallback para default flow para evitar spam
+  // O default flow só será usado se explicitamente ativado pelo operador
+  // ou se a mensagem contiver uma keyword configurada
+  
+  // If no keyword match, check if there's a default flow
+  // DEFAULT FLOW: Only trigger if this is likely a greeting/first contact
+  const greetingPatterns = ["oi", "olá", "ola", "bom dia", "boa tarde", "boa noite", "hello", "hi", "hey", "e ai", "eai"];
+  const isGreeting = greetingPatterns.some(g => messageLower.includes(g));
+  
+  if (isGreeting) {
+    const defaultFlow = flows.find((f: ChatbotFlow) => f.is_default);
+    if (defaultFlow) {
+      console.log(`✅ Greeting detected + default flow: ${defaultFlow.name}`);
+      return defaultFlow as ChatbotFlow;
+    }
   }
 
-  // FALLBACK: If no default, use the first active flow
-  if (flows.length > 0) {
-    console.log(`⚠️ No default flow, using first active: ${flows[0].name}`);
-    return flows[0] as ChatbotFlow;
-  }
-
-  console.log("❌ No matching flow found");
+  console.log("❌ No matching flow found (no keyword match and not a greeting)");
   return null;
 }
 
@@ -978,28 +986,10 @@ async function continueExecution(
         sourceHandle = buttonId;
         console.log(`✅ Button clicked: ${sourceHandle}`);
       } else {
-        // User sent text instead of clicking a button - remind them to use buttons
-        console.log(`⚠️ Text response received but question requires button click. Ignoring and waiting for button.`);
-        
-        // Re-send the interactive buttons to remind the user
-        const question = (currentNode.config?.question as string) || "";
-        const buttons = options.map((opt, idx) => ({
-          id: `option-${idx}`,
-          title: opt,
-        }));
-        
-        // Get company phone number ID
-        await sendWhatsAppInteractiveButtons(
-          company.whatsapp_phone_number_id,
-          accessToken,
-          contact.normalized_phone || contact.phone,
-          `Por favor, selecione uma das opções abaixo:\n\n${question}`,
-          buttons
-        );
-        
-        console.log(`🔄 Re-sent interactive buttons - waiting for button click`);
-        
-        // Stay in waiting_response status - don't proceed
+        // User sent text instead of clicking a button
+        // NÃO reenviar botões para evitar spam/duplicação - apenas aguardar silenciosamente
+        console.log(`⚠️ Text response received but question requires button click. Waiting silently for button.`);
+        // Manter status waiting_response - não fazer nada
         return;
       }
     } else if (options.length > 3) {

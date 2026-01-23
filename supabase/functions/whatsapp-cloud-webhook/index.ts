@@ -441,64 +441,67 @@ Deno.serve(async (req) => {
       } else {
         console.log("Message saved:", messageId, "| Type:", messageType, "| Media:", mediaUrl ? "Yes" : "No");
         
-        // ===== TRIGGER: DISPARAR FLUXOS DE AUTOMAÇÃO (KEYWORD) =====
-        if (messageType === "text" && content) {
-          try {
-            const flowExecutorUrl = `${supabaseUrl}/functions/v1/flow-executor`;
-            
-            await fetch(flowExecutorUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${supabaseServiceKey}`,
-              },
-              body: JSON.stringify({
-                trigger_type: "keyword",
-                company_id: companyId,
-                contact_id: contact.id,
-                message_content: content,
-              }),
-            });
-            
-            console.log(`[Webhook] 🚀 Trigger keyword disparado`);
-          } catch (flowError) {
-            console.error("[Webhook] Erro ao disparar fluxo:", flowError);
-          }
-        }
-        
-        // ===== VERIFICAR SE HÁ FLUXO AGUARDANDO RESPOSTA =====
+        // ===== LÓGICA UNIFICADA: VERIFICAR ESTADO ANTES DE DISPARAR =====
+        // CRÍTICO: Evitar disparo duplo e mensagens duplicadas
         try {
-          const { data: waitingExecution } = await supabase
+          const flowExecutorUrl = `${supabaseUrl}/functions/v1/flow-executor`;
+          
+          // Primeiro, verificar se existe execução ativa (running ou waiting_response)
+          const { data: activeExecution } = await supabase
             .from("chatbot_flow_executions")
-            .select("id")
+            .select("id, status")
             .eq("company_id", companyId)
             .eq("contact_id", contact.id)
-            .eq("status", "waiting_response")
+            .in("status", ["waiting_response", "running"])
+            .order("started_at", { ascending: false })
             .maybeSingle();
           
-          if (waitingExecution) {
-            // Retomar execução - passar button_id se for resposta de botão
-            const flowExecutorUrl = `${supabaseUrl}/functions/v1/flow-executor`;
-            
-            await fetch(flowExecutorUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${supabaseServiceKey}`,
-              },
-              body: JSON.stringify({
-                trigger_type: "continue_execution",
-                company_id: companyId,
-                execution_id: waitingExecution.id,
-                button_id: buttonId, // Pass button_id for interactive responses
-                user_response: content, // Pass the content as well
-              }),
-            });
-            
-            console.log(`[Webhook] 🔄 Execução retomada: ${waitingExecution.id}, buttonId: ${buttonId}`);
+          if (activeExecution) {
+            if (activeExecution.status === "waiting_response") {
+              // Há uma pergunta aguardando resposta - retomar execução
+              await fetch(flowExecutorUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${supabaseServiceKey}`,
+                },
+                body: JSON.stringify({
+                  trigger_type: "continue_execution",
+                  company_id: companyId,
+                  execution_id: activeExecution.id,
+                  button_id: buttonId,
+                  user_response: content,
+                }),
+              });
+              
+              console.log(`[Webhook] 🔄 Execução retomada: ${activeExecution.id}, buttonId: ${buttonId}`);
+            } else {
+              // Execução 'running' - NÃO fazer nada para evitar conflito
+              console.log(`[Webhook] ⏸️ Execução running ativa (${activeExecution.id}), ignorando mensagem`);
+            }
+          } else {
+            // NENHUMA execução ativa - verificar se deve iniciar um novo fluxo
+            // Isso acontece APENAS se a mensagem contiver uma keyword OU for o fluxo default
+            if (messageType === "text" && content) {
+              await fetch(flowExecutorUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${supabaseServiceKey}`,
+                },
+                body: JSON.stringify({
+                  trigger_type: "keyword",
+                  company_id: companyId,
+                  contact_id: contact.id,
+                  message_content: content,
+                }),
+              });
+              
+              console.log(`[Webhook] 🚀 Trigger keyword disparado (sem execução ativa)`);
+            }
           }
         } catch (execError) {
-          console.error("[Webhook] Erro ao retomar execução:", execError);
+          console.error("[Webhook] Erro ao processar fluxo:", execError);
         }
       }
     }
