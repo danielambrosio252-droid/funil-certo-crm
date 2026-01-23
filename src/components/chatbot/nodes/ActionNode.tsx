@@ -30,7 +30,10 @@ const actionTypes = [
 
 function ActionNode({ id, data }: NodeProps) {
   const nodeData = data as ActionNodeData;
-  const [actionType, setActionType] = useState(nodeData?.action_type || "add_tag");
+  
+  // Use nodeData values directly as source of truth, with local state as fallback for edits
+  const currentActionType = nodeData?.action_type || "add_tag";
+  const [actionType, setActionType] = useState(currentActionType);
   const [actionValue, setActionValue] = useState(nodeData?.action_value || "");
   const [selectedFunnelId, setSelectedFunnelId] = useState(nodeData?.funnel_id || "");
   const [selectedStageId, setSelectedStageId] = useState(nodeData?.stage_id || "");
@@ -236,7 +239,11 @@ function ActionNode({ id, data }: NodeProps) {
           </SelectContent>
         </Select>
 
-        {actionType === "move_stage" ? renderMoveStageConfig() : renderDefaultInput()}
+        {/* Render appropriate config based on action type - use both local state and nodeData */}
+        {(actionType === "move_stage" || currentActionType === "move_stage") 
+          ? renderMoveStageConfig() 
+          : renderDefaultInput()
+        }
       </CardContent>
 
       {/* Output handle with + button */}
