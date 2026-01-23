@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { WhatsAppChat } from "@/components/whatsapp/WhatsAppChat";
 import { WhatsAppTemplates } from "@/components/whatsapp/WhatsAppTemplates";
+import { HumanTakeoverPanel } from "@/components/whatsapp/HumanTakeoverPanel";
 import { useWhatsApp } from "@/hooks/useWhatsApp";
 import { useFFmpegPreload } from "@/hooks/useFFmpegPreload";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MessageSquare, FileText } from "lucide-react";
 
 export default function WhatsApp() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { contacts, isConnected, whatsappMode, loading } = useWhatsApp();
   const [activeTab, setActiveTab] = useState("chat");
   
@@ -31,13 +33,20 @@ export default function WhatsApp() {
     return "Desconectado";
   };
 
+  const handleSelectContactFromPanel = (contactId: string, phone: string, name: string | null) => {
+    // Update URL params to trigger contact selection in WhatsAppChat
+    setSearchParams({ phone, ...(name ? { name } : {}) });
+    setActiveTab("chat");
+  };
+
   return (
     <MainLayout title="WhatsApp" subtitle="Central de atendimento">
       <div className="flex flex-col h-[calc(100vh-140px)]">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
           {/* Header with tabs and status */}
           <div className="flex items-center justify-between mb-3 shrink-0">
-            <TabsList className="bg-muted/50">
+            <div className="flex items-center gap-3">
+              <TabsList className="bg-muted/50">
               <TabsTrigger value="chat" className="flex items-center gap-2 relative">
                 <MessageSquare className="w-4 h-4" />
                 Conversas
@@ -51,7 +60,11 @@ export default function WhatsApp() {
                 <FileText className="w-4 h-4" />
                 Templates
               </TabsTrigger>
-            </TabsList>
+              </TabsList>
+              
+              {/* Human Takeover Panel */}
+              <HumanTakeoverPanel onSelectContact={handleSelectContactFromPanel} />
+            </div>
             
             {/* Connection status indicator */}
             <div className="flex items-center gap-2">
