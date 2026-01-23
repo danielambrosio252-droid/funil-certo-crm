@@ -464,9 +464,172 @@ async function processNode(
 
     case "action": {
       const actionType = (config.action_type as string) || "";
-      console.log(`🎬 Executing action: ${actionType}`);
+      const actionValue = (config.action_value as string) || "";
+      const funnelId = (config.funnel_id as string) || "";
+      const stageId = (config.stage_id as string) || "";
+      
+      console.log(`🎬 Executing action: ${actionType}`, { actionValue, funnelId, stageId });
 
-      // Actions can be expanded later (move lead to stage, add tag, etc.)
+      try {
+        switch (actionType) {
+          case "move_stage": {
+            if (stageId) {
+              // First, find a lead associated with this contact's phone
+              const { data: contact } = await supabase
+                .from("whatsapp_contacts")
+                .select("phone, normalized_phone")
+                .eq("id", context.contactId)
+                .single();
+
+              if (contact) {
+                const phoneToSearch = contact.normalized_phone || contact.phone;
+                console.log(`📱 Looking for lead with phone: ${phoneToSearch}`);
+
+                // Find leads matching this phone
+                const { data: leads } = await supabase
+                  .from("funnel_leads")
+                  .select("id, name, stage_id")
+                  .eq("company_id", context.companyId)
+                  .or(`phone.eq.${phoneToSearch},phone.ilike.%${phoneToSearch.slice(-9)}%`);
+
+                if (leads && leads.length > 0) {
+                  // Move the first matching lead to the target stage
+                  const leadToMove = leads[0];
+                  console.log(`📦 Moving lead "${leadToMove.name}" (${leadToMove.id}) to stage ${stageId}`);
+
+                  const { error: moveError } = await supabase
+                    .from("funnel_leads")
+                    .update({ 
+                      stage_id: stageId,
+                      updated_at: new Date().toISOString()
+                    })
+                    .eq("id", leadToMove.id);
+
+                  if (moveError) {
+                    console.error("❌ Error moving lead:", moveError);
+                  } else {
+                    console.log(`✅ Lead moved successfully to stage ${stageId}`);
+                  }
+                } else {
+                  console.log(`⚠️ No lead found with phone ${phoneToSearch} - creating new lead`);
+                  
+                  // Create a new lead in the target stage
+                  const { data: contactData } = await supabase
+                    .from("whatsapp_contacts")
+                    .select("name, phone")
+                    .eq("id", context.contactId)
+                    .single();
+
+                  if (contactData) {
+                    const { error: createError } = await supabase
+                      .from("funnel_leads")
+                      .insert({
+                        company_id: context.companyId,
+                        stage_id: stageId,
+                        name: contactData.name || contactData.phone,
+                        phone: contactData.phone,
+                        source: "whatsapp_chatbot",
+                        position: 0,
+                      });
+
+                    if (createError) {
+                      console.error("❌ Error creating lead:", createError);
+                    } else {
+                      console.log(`✅ New lead created in stage ${stageId}`);
+                    }
+                  }
+                }
+              }
+            } else {
+              console.log(`⚠️ No stage_id configured for move_stage action`);
+            }
+            break;
+          }
+
+          case "add_tag": {
+            if (actionValue) {
+              // Find lead by contact phone and add tag
+              const { data: contact } = await supabase
+                .from("whatsapp_contacts")
+                .select("phone, normalized_phone")
+                .eq("id", context.contactId)
+                .single();
+
+              if (contact) {
+                const phoneToSearch = contact.normalized_phone || contact.phone;
+                
+                const { data: leads } = await supabase
+                  .from("funnel_leads")
+                  .select("id, tags")
+                  .eq("company_id", context.companyId)
+                  .or(`phone.eq.${phoneToSearch},phone.ilike.%${phoneToSearch.slice(-9)}%`);
+
+                if (leads && leads.length > 0) {
+                  const lead = leads[0];
+                  const currentTags = lead.tags || [];
+                  
+                  if (!currentTags.includes(actionValue)) {
+                    await supabase
+                      .from("funnel_leads")
+                      .update({ 
+                        tags: [...currentTags, actionValue],
+                        updated_at: new Date().toISOString()
+                      })
+                      .eq("id", lead.id);
+                    
+                    console.log(`✅ Tag "${actionValue}" added to lead`);
+                  }
+                }
+              }
+            }
+            break;
+          }
+
+          case "remove_tag": {
+            if (actionValue) {
+              const { data: contact } = await supabase
+                .from("whatsapp_contacts")
+                .select("phone, normalized_phone")
+                .eq("id", context.contactId)
+                .single();
+
+              if (contact) {
+                const phoneToSearch = contact.normalized_phone || contact.phone;
+                
+                const { data: leads } = await supabase
+                  .from("funnel_leads")
+                  .select("id, tags")
+                  .eq("company_id", context.companyId)
+                  .or(`phone.eq.${phoneToSearch},phone.ilike.%${phoneToSearch.slice(-9)}%`);
+
+                if (leads && leads.length > 0) {
+                  const lead = leads[0];
+                  const currentTags = lead.tags || [];
+                  
+                  if (currentTags.includes(actionValue)) {
+                    await supabase
+                      .from("funnel_leads")
+                      .update({ 
+                        tags: currentTags.filter((t: string) => t !== actionValue),
+                        updated_at: new Date().toISOString()
+                      })
+                      .eq("id", lead.id);
+                    
+                    console.log(`✅ Tag "${actionValue}" removed from lead`);
+                  }
+                }
+              }
+            }
+            break;
+          }
+
+          default:
+            console.log(`⚠️ Action type "${actionType}" not implemented yet`);
+        }
+      } catch (actionError) {
+        console.error(`❌ Error executing action ${actionType}:`, actionError);
+      }
+
       const nextNode = await getNextNode(supabase, node.flow_id, node.id);
       return { shouldContinue: true, nextNode };
     }
