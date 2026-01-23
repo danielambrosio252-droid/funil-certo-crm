@@ -1017,6 +1017,7 @@ export type Database = {
           normalized_phone: string | null
           phone: string
           profile_picture: string | null
+          tags: string[] | null
           unread_count: number
           updated_at: string
         }
@@ -1030,6 +1031,7 @@ export type Database = {
           normalized_phone?: string | null
           phone: string
           profile_picture?: string | null
+          tags?: string[] | null
           unread_count?: number
           updated_at?: string
         }
@@ -1043,6 +1045,7 @@ export type Database = {
           normalized_phone?: string | null
           phone?: string
           profile_picture?: string | null
+          tags?: string[] | null
           unread_count?: number
           updated_at?: string
         }

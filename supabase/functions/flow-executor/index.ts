@@ -821,6 +821,29 @@ async function processNode(
         })
         .eq("id", context.executionId);
 
+      // Add "em_atendimento" tag to the contact to block bot execution
+      try {
+        const { data: contactData } = await supabase
+          .from("whatsapp_contacts")
+          .select("tags")
+          .eq("id", context.contactId)
+          .single();
+        
+        const currentTags = contactData?.tags || [];
+        if (!currentTags.includes("em_atendimento")) {
+          await supabase
+            .from("whatsapp_contacts")
+            .update({ 
+              tags: [...currentTags, "em_atendimento"],
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", context.contactId);
+          console.log(`🏷️ Tag "em_atendimento" added to contact ${context.contactId}`);
+        }
+      } catch (tagError) {
+        console.error("Error adding em_atendimento tag:", tagError);
+      }
+
       const rawTransferMessage = (config.message as string) || "Você será atendido por um humano em breve.";
       const transferMessage = replaceMessageVariables(rawTransferMessage, {
         ownerFirstName: context.ownerFirstName,
@@ -1310,6 +1333,21 @@ Deno.serve(async (req) => {
     console.log(`📨 Flow executor called: ${trigger_type}`);
 
     if (trigger_type === "keyword" && company_id && contact_id && message_content) {
+      // CRITICAL: Check if contact has "em_atendimento" tag - block bot execution
+      const { data: contactTags } = await supabase
+        .from("whatsapp_contacts")
+        .select("tags")
+        .eq("id", contact_id)
+        .single();
+
+      const tags = contactTags?.tags || [];
+      if (tags.includes("em_atendimento")) {
+        console.log(`🚫 Contact has "em_atendimento" tag - bot execution blocked`);
+        return new Response(JSON.stringify({ status: "blocked", reason: "human_takeover" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       // Check if there's already an active execution for this contact
       const { data: existingExecution } = await supabase
         .from("chatbot_flow_executions")

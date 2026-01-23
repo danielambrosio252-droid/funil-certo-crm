@@ -358,10 +358,29 @@ export function useChatbotFlowEditor(flowId: string | null) {
   };
 }
 
+// Helper to get contacts table
+const getContactsTable = () => (supabase as any).from("whatsapp_contacts");
+
 // Hook to check if bot is active for a contact
 export function useChatbotStatus(contactId: string | null) {
   const { profile } = useAuth();
   const queryClient = useQueryClient();
+
+  // Query for contact tags to detect "em_atendimento" state
+  const { data: contactTags } = useQuery({
+    queryKey: ["contact-tags", contactId],
+    queryFn: async () => {
+      if (!contactId) return [];
+      const { data, error } = await getContactsTable()
+        .select("tags")
+        .eq("id", contactId)
+        .single();
+      if (error) throw error;
+      return (data?.tags || []) as string[];
+    },
+    enabled: !!contactId,
+    refetchInterval: 5000,
+  });
 
   const { data: execution, isLoading } = useQuery({
     queryKey: ["chatbot-execution", contactId],
@@ -381,19 +400,54 @@ export function useChatbotStatus(contactId: string | null) {
     refetchInterval: 5000, // Poll every 5s
   });
 
+  // Check if contact has "em_atendimento" tag
+  const hasHumanTakeoverTag = contactTags?.includes("em_atendimento") || false;
+
   const toggleHumanTakeover = useMutation({
     mutationFn: async (isHuman: boolean) => {
-      if (!execution) throw new Error("No active execution");
-      const { error } = await getExecutionsTable()
-        .update({
-          is_human_takeover: isHuman,
-          status: isHuman ? "paused" : "running",
-        })
-        .eq("id", execution.id);
-      if (error) throw error;
+      if (!contactId) throw new Error("No contact selected");
+      
+      // Get current tags
+      const { data: contact, error: fetchError } = await getContactsTable()
+        .select("tags")
+        .eq("id", contactId)
+        .single();
+      
+      if (fetchError) throw fetchError;
+      
+      const currentTags: string[] = contact?.tags || [];
+      let newTags: string[];
+      
+      if (isHuman) {
+        // Add "em_atendimento" tag if not present
+        newTags = currentTags.includes("em_atendimento") 
+          ? currentTags 
+          : [...currentTags, "em_atendimento"];
+      } else {
+        // Remove "em_atendimento" tag
+        newTags = currentTags.filter((t: string) => t !== "em_atendimento");
+      }
+      
+      // Update contact tags
+      const { error: updateError } = await getContactsTable()
+        .update({ tags: newTags, updated_at: new Date().toISOString() })
+        .eq("id", contactId);
+      
+      if (updateError) throw updateError;
+      
+      // Also update execution if exists
+      if (execution) {
+        await getExecutionsTable()
+          .update({
+            is_human_takeover: isHuman,
+            status: isHuman ? "paused" : "running",
+          })
+          .eq("id", execution.id);
+      }
     },
     onSuccess: (_, isHuman) => {
       queryClient.invalidateQueries({ queryKey: ["chatbot-execution", contactId] });
+      queryClient.invalidateQueries({ queryKey: ["contact-tags", contactId] });
       toast.success(isHuman ? "Atendimento humano ativado" : "Bot reativado");
     },
   });
@@ -415,12 +469,41 @@ export function useChatbotStatus(contactId: string | null) {
     },
   });
 
+  // Remove tag mutation for when finishing human attendance
+  const removeHumanTag = useMutation({
+    mutationFn: async () => {
+      if (!contactId) throw new Error("No contact selected");
+      
+      const { data: contact, error: fetchError } = await getContactsTable()
+        .select("tags")
+        .eq("id", contactId)
+        .single();
+      
+      if (fetchError) throw fetchError;
+      
+      const currentTags: string[] = contact?.tags || [];
+      const newTags = currentTags.filter((t: string) => t !== "em_atendimento");
+      
+      const { error: updateError } = await getContactsTable()
+        .update({ tags: newTags, updated_at: new Date().toISOString() })
+        .eq("id", contactId);
+      
+      if (updateError) throw updateError;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["contact-tags", contactId] });
+      toast.success("Tag de atendimento removida - Bot pode atuar novamente");
+    },
+  });
+
   return {
     execution,
     isLoading,
-    isBotActive: !!execution && !execution.is_human_takeover && execution.status !== "paused",
-    isHumanTakeover: execution?.is_human_takeover || false,
+    isBotActive: !!execution && !execution.is_human_takeover && execution.status !== "paused" && !hasHumanTakeoverTag,
+    isHumanTakeover: hasHumanTakeoverTag || execution?.is_human_takeover || false,
+    hasHumanTakeoverTag,
     toggleHumanTakeover,
     stopExecution,
+    removeHumanTag,
   };
 }
