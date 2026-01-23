@@ -584,6 +584,23 @@ async function processNode(
       return { shouldContinue: false, nextNode: null, delaySeconds };
     }
 
+    case "pause": {
+      // Pause node - wait for any message from the contact before continuing
+      console.log(`⏸️ Pause node: waiting for message from contact`);
+
+      // Update execution to wait for response
+      await supabase
+        .from("chatbot_flow_executions")
+        .update({
+          current_node_id: node.id,
+          status: "waiting_response",
+          context: { waiting_for: "pause_message" },
+        })
+        .eq("id", context.executionId);
+
+      return { shouldContinue: false, nextNode: null, waitForResponse: true };
+    }
+
     case "condition": {
       // Simple condition check based on last message
       const conditionField = (config.field as string) || "last_message";
@@ -1052,6 +1069,77 @@ async function continueExecution(
   }
 
   const accessToken = Deno.env.get("WHATSAPP_CLOUD_ACCESS_TOKEN") || "";
+
+  // If it's a pause node, any message continues the flow
+  if (currentNode.node_type === "pause") {
+    console.log(`⏸️ Pause node received message - continuing flow`);
+    
+    const nextNode = await getNextNode(supabase, currentNode.flow_id, currentNode.id);
+    
+    if (nextNode) {
+      console.log(`➡️ Next node after pause: ${nextNode.node_type} (${nextNode.id})`);
+      
+      // Update execution status
+      await supabase
+        .from("chatbot_flow_executions")
+        .update({ status: "running", current_node_id: nextNode.id })
+        .eq("id", executionId);
+
+      // Process the remaining nodes
+      let currentProcessNode: FlowNode | null = nextNode;
+      let iterationCount = 0;
+      const maxIterations = 50;
+
+      while (currentProcessNode && iterationCount < maxIterations) {
+        iterationCount++;
+        console.log(`📦 Processing continued node: ${currentProcessNode.node_type}`);
+
+        // Log node execution
+        await supabase.from("chatbot_flow_logs").insert({
+          execution_id: executionId,
+          company_id: execution.company_id,
+          node_id: currentProcessNode.id,
+          node_type: currentProcessNode.node_type,
+          action: "executed",
+          details: { iteration: iterationCount, continued_from_pause: true },
+        });
+
+        const result = await processNode(supabase, currentProcessNode, {
+          companyId: execution.company_id,
+          contactId: execution.contact_id,
+          contactPhone: contact.normalized_phone || contact.phone,
+          phoneNumberId: company.whatsapp_phone_number_id,
+          accessToken,
+          executionId,
+          lastUserMessage: userResponse,
+          ownerFirstName,
+          contactName,
+        });
+
+        if (!result.shouldContinue) {
+          if (!result.waitForResponse && !result.delaySeconds) {
+            // Flow has ended
+            await supabase
+              .from("chatbot_flow_executions")
+              .update({ status: "completed", completed_at: new Date().toISOString() })
+              .eq("id", executionId);
+            console.log("✅ Execution completed after pause");
+          }
+          break;
+        }
+
+        currentProcessNode = result.nextNode;
+      }
+    } else {
+      // No next node - end the flow
+      await supabase
+        .from("chatbot_flow_executions")
+        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .eq("id", executionId);
+      console.log("✅ Execution completed (no next node after pause)");
+    }
+    return;
+  }
 
   // If it's a question node, determine the next path based on response
   if (currentNode.node_type === "question") {

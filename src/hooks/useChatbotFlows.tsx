@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 
 // Types
-export type NodeType = "start" | "message" | "question" | "condition" | "delay" | "action" | "transfer" | "end";
+export type NodeType = "start" | "message" | "question" | "condition" | "delay" | "pause" | "action" | "transfer" | "end";
 
 export interface ChatbotFlow {
   id: string;

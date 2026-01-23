@@ -23,6 +23,7 @@ import {
   HelpCircle, 
   GitBranch, 
   Clock, 
+  Pause,
   Zap, 
   UserCheck, 
   Flag,
@@ -46,6 +47,7 @@ import MessageNode from "./nodes/MessageNode";
 import QuestionNode from "./nodes/QuestionNode";
 import ConditionNode from "./nodes/ConditionNode";
 import DelayNode from "./nodes/DelayNode";
+import PauseNode from "./nodes/PauseNode";
 import ActionNode from "./nodes/ActionNode";
 import TransferNode from "./nodes/TransferNode";
 import EndNode from "./nodes/EndNode";
@@ -57,6 +59,7 @@ const nodeTypes = {
   question: QuestionNode,
   condition: ConditionNode,
   delay: DelayNode,
+  pause: PauseNode,
   action: ActionNode,
   transfer: TransferNode,
   end: EndNode,
@@ -71,6 +74,7 @@ const nodeOptions: { type: NodeType; label: string; icon: React.ElementType; col
   { type: "question", label: "Pergunta", icon: HelpCircle, color: "text-purple-500" },
   { type: "condition", label: "Condição", icon: GitBranch, color: "text-amber-500" },
   { type: "delay", label: "Delay", icon: Clock, color: "text-cyan-500" },
+  { type: "pause", label: "Pausa", icon: Pause, color: "text-orange-500" },
   { type: "action", label: "Ação", icon: Zap, color: "text-violet-500" },
   { type: "transfer", label: "Transferir", icon: UserCheck, color: "text-rose-500" },
   { type: "end", label: "Fim", icon: Flag, color: "text-slate-500" },

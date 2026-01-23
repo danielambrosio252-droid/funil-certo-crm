@@ -4,6 +4,7 @@ import {
   HelpCircle, 
   GitBranch, 
   Clock, 
+  Pause,
   Zap, 
   UserCheck, 
   Flag,
@@ -60,6 +61,14 @@ const blockOptions: BlockOption[] = [
     icon: Clock, 
     color: "text-cyan-500",
     bgColor: "bg-cyan-500/10 hover:bg-cyan-500/20"
+  },
+  { 
+    type: "pause", 
+    label: "Pausa", 
+    description: "Aguarde mensagem do contato",
+    icon: Pause, 
+    color: "text-orange-500",
+    bgColor: "bg-orange-500/10 hover:bg-orange-500/20"
   },
   { 
     type: "transfer", 
