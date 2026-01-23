@@ -923,31 +923,84 @@ async function continueExecution(
   // If it's a question node, determine the next path based on response
   if (currentNode.node_type === "question") {
     const options = (currentNode.config?.options as string[]) || [];
+    const hasInteractiveButtons = options.length > 0 && options.length <= 3;
 
-    console.log(`🤔 Question options: ${JSON.stringify(options)}, buttonId: "${buttonId}", Response: "${userResponse}"`);
+    console.log(`🤔 Question options: ${JSON.stringify(options)}, buttonId: "${buttonId}", Response: "${userResponse}", hasButtons: ${hasInteractiveButtons}`);
 
     let sourceHandle: string | null = null;
 
-    // Priority 1: Use buttonId directly if available (from interactive buttons)
-    if (buttonId && buttonId.startsWith("option-")) {
-      sourceHandle = buttonId;
-      console.log(`✅ Using buttonId directly: ${sourceHandle}`);
-    } else if (userResponse) {
-      // Priority 2: Try to match by number or content
-      const responseLower = userResponse.toLowerCase().trim();
-      const responseNum = parseInt(responseLower);
-      
-      if (!isNaN(responseNum) && responseNum >= 1 && responseNum <= options.length) {
-        sourceHandle = `option-${responseNum - 1}`;
-        console.log(`✅ Matched by number: ${responseNum} -> ${sourceHandle}`);
+    // CRITICAL: If we have interactive buttons (1-3 options), ONLY accept button_id responses
+    // Do NOT accept text responses for button-based questions
+    if (hasInteractiveButtons) {
+      // ONLY accept buttonId from interactive responses
+      if (buttonId && buttonId.startsWith("option-")) {
+        sourceHandle = buttonId;
+        console.log(`✅ Button clicked: ${sourceHandle}`);
       } else {
-        // Try to match by content
-        const matchedIndex = options.findIndex((opt: string) =>
-          responseLower.includes(opt.toLowerCase()) || opt.toLowerCase().includes(responseLower)
+        // User sent text instead of clicking a button - remind them to use buttons
+        console.log(`⚠️ Text response received but question requires button click. Ignoring and waiting for button.`);
+        
+        // Re-send the interactive buttons to remind the user
+        const question = (currentNode.config?.question as string) || "";
+        const buttons = options.map((opt, idx) => ({
+          id: `option-${idx}`,
+          title: opt,
+        }));
+        
+        // Get company phone number ID
+        await sendWhatsAppInteractiveButtons(
+          company.whatsapp_phone_number_id,
+          accessToken,
+          contact.normalized_phone || contact.phone,
+          `Por favor, selecione uma das opções abaixo:\n\n${question}`,
+          buttons
         );
-        if (matchedIndex >= 0) {
-          sourceHandle = `option-${matchedIndex}`;
-          console.log(`✅ Matched by content: "${options[matchedIndex]}" -> ${sourceHandle}`);
+        
+        console.log(`🔄 Re-sent interactive buttons - waiting for button click`);
+        
+        // Stay in waiting_response status - don't proceed
+        return;
+      }
+    } else if (options.length > 3) {
+      // For 4+ options (numbered text response), accept text matching
+      if (userResponse) {
+        const responseLower = userResponse.toLowerCase().trim();
+        const responseNum = parseInt(responseLower);
+        
+        if (!isNaN(responseNum) && responseNum >= 1 && responseNum <= options.length) {
+          sourceHandle = `option-${responseNum - 1}`;
+          console.log(`✅ Matched by number: ${responseNum} -> ${sourceHandle}`);
+        } else {
+          // Try to match by content
+          const matchedIndex = options.findIndex((opt: string) =>
+            responseLower.includes(opt.toLowerCase()) || opt.toLowerCase().includes(responseLower)
+          );
+          if (matchedIndex >= 0) {
+            sourceHandle = `option-${matchedIndex}`;
+            console.log(`✅ Matched by content: "${options[matchedIndex]}" -> ${sourceHandle}`);
+          }
+        }
+        
+        // If no match, resend the numbered options
+        if (!sourceHandle) {
+          console.log(`⚠️ No match for text response. Resending options.`);
+          
+          let fullMessage = "Por favor, responda com o número da opção desejada:\n\n";
+          fullMessage += (currentNode.config?.question as string) || "";
+          fullMessage += "\n\n";
+          options.forEach((opt, idx) => {
+            fullMessage += `${idx + 1}. ${opt}\n`;
+          });
+          
+          await sendWhatsAppMessage(
+            company.whatsapp_phone_number_id,
+            accessToken,
+            contact.normalized_phone || contact.phone,
+            fullMessage
+          );
+          
+          console.log(`🔄 Re-sent numbered options - waiting for valid response`);
+          return;
         }
       }
     }
@@ -1017,9 +1070,8 @@ async function continueExecution(
           .eq("id", executionId);
       }
     } else {
-      console.log(`❌ No matching option for buttonId: "${buttonId}" or response: "${userResponse}"`);
-      
-      // Could send a "didn't understand" message here in the future
+      console.log(`❌ No valid response received - staying in waiting_response state`);
+      // Don't change status - keep waiting for proper response
     }
   } else {
     console.log(`⚠️ Not a question node or no user response`);
