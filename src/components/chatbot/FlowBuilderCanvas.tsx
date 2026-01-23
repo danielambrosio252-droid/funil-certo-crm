@@ -732,11 +732,12 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
           type: "custom",
           animated: true,
         }}
-        selectionOnDrag
+        selectionOnDrag={true}
         selectionMode={SelectionMode.Partial}
-        panOnDrag={[1, 2]} // Middle mouse or right mouse for panning
         selectionKeyCode="Shift"
         multiSelectionKeyCode="Shift"
+        panOnScroll
+        panOnDrag={false}
         fitView
         snapToGrid
         snapGrid={[20, 20]}
