@@ -443,13 +443,14 @@ Deno.serve(async (req) => {
         
         // ===== LÓGICA UNIFICADA: VERIFICAR ESTADO ANTES DE DISPARAR =====
         // CRÍTICO: Evitar disparo duplo e mensagens duplicadas
+        // NOVO: Recuperação automática de execuções travadas
         try {
           const flowExecutorUrl = `${supabaseUrl}/functions/v1/flow-executor`;
           
           // Primeiro, verificar se existe execução ativa (running ou waiting_response)
           const { data: activeExecution } = await supabase
             .from("chatbot_flow_executions")
-            .select("id, status")
+            .select("id, status, started_at, current_node_id, context")
             .eq("company_id", companyId)
             .eq("contact_id", contact.id)
             .in("status", ["waiting_response", "running"])
@@ -457,7 +458,56 @@ Deno.serve(async (req) => {
             .maybeSingle();
           
           if (activeExecution) {
-            if (activeExecution.status === "waiting_response") {
+            // ===== VERIFICAÇÃO DE TIMEOUT - RECUPERAÇÃO AUTOMÁTICA =====
+            const startedAt = new Date(activeExecution.started_at).getTime();
+            const now = Date.now();
+            const elapsedMinutes = (now - startedAt) / (1000 * 60);
+            
+            // Timeouts configuráveis
+            const RUNNING_TIMEOUT_MINUTES = 2;      // 2 minutos para execuções "running"
+            const WAITING_TIMEOUT_MINUTES = 30;     // 30 minutos para "waiting_response"
+            
+            const isRunningStuck = activeExecution.status === "running" && elapsedMinutes > RUNNING_TIMEOUT_MINUTES;
+            const isWaitingStuck = activeExecution.status === "waiting_response" && elapsedMinutes > WAITING_TIMEOUT_MINUTES;
+            
+            if (isRunningStuck || isWaitingStuck) {
+              // Execução travada detectada - marcar como failed e permitir novo fluxo
+              console.log(`[Webhook] ⚠️ Execução travada detectada! ID: ${activeExecution.id}, Status: ${activeExecution.status}, Tempo: ${elapsedMinutes.toFixed(1)} minutos`);
+              
+              await supabase
+                .from("chatbot_flow_executions")
+                .update({ 
+                  status: "failed", 
+                  completed_at: new Date().toISOString(),
+                  context: { 
+                    ...activeExecution.context,
+                    auto_recovered: true, 
+                    recovery_reason: isRunningStuck ? "running_timeout" : "waiting_timeout",
+                    elapsed_minutes: elapsedMinutes
+                  }
+                })
+                .eq("id", activeExecution.id);
+              
+              console.log(`[Webhook] ✅ Execução ${activeExecution.id} marcada como failed (auto-recovery)`);
+              
+              // Agora permitir iniciar um novo fluxo
+              if (messageType === "text" && content) {
+                await fetch(flowExecutorUrl, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${supabaseServiceKey}`,
+                  },
+                  body: JSON.stringify({
+                    trigger_type: "keyword",
+                    company_id: companyId,
+                    contact_id: contact.id,
+                    message_content: content,
+                  }),
+                });
+                console.log(`[Webhook] 🚀 Novo fluxo iniciado após auto-recovery`);
+              }
+            } else if (activeExecution.status === "waiting_response") {
               // Há uma pergunta aguardando resposta - retomar execução
               await fetch(flowExecutorUrl, {
                 method: "POST",
@@ -476,8 +526,8 @@ Deno.serve(async (req) => {
               
               console.log(`[Webhook] 🔄 Execução retomada: ${activeExecution.id}, buttonId: ${buttonId}`);
             } else {
-              // Execução 'running' - NÃO fazer nada para evitar conflito
-              console.log(`[Webhook] ⏸️ Execução running ativa (${activeExecution.id}), ignorando mensagem`);
+              // Execução 'running' ainda dentro do timeout - NÃO fazer nada para evitar conflito
+              console.log(`[Webhook] ⏸️ Execução running ativa (${activeExecution.id}), tempo: ${elapsedMinutes.toFixed(1)}min, aguardando...`);
             }
           } else {
             // NENHUMA execução ativa - verificar se deve iniciar um novo fluxo
