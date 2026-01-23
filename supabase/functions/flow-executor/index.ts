@@ -653,23 +653,28 @@ async function processNode(
               // First, find a lead associated with this contact's phone
               const { data: contact } = await supabase
                 .from("whatsapp_contacts")
-                .select("phone, normalized_phone")
+                .select("phone, normalized_phone, name")
                 .eq("id", context.contactId)
                 .single();
 
               if (contact) {
                 const phoneToSearch = contact.normalized_phone || contact.phone;
-                console.log(`📱 Looking for lead with phone: ${phoneToSearch}`);
+                // Extract last 9 digits for flexible matching
+                const phoneSuffix = phoneToSearch.replace(/\D/g, '').slice(-9);
+                console.log(`📱 Looking for lead with phone: ${phoneToSearch} (suffix: ${phoneSuffix})`);
 
-                // Find leads matching this phone
+                // Find ALL leads matching this phone (to detect duplicates)
                 const { data: leads } = await supabase
                   .from("funnel_leads")
-                  .select("id, name, stage_id")
+                  .select("id, name, stage_id, phone, created_at")
                   .eq("company_id", context.companyId)
-                  .or(`phone.eq.${phoneToSearch},phone.ilike.%${phoneToSearch.slice(-9)}%`);
+                  .ilike("phone", `%${phoneSuffix}`)
+                  .order("created_at", { ascending: true });
+
+                console.log(`📋 Found ${leads?.length || 0} leads with matching phone`);
 
                 if (leads && leads.length > 0) {
-                  // Move the first matching lead to the target stage
+                  // IMPORTANT: Use OLDEST lead to avoid working with duplicates
                   const leadToMove = leads[0];
                   console.log(`📦 Moving lead "${leadToMove.name}" (${leadToMove.id}) to stage ${stageId}`);
 
@@ -686,24 +691,41 @@ async function processNode(
                   } else {
                     console.log(`✅ Lead moved successfully to stage ${stageId}`);
                   }
-                } else {
-                  console.log(`⚠️ No lead found with phone ${phoneToSearch} - creating new lead`);
-                  
-                  // Create a new lead in the target stage
-                  const { data: contactData } = await supabase
-                    .from("whatsapp_contacts")
-                    .select("name, phone")
-                    .eq("id", context.contactId)
-                    .single();
 
-                  if (contactData) {
+                  // If there are duplicate leads, log a warning
+                  if (leads.length > 1) {
+                    console.warn(`⚠️ WARNING: ${leads.length} duplicate leads found for phone ${phoneSuffix}. IDs: ${leads.map((l: { id: string }) => l.id).join(', ')}`);
+                  }
+                } else {
+                  console.log(`⚠️ No lead found with phone ${phoneToSearch} - checking again before creating`);
+                  
+                  // DOUBLE CHECK: Search with exact phone match before creating
+                  const { data: exactMatch } = await supabase
+                    .from("funnel_leads")
+                    .select("id")
+                    .eq("company_id", context.companyId)
+                    .eq("phone", contact.phone)
+                    .limit(1)
+                    .maybeSingle();
+
+                  if (exactMatch) {
+                    console.log(`✅ Found existing lead with exact phone match, moving it instead`);
+                    await supabase
+                      .from("funnel_leads")
+                      .update({ 
+                        stage_id: stageId,
+                        updated_at: new Date().toISOString()
+                      })
+                      .eq("id", exactMatch.id);
+                  } else {
+                    // Create a new lead in the target stage
                     const { error: createError } = await supabase
                       .from("funnel_leads")
                       .insert({
                         company_id: context.companyId,
                         stage_id: stageId,
-                        name: contactData.name || contactData.phone,
-                        phone: contactData.phone,
+                        name: contact.name || contact.phone,
+                        phone: contact.phone,
                         source: "whatsapp_chatbot",
                         position: 0,
                       });
