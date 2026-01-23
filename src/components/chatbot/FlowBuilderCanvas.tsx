@@ -151,6 +151,11 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
     checkAndCreateStartNode();
   }, [loadingNodes, dbNodes.length, ensureStartNode]);
 
+  // Reset center flag when flowId changes
+  useEffect(() => {
+    hasCenteredView.current = false;
+  }, [flowId]);
+
   // Auto-center view when nodes are loaded
   useEffect(() => {
     if (loadingNodes || hasCenteredView.current) return;
@@ -158,16 +163,16 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
     
     hasCenteredView.current = true;
     
-    // Small delay to ensure nodes are rendered
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        try {
-          fitView({ padding: 0.4, duration: 300 });
-        } catch {
-          // noop
-        }
-      }, 100);
-    });
+    // Delay to ensure ReactFlow has rendered nodes
+    const timer = setTimeout(() => {
+      try {
+        fitView({ padding: 0.3, duration: 400, maxZoom: 1 });
+      } catch {
+        // noop
+      }
+    }, 250);
+    
+    return () => clearTimeout(timer);
   }, [loadingNodes, dbNodes.length, fitView]);
 
   // Callbacks
