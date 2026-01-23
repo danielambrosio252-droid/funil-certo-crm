@@ -842,25 +842,28 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
             variant="secondary"
             size="icon"
             onClick={() => zoomIn()}
-            className="h-8 w-8"
+            className="h-9 w-9 bg-white/90 hover:bg-white shadow-md"
+            title="Aumentar zoom"
           >
-            <ZoomIn className="w-4 h-4" />
+            <ZoomIn className="w-4 h-4 text-slate-700" />
           </Button>
           <Button
             variant="secondary"
             size="icon"
             onClick={() => zoomOut()}
-            className="h-8 w-8"
+            className="h-9 w-9 bg-white/90 hover:bg-white shadow-md"
+            title="Diminuir zoom"
           >
-            <ZoomOut className="w-4 h-4" />
+            <ZoomOut className="w-4 h-4 text-slate-700" />
           </Button>
           <Button
-            variant="secondary"
+            variant="default"
             size="icon"
-            onClick={() => fitView({ padding: 0.2 })}
-            className="h-8 w-8"
+            onClick={() => fitView({ padding: 0.3, duration: 400, maxZoom: 1 })}
+            className="h-9 w-9 bg-emerald-500 hover:bg-emerald-600 shadow-md"
+            title="Centralizar fluxo"
           >
-            <Maximize2 className="w-4 h-4" />
+            <Maximize2 className="w-4 h-4 text-white" />
           </Button>
         </Panel>
 
