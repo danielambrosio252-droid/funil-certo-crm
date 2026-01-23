@@ -98,6 +98,7 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
   const [isMovingSelection, setIsMovingSelection] = useState(false);
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const hasEnsuredStartNode = useRef(false);
+  const hasCenteredView = useRef(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
   // Get current flow data for trigger configuration
@@ -149,6 +150,25 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
     
     checkAndCreateStartNode();
   }, [loadingNodes, dbNodes.length, ensureStartNode]);
+
+  // Auto-center view when nodes are loaded
+  useEffect(() => {
+    if (loadingNodes || hasCenteredView.current) return;
+    if (dbNodes.length === 0) return;
+    
+    hasCenteredView.current = true;
+    
+    // Small delay to ensure nodes are rendered
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try {
+          fitView({ padding: 0.4, duration: 300 });
+        } catch {
+          // noop
+        }
+      }, 100);
+    });
+  }, [loadingNodes, dbNodes.length, fitView]);
 
   // Callbacks
   const handleDeleteNode = useCallback(async (nodeId: string) => {
