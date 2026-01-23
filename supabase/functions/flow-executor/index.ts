@@ -63,6 +63,61 @@ async function sendWhatsAppMessage(
   }
 }
 
+// Send media message via WhatsApp Cloud API
+async function sendWhatsAppMediaMessage(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  mediaType: "image" | "audio" | "video" | "document",
+  mediaUrl: string,
+  caption?: string
+): Promise<boolean> {
+  try {
+    const payload: Record<string, unknown> = {
+      messaging_product: "whatsapp",
+      to,
+      type: mediaType,
+    };
+
+    // Different media types have different structures
+    if (mediaType === "image") {
+      payload.image = { link: mediaUrl, caption: caption || undefined };
+    } else if (mediaType === "video") {
+      payload.video = { link: mediaUrl, caption: caption || undefined };
+    } else if (mediaType === "audio") {
+      payload.audio = { link: mediaUrl };
+    } else if (mediaType === "document") {
+      payload.document = { link: mediaUrl, caption: caption || undefined };
+    }
+
+    console.log(`📤 Sending ${mediaType}:`, JSON.stringify(payload, null, 2));
+
+    const response = await fetch(
+      `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`WhatsApp API error (${mediaType}):`, error);
+      return false;
+    }
+
+    console.log(`✅ ${mediaType} sent to ${to}`);
+    return true;
+  } catch (error) {
+    console.error(`Error sending WhatsApp ${mediaType}:`, error);
+    return false;
+  }
+}
+
 // Send interactive button message via WhatsApp Cloud API
 async function sendWhatsAppInteractiveButtons(
   phoneNumberId: string,
@@ -298,7 +353,36 @@ async function processNode(
   switch (node.node_type) {
     case "message": {
       const message = (config.message as string) || "";
-      if (message) {
+      const mediaType = (config.mediaType as string) || "text";
+      const mediaUrl = (config.mediaUrl as string) || "";
+
+      // Check if this is a media message
+      if (mediaType !== "text" && mediaUrl) {
+        const validMediaTypes = ["image", "audio", "video", "document"] as const;
+        if (validMediaTypes.includes(mediaType as typeof validMediaTypes[number])) {
+          await sendWhatsAppMediaMessage(
+            context.phoneNumberId,
+            context.accessToken,
+            context.contactPhone,
+            mediaType as "image" | "audio" | "video" | "document",
+            mediaUrl,
+            message || undefined // caption
+          );
+
+          // Save outgoing media message to DB
+          await supabase.from("whatsapp_messages").insert({
+            company_id: context.companyId,
+            contact_id: context.contactId,
+            content: message || `[${mediaType}]`,
+            message_type: mediaType,
+            media_url: mediaUrl,
+            is_from_me: true,
+            status: "sent",
+            sent_at: new Date().toISOString(),
+          });
+        }
+      } else if (message) {
+        // Text-only message
         await sendWhatsAppMessage(
           context.phoneNumberId,
           context.accessToken,
