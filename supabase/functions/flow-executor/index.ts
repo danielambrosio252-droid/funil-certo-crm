@@ -28,6 +28,55 @@ interface ChatbotFlow {
   trigger_keywords: string[];
 }
 
+// Get the first name of the company owner (person responsible for messages)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getOwnerFirstName(supabase: any, companyId: string): Promise<string> {
+  try {
+    const { data: ownerProfile, error } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("company_id", companyId)
+      .eq("role", "owner")
+      .limit(1)
+      .single();
+
+    if (error || !ownerProfile?.full_name) {
+      console.log("⚠️ Could not find owner profile, using empty name");
+      return "";
+    }
+
+    // Extract first name only
+    const firstName = ownerProfile.full_name.trim().split(/\s+/)[0];
+    console.log(`👤 Owner first name: ${firstName}`);
+    return firstName;
+  } catch (err) {
+    console.error("Error getting owner name:", err);
+    return "";
+  }
+}
+
+// Replace template variables in message text
+function replaceMessageVariables(text: string, variables: { ownerFirstName?: string; contactName?: string }): string {
+  let result = text;
+  
+  // Replace owner/attendant name variables
+  if (variables.ownerFirstName) {
+    result = result.replace(/\{\{nome\}\}/gi, variables.ownerFirstName);
+    result = result.replace(/\{\{atendente\}\}/gi, variables.ownerFirstName);
+    result = result.replace(/\{\{responsavel\}\}/gi, variables.ownerFirstName);
+    result = result.replace(/\{\{owner\}\}/gi, variables.ownerFirstName);
+  }
+  
+  // Replace contact name if available
+  if (variables.contactName) {
+    result = result.replace(/\{\{cliente\}\}/gi, variables.contactName);
+    result = result.replace(/\{\{contato\}\}/gi, variables.contactName);
+    result = result.replace(/\{\{contact\}\}/gi, variables.contactName);
+  }
+  
+  return result;
+}
+
 // Send text message via WhatsApp Cloud API
 async function sendWhatsAppMessage(
   phoneNumberId: string,
@@ -350,6 +399,8 @@ async function processNode(
     accessToken: string;
     executionId: string;
     lastUserMessage?: string;
+    ownerFirstName?: string;
+    contactName?: string;
   }
 ): Promise<{
   shouldContinue: boolean;
@@ -364,9 +415,15 @@ async function processNode(
 
   switch (node.node_type) {
     case "message": {
-      const message = (config.message as string) || "";
+      const rawMessage = (config.message as string) || "";
       const mediaType = (config.mediaType as string) || "text";
       const mediaUrl = (config.mediaUrl as string) || "";
+      
+      // Replace template variables with actual values
+      const message = replaceMessageVariables(rawMessage, {
+        ownerFirstName: context.ownerFirstName,
+        contactName: context.contactName,
+      });
 
       // Check if this is a media message
       if (mediaType !== "text" && mediaUrl) {
@@ -419,8 +476,14 @@ async function processNode(
     }
 
     case "question": {
-      const question = (config.question as string) || "";
+      const rawQuestion = (config.question as string) || "";
       const options = (config.options as string[]) || [];
+      
+      // Replace template variables in question
+      const question = replaceMessageVariables(rawQuestion, {
+        ownerFirstName: context.ownerFirstName,
+        contactName: context.contactName,
+      });
 
       // Use interactive buttons if we have 1-3 options (WhatsApp limit)
       if (options.length > 0 && options.length <= 3) {
@@ -741,7 +804,11 @@ async function processNode(
         })
         .eq("id", context.executionId);
 
-      const transferMessage = (config.message as string) || "Você será atendido por um humano em breve.";
+      const rawTransferMessage = (config.message as string) || "Você será atendido por um humano em breve.";
+      const transferMessage = replaceMessageVariables(rawTransferMessage, {
+        ownerFirstName: context.ownerFirstName,
+        contactName: context.contactName,
+      });
       await sendWhatsAppMessage(
         context.phoneNumberId,
         context.accessToken,
@@ -806,6 +873,17 @@ async function executeFlow(
   console.log(`📝 Execution created: ${execution.id}`);
 
   try {
+    // Get owner first name for message personalization
+    const ownerFirstName = await getOwnerFirstName(supabase, flow.company_id);
+    
+    // Get contact name for personalization
+    const { data: contactData } = await supabase
+      .from("whatsapp_contacts")
+      .select("name")
+      .eq("id", contactId)
+      .single();
+    const contactName = contactData?.name || "";
+    
     // Get start node and first connected node
     const startInfo = await getStartNode(supabase, flow.id);
     if (!startInfo || !startInfo.firstNode) {
@@ -843,6 +921,8 @@ async function executeFlow(
         accessToken,
         executionId: execution.id,
         lastUserMessage: triggerMessage,
+        ownerFirstName,
+        contactName,
       });
 
       if (!result.shouldContinue) {
@@ -946,7 +1026,7 @@ async function continueExecution(
   // Get contact info
   const { data: contact } = await supabase
     .from("whatsapp_contacts")
-    .select("phone, normalized_phone")
+    .select("phone, normalized_phone, name")
     .eq("id", execution.contact_id)
     .single();
 
@@ -954,6 +1034,10 @@ async function continueExecution(
     console.log("Contact not found");
     return;
   }
+  
+  // Get owner first name for message personalization
+  const ownerFirstName = await getOwnerFirstName(supabase, execution.company_id);
+  const contactName = contact.name || "";
 
   // Get company info
   const { data: company } = await supabase
@@ -1077,6 +1161,8 @@ async function continueExecution(
             accessToken,
             executionId,
             lastUserMessage: userResponse,
+            ownerFirstName,
+            contactName,
           });
 
           if (!result.shouldContinue) {
