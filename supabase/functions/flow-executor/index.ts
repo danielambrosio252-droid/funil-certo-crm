@@ -5,6 +5,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Safety timeouts to prevent executions getting stuck and blocking new flows
+const RUNNING_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes (running should be short-lived)
+const WAITING_RESPONSE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
 interface FlowNode {
   id: string;
   flow_id: string;
@@ -793,58 +797,77 @@ async function executeFlow(
 
   console.log(`📝 Execution created: ${execution.id}`);
 
-  // Get start node and first connected node
-  const startInfo = await getStartNode(supabase, flow.id);
-  if (!startInfo || !startInfo.firstNode) {
-    console.log("No nodes to execute after start");
-    await supabase
-      .from("chatbot_flow_executions")
-      .update({ status: "completed", completed_at: new Date().toISOString() })
-      .eq("id", execution.id);
-    return;
-  }
-
-  // Process nodes
-  let currentNode: FlowNode | null = startInfo.firstNode;
-  let iterationCount = 0;
-  const maxIterations = 50; // Prevent infinite loops
-
-  while (currentNode && iterationCount < maxIterations) {
-    iterationCount++;
-
-    // Log node execution
-    await supabase.from("chatbot_flow_logs").insert({
-      execution_id: execution.id,
-      company_id: flow.company_id,
-      node_id: currentNode.id,
-      node_type: currentNode.node_type,
-      action: "executed",
-      details: { iteration: iterationCount },
-    });
-
-    const result = await processNode(supabase, currentNode, {
-      companyId: flow.company_id,
-      contactId,
-      contactPhone,
-      phoneNumberId,
-      accessToken,
-      executionId: execution.id,
-      lastUserMessage: triggerMessage,
-    });
-
-    if (!result.shouldContinue) {
-      console.log("⏸️ Execution paused or completed");
-      break;
+  try {
+    // Get start node and first connected node
+    const startInfo = await getStartNode(supabase, flow.id);
+    if (!startInfo || !startInfo.firstNode) {
+      console.log("No nodes to execute after start");
+      await supabase
+        .from("chatbot_flow_executions")
+        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .eq("id", execution.id);
+      return;
     }
 
-    currentNode = result.nextNode;
+    // Process nodes
+    let currentNode: FlowNode | null = startInfo.firstNode;
+    let iterationCount = 0;
+    const maxIterations = 50; // Prevent infinite loops
 
-    // Small delay between nodes to avoid rate limits
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
+    while (currentNode && iterationCount < maxIterations) {
+      iterationCount++;
 
-  if (iterationCount >= maxIterations) {
-    console.error("⚠️ Max iterations reached, stopping execution");
+      // Log node execution
+      await supabase.from("chatbot_flow_logs").insert({
+        execution_id: execution.id,
+        company_id: flow.company_id,
+        node_id: currentNode.id,
+        node_type: currentNode.node_type,
+        action: "executed",
+        details: { iteration: iterationCount },
+      });
+
+      const result = await processNode(supabase, currentNode, {
+        companyId: flow.company_id,
+        contactId,
+        contactPhone,
+        phoneNumberId,
+        accessToken,
+        executionId: execution.id,
+        lastUserMessage: triggerMessage,
+      });
+
+      if (!result.shouldContinue) {
+        console.log("⏸️ Execution paused or completed");
+        break;
+      }
+
+      currentNode = result.nextNode;
+
+      // Small delay between nodes to avoid rate limits
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    if (iterationCount >= maxIterations) {
+      console.error("⚠️ Max iterations reached, stopping execution");
+      await supabase
+        .from("chatbot_flow_executions")
+        .update({ status: "failed", completed_at: new Date().toISOString() })
+        .eq("id", execution.id);
+      return;
+    }
+
+    // CRITICAL: If the flow naturally ended (no next node), finalize the execution
+    // Otherwise it can remain as "running" and block new flows.
+    if (!currentNode) {
+      await supabase
+        .from("chatbot_flow_executions")
+        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .eq("id", execution.id);
+      console.log("✅ Execution completed (no next node)");
+    }
+  } catch (err) {
+    console.error("❌ executeFlow error:", err);
     await supabase
       .from("chatbot_flow_executions")
       .update({ status: "failed", completed_at: new Date().toISOString() })
@@ -879,6 +902,24 @@ async function continueExecution(
   }
 
   console.log(`📍 Current node: ${execution.current_node_id}, Status: ${execution.status}`);
+
+  // Safety: auto-finalize truly stale executions so they don't block the contact forever
+  try {
+    const startedAt = execution.started_at ? new Date(execution.started_at).getTime() : 0;
+    const ageMs = startedAt ? Date.now() - startedAt : 0;
+    const isStaleWaiting = execution.status === "waiting_response" && ageMs > WAITING_RESPONSE_TIMEOUT_MS;
+    const isStaleRunning = execution.status === "running" && ageMs > RUNNING_TIMEOUT_MS;
+    if (isStaleWaiting || isStaleRunning) {
+      console.log(`⚠️ Stale execution detected (${execution.status}, ageMs=${ageMs}). Marking as failed.`);
+      await supabase
+        .from("chatbot_flow_executions")
+        .update({ status: "failed", completed_at: new Date().toISOString() })
+        .eq("id", executionId);
+      return;
+    }
+  } catch (e) {
+    console.error("Failed stale-execution guard:", e);
+  }
 
   // Get current node
   const { data: currentNode } = await supabase
@@ -1059,7 +1100,16 @@ async function continueExecution(
           await new Promise((resolve) => setTimeout(resolve, 500));
         }
 
-        console.log(`✅ Continued execution completed after ${iterationCount} nodes`);
+        // If the flow naturally ended (no next node), finalize execution.
+        if (!currentProcessNode) {
+          await supabase
+            .from("chatbot_flow_executions")
+            .update({ status: "completed", completed_at: new Date().toISOString() })
+            .eq("id", executionId);
+          console.log("✅ Continued execution completed (no next node)");
+        } else {
+          console.log(`✅ Continued execution finished after ${iterationCount} nodes`);
+        }
       } else {
         console.log(`❌ No next node found for handle: ${sourceHandle}`);
         
@@ -1099,17 +1149,33 @@ Deno.serve(async (req) => {
       // Check if there's already an active execution for this contact
       const { data: existingExecution } = await supabase
         .from("chatbot_flow_executions")
-        .select("id")
+        .select("id, status, started_at")
         .eq("company_id", company_id)
         .eq("contact_id", contact_id)
         .in("status", ["running", "waiting_response"])
+        .order("started_at", { ascending: false })
         .maybeSingle();
 
       if (existingExecution) {
-        console.log("Active execution exists, skipping new flow start");
-        return new Response(JSON.stringify({ status: "skipped", reason: "active_execution" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        const startedAt = existingExecution.started_at
+          ? new Date(existingExecution.started_at).getTime()
+          : 0;
+        const ageMs = startedAt ? Date.now() - startedAt : 0;
+        const isStaleWaiting = existingExecution.status === "waiting_response" && ageMs > WAITING_RESPONSE_TIMEOUT_MS;
+        const isStaleRunning = existingExecution.status === "running" && ageMs > RUNNING_TIMEOUT_MS;
+
+        if (isStaleWaiting || isStaleRunning) {
+          console.log(`⚠️ Active execution is stale (${existingExecution.status}, ageMs=${ageMs}). Finalizing and starting a new flow.`);
+          await supabase
+            .from("chatbot_flow_executions")
+            .update({ status: "failed", completed_at: new Date().toISOString() })
+            .eq("id", existingExecution.id);
+        } else {
+          console.log("Active execution exists, skipping new flow start");
+          return new Response(JSON.stringify({ status: "skipped", reason: "active_execution" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
       }
 
       // Find matching flow
