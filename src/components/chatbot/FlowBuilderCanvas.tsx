@@ -13,6 +13,8 @@ import {
   Edge,
   useReactFlow,
   ReactFlowProvider,
+  SelectionMode,
+  OnSelectionChangeParams,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
@@ -40,6 +42,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { useChatbotFlowEditor, useChatbotFlows, NodeType, ChatbotFlowNode } from "@/hooks/useChatbotFlows";
+import { SelectionContextMenu } from "./SelectionContextMenu";
 
 // Node components
 import StartNode from "./nodes/StartNode";
@@ -89,8 +92,11 @@ interface FlowBuilderCanvasProps {
 function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvasProps) {
   const { nodes: dbNodes, edges: dbEdges, loadingNodes, loadingEdges, addNode, updateNode, deleteNode, addEdge: addDbEdge, deleteEdge, ensureStartNode } = useChatbotFlowEditor(flowId);
   const { flows, updateFlow } = useChatbotFlows();
-  const { fitView, zoomIn, zoomOut, getViewport } = useReactFlow();
+  const { fitView, zoomIn, zoomOut, getViewport, screenToFlowPosition } = useReactFlow();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedNodes, setSelectedNodes] = useState<Node[]>([]);
+  const [isMovingSelection, setIsMovingSelection] = useState(false);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const hasEnsuredStartNode = useRef(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
@@ -445,10 +451,143 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
   }, []);
 
   // Handle pane click to deselect
-  const onPaneClick = useCallback(() => {
+  const onPaneClick = useCallback((event: React.MouseEvent) => {
+    // If we're in moving mode, move the selected nodes to clicked position
+    if (isMovingSelection && selectedNodes.length > 0) {
+      const flowPosition = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      
+      // Calculate the center of the selection
+      const minX = Math.min(...selectedNodes.map(n => n.position.x));
+      const minY = Math.min(...selectedNodes.map(n => n.position.y));
+      
+      // Calculate offset from click to top-left of selection
+      const offsetX = flowPosition.x - minX;
+      const offsetY = flowPosition.y - minY;
+      
+      // Move all selected nodes
+      selectedNodes.forEach(node => {
+        const newX = Math.round(node.position.x + offsetX);
+        const newY = Math.round(node.position.y + offsetY);
+        updateNode.mutate({
+          id: node.id,
+          position_x: newX,
+          position_y: newY,
+        });
+      });
+      
+      setIsMovingSelection(false);
+      setContextMenuPosition(null);
+      setSelectedNodes([]);
+      toast.success(`${selectedNodes.length} blocos movidos!`);
+      return;
+    }
+    
     setSelectedNodeId(null);
+    setSelectedNodes([]);
+    setContextMenuPosition(null);
     setNodes((nds) => nds.map((n) => ({ ...n, selected: false })));
+  }, [isMovingSelection, selectedNodes, screenToFlowPosition, updateNode, setNodes]);
+
+  // Handle selection change (for multi-select)
+  const onSelectionChange = useCallback((params: OnSelectionChangeParams) => {
+    const selected = params.nodes.filter(n => n.type !== "start"); // Don't include start node in selection
+    setSelectedNodes(selected);
+    
+    if (selected.length > 1) {
+      // Show context menu near the selection
+      const centerX = selected.reduce((sum, n) => sum + n.position.x, 0) / selected.length;
+      const centerY = Math.min(...selected.map(n => n.position.y));
+      
+      // Convert to screen coordinates
+      const viewport = getViewport();
+      const rect = wrapperRef.current?.getBoundingClientRect();
+      if (rect) {
+        const screenX = centerX * viewport.zoom + viewport.x + rect.left;
+        const screenY = centerY * viewport.zoom + viewport.y + rect.top - 20;
+        setContextMenuPosition({ x: screenX, y: screenY });
+      }
+    } else {
+      setContextMenuPosition(null);
+    }
+  }, [getViewport]);
+
+  // Handle copy selected nodes
+  const handleCopySelectedNodes = useCallback(async () => {
+    if (selectedNodes.length === 0) return;
+    
+    const offset = 100;
+    const nodeIdMap = new Map<string, string>();
+    
+    // Create copies of all selected nodes
+    for (const node of selectedNodes) {
+      if (node.type === "start") continue;
+      
+      const dbNode = dbNodesRef.current.find(n => n.id === node.id);
+      if (!dbNode) continue;
+      
+      const newNode = await addNode.mutateAsync({
+        node_type: dbNode.node_type as NodeType,
+        position_x: Math.round(node.position.x + offset),
+        position_y: Math.round(node.position.y + offset),
+        config: dbNode.config as Record<string, unknown>,
+      });
+      
+      nodeIdMap.set(node.id, newNode.id);
+    }
+    
+    // Copy edges between selected nodes
+    const selectedIds = new Set(selectedNodes.map(n => n.id));
+    const internalEdges = dbEdgesRef.current.filter(
+      e => selectedIds.has(e.source_node_id) && selectedIds.has(e.target_node_id)
+    );
+    
+    for (const edge of internalEdges) {
+      const newSourceId = nodeIdMap.get(edge.source_node_id);
+      const newTargetId = nodeIdMap.get(edge.target_node_id);
+      
+      if (newSourceId && newTargetId) {
+        await addDbEdge.mutateAsync({
+          source_node_id: newSourceId,
+          target_node_id: newTargetId,
+          source_handle: edge.source_handle || undefined,
+        });
+      }
+    }
+    
+    setSelectedNodes([]);
+    setContextMenuPosition(null);
+    setNodes((nds) => nds.map((n) => ({ ...n, selected: false })));
+    toast.success(`${selectedNodes.length} blocos copiados!`);
+  }, [selectedNodes, addNode, addDbEdge, setNodes]);
+
+  // Handle start move mode
+  const handleStartMoveMode = useCallback(() => {
+    setIsMovingSelection(true);
+    toast.info("Clique no canvas para mover os blocos selecionados");
   }, []);
+
+  // Handle delete selected nodes
+  const handleDeleteSelectedNodes = useCallback(async () => {
+    if (selectedNodes.length === 0) return;
+    
+    for (const node of selectedNodes) {
+      if (node.type !== "start") {
+        await deleteNode.mutateAsync(node.id);
+      }
+    }
+    
+    setSelectedNodes([]);
+    setContextMenuPosition(null);
+    toast.success(`${selectedNodes.length} blocos removidos!`);
+  }, [selectedNodes, deleteNode]);
+
+  // Handle cancel selection
+  const handleCancelSelection = useCallback(() => {
+    setSelectedNodes([]);
+    setContextMenuPosition(null);
+    setIsMovingSelection(false);
+    setNodes((nds) => nds.map((n) => ({ ...n, selected: false })));
+  }, [setNodes]);
 
   // Add new node with auto-connection
   const handleAddNode = async (type: NodeType) => {
@@ -586,18 +725,24 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
         onNodeDragStop={onNodeDragStop}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        onSelectionChange={onSelectionChange}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={{
           type: "custom",
           animated: true,
         }}
+        selectionOnDrag
+        selectionMode={SelectionMode.Partial}
+        panOnDrag={[1, 2]} // Middle mouse or right mouse for panning
+        selectionKeyCode="Shift"
+        multiSelectionKeyCode="Shift"
         fitView
         snapToGrid
         snapGrid={[20, 20]}
         minZoom={0.1}
         maxZoom={2}
-        className="bg-slate-900"
+        className={`bg-slate-900 ${isMovingSelection ? 'cursor-crosshair' : ''}`}
       >
         <Background 
           variant={BackgroundVariant.Dots} 
@@ -700,6 +845,19 @@ function FlowBuilderCanvasInner({ flowId, flowName, onClose }: FlowBuilderCanvas
           className="!bg-slate-800 !border-slate-700 !rounded-lg"
         />
       </ReactFlow>
+
+      {/* Selection Context Menu */}
+      {contextMenuPosition && selectedNodes.length > 0 && (
+        <SelectionContextMenu
+          selectedCount={selectedNodes.length}
+          position={contextMenuPosition}
+          onCopy={handleCopySelectedNodes}
+          onMove={handleStartMoveMode}
+          onDelete={handleDeleteSelectedNodes}
+          onCancel={handleCancelSelection}
+          isMoving={isMovingSelection}
+        />
+      )}
     </div>
   );
 }
